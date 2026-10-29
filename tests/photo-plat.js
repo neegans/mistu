@@ -453,7 +453,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
         aChoisir.push([await imageTest('sup.jpg', '#0aa', 640, 480)]);
         bouton(zoneDe(pSup), 'Choisir une image').click();
         await attendre(() => dits.length === 1, 'toast fiche supprimée');
-        eq([dits, await db.get('recipes', 'rc_sup'), await db.count('files')], [['Recette introuvable.'], undefined, nF], 'fiche supprimée entre le rendu et le geste : « Recette introuvable. », aucune fiche recréée, aucune ligne files neuve (relecture AVANT putFile)');
+        eq([dits, await db.get('recipes', 'rc_sup'), await db.count('files')], [['Recette introuvable.'], undefined, nF], 'fiche supprimée entre le rendu et le geste : « Recette introuvable. », aucune fiche recréée, aucune ligne files neuve (relecture avant la transaction photo)');
 
         // D-F15 : un geste ne redessine que la photo (une scène vide : setServings lit document.getElementById)
         scene.replaceChildren();
@@ -477,7 +477,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
         await mettre(fiche('rc_b')); await versions(version('rc_b'));
         let lever; const barriere = new Promise((r) => { lever = r; });
         // Ronde 1 : saveBatch — l'écriture de la fiche passe par la condition { key, fusion } (relue dans la transaction).
-        const repoB = { get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), save: (...a) => repo.save(...a), saveBatch: (...a) => repo.saveBatch(...a), putFile: async (...a) => { await barriere; return repo.putFile(...a); }, db: repo.db };
+        const repoB = { capturerContexteRecette: (...a) => repo.capturerContexteRecette(...a), get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), save: (...a) => repo.save(...a), saveBatch: async (batch, options) => { if (options?.fichiers?.length) await barriere; return repo.saveBatch(batch, options); }, putFile: (...a) => repo.putFile(...a), db: repo.db };
         let picks = 0; const imgB = await imageTest('b.jpg', '#a5a', 640, 480);
         const m = await PP.monterPhotoPlat(await db.get('recipes', 'rc_b'), { sync }, { repo: repoB, pickFiles: async () => { picks += 1; return [imgB]; }, toast: () => {}, enLigne: () => true });
         scene.append(m.entete, m.zone);
@@ -635,17 +635,17 @@ export async function runPhotoPlatTests({ eq, ok }) {
         await poser({ ...(await db.get('recipes', 'rc_c1')), photo_sha256: H('c'), photo_origin: 'image', photo_source_url: null });
         suspendus.shift()(200, corps200(pngC1));
         const rc1 = garde(await pc1); const lu1 = await db.get('recipes', 'rc_c1');
-        eq([rc1, lu1.photo_sha256, lu1.photo_origin, await db.count('files')], [{ issue: 'refuse', raison: 'fiche_changee' }, H('c'), 'image', nf1], 'photo choisie entre le POST et l’écriture → fiche_changee, la photo de la personne intacte, AUCUNE ligne files neuve (garde AVANT putFile)');
+        eq([rc1, lu1.photo_sha256, lu1.photo_origin, await db.count('files')], [{ issue: 'refuse', raison: 'fiche_changee' }, H('c'), 'image', nf1], 'photo choisie entre le POST et l’écriture → fiche_changee, la photo de la personne intacte, AUCUNE ligne files neuve (garde de la transaction photo)');
         await poser(fiche('rc_c2', { photo_source_url: 'https://cdn.test/c2.png' }));
-        let lever; const barriere = new Promise((r) => { lever = r; }); let entre; const dansPutFile = new Promise((r) => { entre = r; });
-        const repoB = { get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), save: (...a) => repo.save(...a), saveBatch: (...a) => repo.saveBatch(...a), putFile: async (...a) => { entre(); await barriere; return repo.putFile(...a); }, db: repo.db };
+        let lever; const barriere = new Promise((r) => { lever = r; }); let entre; const dansEcriturePhoto = new Promise((r) => { entre = r; });
+        const repoB = { capturerContexteRecette: (...a) => repo.capturerContexteRecette(...a), get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), save: (...a) => repo.save(...a), saveBatch: async (batch, options) => { if (options?.fichiers?.length) { entre(); await barriere; } return repo.saveBatch(batch, options); }, putFile: (...a) => repo.putFile(...a), db: repo.db };
         const nf2 = await db.count('files');
         file.push([200, corps200(pngC2)]);
         const pc2 = PP.rapatrierPhotoWeb('rc_c2', opts({ repo: repoB }));
-        await dansPutFile;
+        await dansEcriturePhoto;
         await poser({ ...(await db.get('recipes', 'rc_c2')), photo_sha256: H('d'), photo_origin: 'image', photo_source_url: null });
         lever();
-        eq([garde(await pc2).raison, (await db.get('recipes', 'rc_c2')).photo_sha256, await db.count('files')], ['fiche_changee', H('d'), nf2 + 1], 'photo choisie PENDANT putFile → fiche_changee, la photo de la personne intacte ; la ligne files du JPEG reste (orphelin L5)');
+        eq([garde(await pc2).raison, (await db.get('recipes', 'rc_c2')).photo_sha256, await db.count('files')], ['fiche_changee', H('d'), nf2], 'photo choisie AVANT la transaction photo → fiche_changee, photo de la personne intacte et aucun fichier orphelin');
         await poser(fiche('rc_c3', { photo_source_url: 'https://cdn.test/c3.png' }));
         file.push('suspendre');
         const pc3 = PP.rapatrierPhotoWeb('rc_c3', opts());
@@ -877,17 +877,17 @@ export async function runPhotoPlatTests({ eq, ok }) {
         '« Retirer » dans la transaction : un titre écrit juste avant est gardé ; « Ne pas récupérer » quand une photo s’engage juste avant → fiche_changee, la photo de la personne intacte');
     });
 
-    await blocR1('ronde 1 : C4 relue APRÈS putFile — un titre changé, puis une fiche supprimée, PENDANT putFile', async ({ PP, repo, db, mettre }) => {
+    await blocR1('ronde 1 : C4 relue DANS la transaction photo — un titre changé, puis une fiche supprimée, AVANT la transaction photo', async ({ PP, repo, db, mettre }) => {
       const avecBarriere = () => {
         let lever; const barriere = new Promise((r) => { lever = r; }); let entre; const dans = new Promise((r) => { entre = r; });
-        const r = { get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), save: (...a) => repo.save(...a), saveBatch: (...a) => repo.saveBatch(...a), putFile: async (...a) => { entre(); await barriere; return repo.putFile(...a); } };
+        const r = { capturerContexteRecette: (...a) => repo.capturerContexteRecette(...a), get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), save: (...a) => repo.save(...a), saveBatch: async (batch, options) => { if (options?.fichiers?.length) { entre(); await barriere; } return repo.saveBatch(batch, options); }, putFile: (...a) => repo.putFile(...a) };
         return { lever, dans, repo: r };
       };
       await mettre(fiche('rc_s1a'), fiche('rc_s1b'));
       const b1 = avecBarriere();
       const p1 = PP.poserPhotoPlat('rc_s1a', await imageTest('s1a.jpg', '#a0a', 640, 480), { repo: b1.repo, origin: 'image' });
       await b1.dans;
-      await mettre({ ...(await db.get('recipes', 'rc_s1a')), original_title: 'Titre changé pendant putFile' });
+      await mettre({ ...(await db.get('recipes', 'rc_s1a')), original_title: 'Titre changé avant la transaction photo' });
       b1.lever();
       const r1 = await p1;
       const b2 = avecBarriere();
@@ -897,7 +897,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
       b2.lever();
       const r2 = await p2;
       eq([r1.issue, (await db.get('recipes', 'rc_s1a')).original_title, (await db.get('recipes', 'rc_s1a')).photo_sha256 === r1.sha256, r2, await db.get('recipes', 'rc_s1b')],
-        ['ok', 'Titre changé pendant putFile', true, { issue: 'refuse', raison: 'fiche_absente' }, undefined], 'C4 relue APRÈS putFile : un titre changé PENDANT putFile est gardé (et la photo posée) ; une fiche supprimée PENDANT putFile → fiche_absente, jamais ressuscitée');
+        ['ok', 'Titre changé avant la transaction photo', true, { issue: 'refuse', raison: 'fiche_absente' }, undefined], 'C4 relue DANS la transaction photo : un titre changé AVANT la transaction photo est gardé (et la photo posée) ; une fiche supprimée AVANT la transaction photo → fiche_absente, jamais ressuscitée');
     });
 
     await blocR1('ronde 1 : ★ Favori dans la transaction (D-F16) — photo écrite juste avant, valeur que l’écran annonce, fiche supprimée depuis le rendu', async ({ repo, db, scene }) => {
@@ -1031,7 +1031,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
     await blocR1('ronde 1 : redessins sérialisés (P-15) — un redessin lent qui finit après un plus récent ne laisse jamais la zone périmée', async ({ PP, repo, db, scene, mettre }) => {
       await mettre(fiche('rc_ser', { photo_source_url: 'https://cdn.test/ser.png' }));
       let bloquer = false; let lever; const barriere = new Promise((r) => { lever = r; }); let entre; const dans = new Promise((r) => { entre = r; });
-      const repoS = { get: async (s, k) => { const r = await repo.get(s, k); if (bloquer && s === 'recipes' && k === 'rc_ser') { bloquer = false; entre(); await barriere; } return r; },
+      const repoS = { capturerContexteRecette: (...a) => repo.capturerContexteRecette(...a), get: async (s, k) => { const r = await repo.get(s, k); if (bloquer && s === 'recipes' && k === 'rc_ser') { bloquer = false; entre(); await barriere; } return r; },
         getFile: (...a) => repo.getFile(...a), putFile: (...a) => repo.putFile(...a), saveBatch: (...a) => repo.saveBatch(...a) };
       const m = await PP.monterPhotoPlat(await db.get('recipes', 'rc_ser'), { sync: syncR1 }, { repo: repoS, pickFiles: async () => [], toast: () => {}, enLigne: () => true });
       scene.append(m.entete, m.zone);
@@ -1084,7 +1084,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
     await blocR1('ronde 1 : gestes et rapatriement aux bords — choix annulé, écriture qui lève, lecture qui lève, origine nulle, fiche reçue hors vocabulaire', async ({ PP, repo, db, journal, mettre }) => {
       const f = fauxFetchR1();
       const ctx = { sync: syncR1 };
-      const comme = (over) => ({ get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), putFile: (...a) => repo.putFile(...a), save: (...a) => repo.save(...a), saveBatch: (...a) => repo.saveBatch(...a), ...over });
+      const comme = (over) => ({ capturerContexteRecette: (...a) => repo.capturerContexteRecette(...a), get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), putFile: (...a) => repo.putFile(...a), save: (...a) => repo.save(...a), saveBatch: (...a) => repo.saveBatch(...a), ...over });
       // un choix annulé (pickFiles ne se résout jamais, dom.js), puis un second « Choisir une image »
       await mettre(fiche('rc_pk'));
       let picks = 0; const imgPk = await imageTest('pk.jpg', '#c63', 640, 480);

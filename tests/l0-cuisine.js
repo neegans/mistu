@@ -15,7 +15,7 @@ export async function runL0CuisineTests({ eq, ok }) {
   const versions = recipes.map((r, i) => ({ id: r.current_version_id, recipe_id: r.id, servings: i ? 2 : 4, ingredients: [], steps: [{ id: `l0-s-${i}-1`, position: 1, text: i ? 'Préparer la sauce.' : 'Préparer le plat.', timers: [{ label: '30 à 90 secondes', seconds: 30, seconds_max: 90 }] }, { id: `l0-s-${i}-2`, position: 2, text: i ? 'Servir la sauce.' : 'Servir le plat.' }] }));
   const session = () => ({ id: 'l0-session', status: 'active', selected_version_ids: versions.map(v => v.id), active_version_id: versions[0].id, servings: 4, progress: { by_version: { [versions[1].id]: { current_step_id: versions[1].steps[1].id } }, done_step_ids: [] } });
   const fixture = (name, fn) => run(name, () => withRepo(async repo => {
-    await repo.saveBatch({ recipes, recipe_versions: versions, cook_sessions: [session()] });
+    await repo.saveBatch({ recipes, recipe_versions: versions, cook_sessions: [session()] }, { conditions: { recipes: recipes.map(r => ({ key: r.id, absente: true })) } });
     const root = await renderCook({ id: 'l0-session' }, {}, await getData(true), { repo });
     document.body.append(root);
     try { await fn(root, repo); } finally { root.dispose?.(); root.remove(); }
@@ -145,7 +145,7 @@ export async function runL0CuisineTests({ eq, ok }) {
     else if (change === 'supprimée') await repo.remove('cook_sessions', before.id);
     else if (change === 'version retirée') await repo.save('cook_sessions', { ...before, selected_version_ids: [versions[0].id] });
     else if (change === 'version supprimée') await repo.remove('recipe_versions', versions[1].id);
-    else if (change === 'version réattribuée') await repo.save('recipe_versions', { ...versions[1], recipe_id: recipes[0].id });
+    else if (change === 'version réattribuée') await repo.db.put('recipe_versions', { ...versions[1], recipe_id: recipes[0].id }, { origin: 'device' }); // arrivée concurrente hors garde locale
     else await repo.remove('recipes', recipes[1].id);
     const expected = await repo.get('cook_sessions', before.id);
     const outbox = await repo.all('outbox');
@@ -166,7 +166,7 @@ export async function runL0CuisineTests({ eq, ok }) {
     eq(launches.map(l => [l.duration_seconds, l.recipe_version_id, l.step_id, l.cook_session_id, l.channel]), [[90, versions[0].id, versions[0].steps[0].id, 'l0-session', 'siri']], 'L0 cuisine : demande réelle liée à la bonne étape et durée');
   });
   await run('sélections sérialisées malgré latence', () => withRepo(async repo => {
-    await repo.saveBatch({ recipes, recipe_versions: versions, cook_sessions: [session()] });
+    await repo.saveBatch({ recipes, recipe_versions: versions, cook_sessions: [session()] }, { conditions: { recipes: recipes.map(r => ({ key: r.id, absente: true })) } });
     let calls = 0, parallel = 0, maximum = 0;
     const delayed = { ...repo, saveBatch: async (...args) => {
       const n = calls++; parallel++; maximum = Math.max(maximum, parallel);
@@ -181,7 +181,7 @@ export async function runL0CuisineTests({ eq, ok }) {
     } finally { root.dispose?.(); }
   }));
   await run('vue quittée pendant demande', () => withRepo(async repo => {
-    await repo.saveBatch({ recipes, recipe_versions: versions, cook_sessions: [session()] });
+    await repo.saveBatch({ recipes, recipe_versions: versions, cook_sessions: [session()] }, { conditions: { recipes: recipes.map(r => ({ key: r.id, absente: true })) } });
     let release;
     const gate = new Promise(resolve => { release = resolve; });
     const delayed = { ...repo, save: async (...args) => { await gate; return repo.save(...args); } };

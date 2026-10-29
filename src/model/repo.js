@@ -13,6 +13,7 @@ import { IMPORTS_OUVERTS, KINDS_PAGES, ligneImportNeuve } from '../domain/import
 import { sha256Hex } from '../core/hash.js';
 import { t } from '../core/i18n.js';
 import { comparerCuissons } from '../domain/cuisine-personnelle.js';
+import { lireCycleRecette, memeCycleRecette, estRecetteAutonome, identifiantCycleValide, dateCycleValide, ErreurCycleRecette } from '../domain/cycle-recette.js';
 
 // Base de l'application. Liaison vivante : bindDatabase ne sert qu'aux tests, pour travailler sur une base jetable.
 export let db = new Database(DB_NAME, DB_VERSION, STORES);
@@ -375,12 +376,180 @@ export function stamp(record) {
 // ne sont pas touchés — rien n'en part, donc rien n'y fait conflit.
 const propre = (store, record) => (SYNC_STORES.includes(store) ? nettoyerChaines(record) : record);
 
-export async function save(store, record) {
+export async function save(store, record, options = {}) {
   const r = { ...propre(store, record), updated_at: syncNow() };
   if (!r.created_at) r.created_at = r.updated_at;
-  await db.put(store, r);
-  emit('change', { store, id: r.id ?? r.key ?? r.edition_id ?? r.sha256 });
+  await saveBatch({ [store]: [r] }, options);
   return r;
+}
+
+// Le contexte vient de la fiche affichée au départ du geste, jamais d'une relecture tardive de son cycle.
+export async function capturerContexteRecette(recipe, { historique = false, creation = false, owner_id, contexteValide = null } = {}) {
+  if (!recipe?.id || (contexteValide && !contexteValide())) throw new ErreurCycleRecette('contexte_change', recipe?.id);
+  const recipe_id = recipe.id, cycle = lireCycleRecette(recipe);
+  if (cycle.etat === 'invalide') throw new ErreurCycleRecette('cycle_invalide', recipe_id);
+  const base = db, owner = (await base.get('sync_state', 'user_id'))?.value ?? null;
+  if (base !== db || (owner_id !== undefined && owner_id !== owner) || (contexteValide && !contexteValide())) throw new ErreurCycleRecette('compte_change', recipe_id);
+  return { recipe_id, expected_cycle_id: cycle.id, owner_id: owner, historique: !!historique, creation: !!creation, ...(contexteValide ? { contexteValide } : {}) };
+}
+
+const contenuRecette = new Set(['recipes', 'recipe_versions', 'recipe_translations', 'substitutions', 'dish_recipe_links']);
+const conditionUnique = (conditions, store, key, transformer) => {
+  const items = conditions[store] || [], trouve = items.find(c => c.key === key && c.index == null);
+  conditions[store] = [...items.filter(c => c !== trouve), transformer(trouve)];
+};
+function lireCondition(c, courant, store, key) {
+  if (!c) return null;
+  if (c.absente === true) { if (courant) throw new TransitionRefusee(store, key, courant.status); return null; }
+  if (c.fusion) return c.fusion(courant);
+  if (!courant || !c.attendus?.includes(courant.status)) throw new TransitionRefusee(store, key, courant?.status);
+  return c.patch == null ? null : { ...courant, ...(typeof c.patch === 'function' ? c.patch(courant) : c.patch) };
+}
+
+// Tous les chemins du dépôt passent cette garde, y compris un lot n'écrivant que des enfants.
+// Les lectures préparatoires résolvent les parents ; les associations et cycles sont revalidés dans la transaction finale.
+async function protegerMutationRecettes(puts, conditionsInitiales, recettesInitiales, { origin = 'local', deletes = {} } = {}) {
+  const conditions = Object.fromEntries(Object.entries(conditionsInitiales || {}).map(([s, xs]) => [s, [...xs]]));
+  if (origin !== 'local') return { conditions, recettes: [] };
+  if (!Array.isArray(recettesInitiales)) throw new TypeError('Les contextes de recette sont un tableau');
+  const base = db, owner = (await base.get('sync_state', 'user_id'))?.value ?? null;
+  const contextes = new Map(), suppressionsRecettes = new Set();
+  for (const c of recettesInitiales) {
+    if (!c || typeof c.recipe_id !== 'string' || !(c.expected_cycle_id === null || identifiantCycleValide(c.expected_cycle_id)) || !Object.hasOwn(c, 'owner_id')) throw new ErreurCycleRecette('contexte_invalide');
+    if (contextes.has(c.recipe_id)) throw new ErreurCycleRecette('contexte_duplique', c.recipe_id);
+    contextes.set(c.recipe_id, { ...c, records: [] });
+  }
+  const nouvellesVersions = new Map((puts.recipe_versions || []).map(v => [v.id, v]));
+  const parentsVersions = new Map();
+  const parentVersion = async id => {
+    if (!id) return null;
+    if (nouvellesVersions.has(id)) return nouvellesVersions.get(id).recipe_id;
+    if (!parentsVersions.has(id)) parentsVersions.set(id, (await base.get('recipe_versions', id))?.recipe_id ?? null);
+    return parentsVersions.get(id);
+  };
+  const ajouter = (id, store, key, row = null) => {
+    if (!id) throw new ErreurCycleRecette('source_absente');
+    let c = contextes.get(id);
+    if (!c) {
+      const absence = conditions.recipes?.some(g => g.key === id && g.absente === true);
+      c = { recipe_id: id, expected_cycle_id: store === 'recipes' ? (row?.lifecycle_id ?? null) : null, owner_id: owner, historique: false, creation: !!absence, records: [] };
+      contextes.set(id, c);
+    }
+    if (!c.records.some(r => r.store === store && r.id === key)) c.records.push({ store, id: key });
+  };
+  for (const store of contenuRecette) {
+    const rows = new Map((puts[store] || []).map(r => [r[STORES[store].keyPath], r]));
+    for (const c of conditions[store] || []) if (c.key != null && !rows.has(c.key)) rows.set(c.key, null);
+    for (const key of deletes[store] || []) if (!rows.has(key)) rows.set(key, null);
+    for (const [key, entree] of rows) {
+      const current = await base.get(store, key), row = entree || current, supprime = (deletes[store] || []).includes(key);
+      if (supprime && !row) continue;
+      if (store === 'recipes') { ajouter(key, store, key, row); if (supprime) suppressionsRecettes.add(key); continue; }
+      const id = store === 'recipe_versions' || store === 'dish_recipe_links' ? row?.recipe_id : await parentVersion(row?.recipe_version_id);
+      if (!id && !entree && !current) continue; // la condition métier refusera elle-même une fiche disparue
+      ajouter(id, store, key);
+      if (supprime) suppressionsRecettes.add(id);
+      if (current) {
+        const champ = store === 'recipe_versions' || store === 'dish_recipe_links' ? 'recipe_id' : 'recipe_version_id';
+        if (entree && entree[champ] !== current[champ]) throw new ErreurCycleRecette('source_modifiee', id);
+        conditionUnique(conditions, store, key, ancienne => ({ key, fusion: courant => {
+          if (!courant || courant[champ] !== current[champ]) throw new ErreurCycleRecette('source_modifiee', id);
+          const ecrite = lireCondition(ancienne, courant, store, key);
+          if (contextes.get(id)?.historique && ecrite) throw new ErreurCycleRecette('historique_seul', id);
+          return ecrite;
+        } }));
+      }
+    }
+  }
+  // Les agrégats et historiques peuvent dépendre de plusieurs recettes. Chaque contexte garde la ligne concernée.
+  for (const store of new Set([...Object.keys(puts), ...Object.keys(conditions), ...Object.keys(deletes)])) if (!contenuRecette.has(store)) {
+    const rows = new Map((puts[store] || []).map(row => [row[STORES[store].keyPath], row]));
+    for (const c of conditions[store] || []) if (c.key != null && !rows.has(c.key)) { const row = await base.get(store, c.key); if (row) rows.set(c.key, row); }
+    for (const key of deletes[store] || []) if (!rows.has(key)) { const row = await base.get(store, key); if (row) rows.set(key, row); }
+    for (const row of rows.values()) {
+    // Une fusion peut introduire une référence absente de la copie lue. Les contextes explicites
+    // protègent toute la transaction et doivent accompagner chaque écriture d’agrégat en synchronisation.
+    for (const explicite of recettesInitiales) ajouter(explicite.recipe_id, store, row[STORES[store].keyPath], row);
+    const ids = new Set([row.recipe_id, row.source_recipe_id, ...(Array.isArray(row.recipe_ids) ? row.recipe_ids : []), ...(Array.isArray(row.items) ? row.items.map(i => i.recipe_id) : [])].filter(Boolean));
+    const versions = [row.recipe_version_id, row.source_recipe_version_id, ...(Array.isArray(row.selected_version_ids) ? row.selected_version_ids : []), ...(Array.isArray(row.items) ? row.items.map(i => i.recipe_version_id) : [])].filter(Boolean);
+    for (const id of versions) { const parent = await parentVersion(id); if (parent) ids.add(parent); }
+    for (const id of ids) if (!['imports', 'scan_sessions'].includes(store) || contextes.has(id)) ajouter(id, store, row[STORES[store].keyPath], row);
+    }
+  }
+  for (const [id, parent] of parentsVersions) conditionUnique(conditions, 'recipe_versions', id, ancienne => ({ key: id, fusion: courant => {
+    if (!courant || courant.recipe_id !== parent) throw new ErreurCycleRecette('source_modifiee', parent);
+    return lireCondition(ancienne, courant, 'recipe_versions', id);
+  } }));
+  for (const c of contextes.values()) {
+    const id = c.recipe_id;
+    const entree = (puts.recipes || []).find(r => r.id === id);
+    const declarerCreation = c.creation || conditions.recipes?.some(g => g.key === id && g.absente === true);
+    conditionUnique(conditions, 'recipes', id, ancienne => ({ key: id, fusion: courant => {
+      if (base !== db || (c.contexteValide && !c.contexteValide())) throw new ErreurCycleRecette('contexte_change', id);
+      const cycle = lireCycleRecette(courant);
+      if (declarerCreation) {
+        if (courant || !entree || lireCycleRecette(entree).id !== null || lireCycleRecette(entree).etat !== 'active') throw new ErreurCycleRecette('creation_refusee', id);
+      } else {
+        if (!courant) throw new ErreurCycleRecette('source_absente', id);
+        if (cycle.etat === 'invalide') throw new ErreurCycleRecette('cycle_invalide', id);
+        if (!c.historique && (cycle.etat !== 'active' || cycle.id !== c.expected_cycle_id)) throw new ErreurCycleRecette('cycle_change', id);
+      }
+      if (suppressionsRecettes.has(id) && (cycle.id !== null || c.historique)) throw new ErreurCycleRecette('suppression_interdite', id);
+      const fusion = lireCondition(ancienne, courant, 'recipes', id);
+      const ecrite = fusion || entree;
+      if (c.historique && (ecrite || c.records.some(r => contenuRecette.has(r.store) && (puts[r.store] || []).some(row => row[STORES[r.store].keyPath] === r.id)))) throw new ErreurCycleRecette('historique_seul', id);
+      if (ecrite && !declarerCreation) {
+        if (!memeCycleRecette(ecrite, courant)) throw new ErreurCycleRecette('cycle_reserve', id);
+      }
+      return fusion;
+    } }));
+  }
+  if (contextes.size) conditionUnique(conditions, 'sync_state', 'user_id', ancienne => ({ key: 'user_id', fusion: courant => {
+    for (const c of contextes.values()) if ((courant?.value ?? null) !== c.owner_id || (c.contexteValide && !c.contexteValide())) throw new ErreurCycleRecette('compte_change', c.recipe_id);
+    return lireCondition(ancienne, courant, 'sync_state', 'user_id');
+  } }));
+  return { conditions, recettes: [...contextes.values()].map(({ contexteValide, creation, ...c }) => c) };
+}
+
+function conditionsFichiers(fichiers, conditions, now) {
+  if (!Array.isArray(fichiers)) throw new TypeError('Les fichiers sont un tableau');
+  for (const { sha256, blob, meta = {} } of fichiers) {
+    if (!/^[a-f0-9]{64}$/.test(sha256 || '') || !(blob instanceof Blob)) throw new TypeError('Fichier invalide');
+    conditionUnique(conditions, 'files', sha256, ancienne => ({ key: sha256, fusion: courant => {
+      const precedent = lireCondition(ancienne, courant, 'files', sha256);
+      if (courant?.blob instanceof Blob) return precedent; // ne remplace jamais des octets déjà possédés
+      const { origin, ...brut } = meta, propreMeta = nettoyerChaines(brut);
+      const { mime, syncable } = resolveMime(blob.type || propreMeta.mime || courant?.mime, propreMeta.original_filename || courant?.original_filename);
+      return { ...(courant || {}), ...propreMeta, ...(precedent || {}), sha256, blob, mime, syncable, size: blob.size, created_at: courant?.created_at || now, updated_at: now };
+    } }));
+  }
+}
+
+// Porte réservée aux commandes explicites. Le contenu courant n'est jamais reconstruit depuis une copie de formulaire.
+export async function commanderCycleRecette(operation, contexte) {
+  const { action, recipe_id, operation_id, base_cycle_id, at } = operation || {};
+  if (!['trash', 'restore'].includes(action) || (typeof recipe_id !== 'string' || !recipe_id.trim()) || !identifiantCycleValide(operation_id) || !(base_cycle_id === null || identifiantCycleValide(base_cycle_id)) || !dateCycleValide(at)) throw new ErreurCycleRecette('commande_invalide', recipe_id);
+  if (!contexte || contexte.recipe_id !== recipe_id || contexte.expected_cycle_id !== base_cycle_id || !Object.hasOwn(contexte, 'owner_id')) throw new ErreurCycleRecette('contexte_invalide', recipe_id);
+  const base = db, cible = action === 'trash' ? 'retiree' : 'active';
+  let recipe = null, commande = { action, recipe_id, operation_id, base_cycle_id, at };
+  await base.mutate({ origin: 'local', lifecycle: () => commande, recettes: [{ ...contexte, records: [{ store: 'recipes', id: recipe_id }] }], conditions: {
+    sync_state: [{ key: 'user_id', fusion: courant => {
+      if ((courant?.value ?? null) !== contexte.owner_id || base !== db || (contexte.contexteValide && !contexte.contexteValide())) throw new ErreurCycleRecette('compte_change', recipe_id);
+      return null;
+    } }],
+    recipes: [{ key: recipe_id, fusion: courant => {
+      if (!courant) throw new ErreurCycleRecette('source_absente', recipe_id);
+      if (!estRecetteAutonome(courant)) throw new ErreurCycleRecette('recette_liee', recipe_id);
+      const cycle = lireCycleRecette(courant);
+      if (cycle.id === operation_id && cycle.etat === cible) { recipe = courant; commande = null; return null; }
+      if (cycle.etat === 'invalide' || cycle.id !== base_cycle_id || cycle.etat !== (action === 'trash' ? 'active' : 'retiree')) throw new ErreurCycleRecette('cycle_change', recipe_id);
+      if (action === 'trash' && base_cycle_id === null) commande.seed = structuredClone(courant);
+      recipe = { ...courant, lifecycle_id: operation_id, trashed_at: action === 'trash' ? at : null, updated_at: syncNow() };
+      return recipe;
+    } }],
+  } });
+  if (commande) emit('change', { store: 'recipes', id: recipe_id });
+  return { recipe, operation: { action, recipe_id, operation_id, base_cycle_id, at }, dejaFaite: commande === null };
 }
 
 // Fiches prêtes à écrire : nettoyées (R-L3-25, comme save() — même raison, et un seul endroit qui en décide : `propre`), created_at
@@ -403,14 +572,17 @@ const envelopperFusions = (conditions, now) => (conditions && typeof conditions 
 // réécrite ni recapturée (à la différence de transitionner, qui la réécrit avec un updated_at neuf) ; un `patch` ici contournerait `propre` et
 // l'horodatage, il est refusé : passer par repo.transitionner. Une condition de fusion `{ key, fusion }` (lot G) écrit la fiche qu'elle calcule sur la
 // fiche RELUE, enveloppée comme un patch (envelopperFusion, ronde 1 de la tâche 2 du lot C), et un `change` part aussi pour son magasin.
-export async function saveBatch(batch, { origin = 'local', conditions = null } = {}) {
+export async function saveBatch(batch, { origin = 'local', conditions = null, recettes = [], fichiers = [] } = {}) {
+  for (const [store, items] of Object.entries(conditions ?? {})) for (const c of (Array.isArray(items) ? items : [])) if (c?.patch != null) throw new TypeError('saveBatch ne porte pas de patch (' + store + ') : passer par repo.transitionner');
   const now = syncNow();
   const stamped = {};
   for (const [store, rows] of Object.entries(batch)) stamped[store] = horodater(store, rows, now);
   let ecrites = {};
+  const protection = await protegerMutationRecettes(stamped, conditions, recettes, { origin });
+  conditions = protection.conditions;
+  conditionsFichiers(fichiers, conditions, now);
   if (conditions) {
-    for (const [store, items] of Object.entries(conditions)) for (const c of (Array.isArray(items) ? items : [])) if (c?.patch != null) throw new TypeError('saveBatch ne porte pas de patch (' + store + ') : passer par repo.transitionner');
-    ecrites = (await db.mutate({ puts: stamped, origin, conditions: envelopperFusions(conditions, now) })) ?? {};
+    ecrites = (await db.mutate({ puts: stamped, origin, conditions: envelopperFusions(conditions, now), recettes: protection.recettes })) ?? {};
   } else await db.putBatch(stamped, { origin });
   for (const store of new Set([...Object.keys(stamped), ...Object.keys(ecrites)])) emit('change', { store });
   return stamped;
@@ -436,7 +608,7 @@ export async function saveBatch(batch, { origin = 'local', conditions = null } =
 // absente: true }` (une ligne neuve) et `{ index, valeur, exclus }` (I-2) —, passées telles quelles APRÈS la condition de la ligne, jamais à sa
 // place ; toute autre forme y reste refusée, un sac MIXTE aussi (CHAQUE condition sans fiche ; `absente` vaut exactement true) — TypeError avant
 // toute écriture (ronde 1 du lot C, ronde 1 de la tâche 1 du lot D).
-export async function transitionner(store, key, { attendus, patch = null, puts = {}, deletes = {}, payloads = {}, origin = 'local', autres = {}, conditions = {} } = {}) {
+export async function transitionner(store, key, { attendus, patch = null, puts = {}, deletes = {}, payloads = {}, origin = 'local', autres = {}, conditions = {}, recettes = [], fichiers = [] } = {}) {
   if (Object.hasOwn(autres, store)) throw new TypeError('transitionner : `autres` ne porte pas de condition sur ' + store);
   const sansFiche = (c) => !!c && typeof c === 'object' && (c.absente === true || c.index != null); // lot D (D-D17) : une ligne neuve ou une condition d'index
   if (Object.hasOwn(conditions ?? {}, store) && !(Array.isArray(conditions[store]) && conditions[store].every(sansFiche))) throw new TypeError('transitionner : sur ' + store + ', `conditions` n’admet que { key, absente: true } et { index, valeur, exclus }');
@@ -451,26 +623,24 @@ export async function transitionner(store, key, { attendus, patch = null, puts =
     if (!Array.isArray(items)) throw new TypeError('Les conditions de ' + s + ' doivent être un tableau');
     toutes[s] = [...(toutes[s] || []), ...items.map((c) => (c && c.patch != null ? { ...c, patch: envelopper(s, c.patch) } : envelopperFusion(s, c, now)))];
   }
-  const ecrites = await db.mutate({ puts: stamped, deletes, payloads, origin, conditions: toutes });
+  const protection = await protegerMutationRecettes(stamped, toutes, recettes, { origin, deletes });
+  conditionsFichiers(fichiers, protection.conditions, now);
+  const ecrites = await db.mutate({ puts: stamped, deletes, payloads, origin, conditions: protection.conditions, recettes: protection.recettes });
   emit('change', { store, id: key });
   for (const s of new Set([...Object.keys(stamped), ...Object.keys(deletes), ...Object.keys(conditions ?? {})])) if (s !== store) emit('change', { store: s });
   return ecrites[store][0]; // la première condition de `store` est toujours celle de la ligne
 }
 
 // La fiche est relue avant sa suppression : la capture a besoin de sa copie pour l'envoyer (spec § 5.1).
-export async function remove(store, key) {
-  const existing = await db.get(store, key);
-  await db.mutate({ deletes: { [store]: [key] }, payloads: { [store]: { [key]: existing || null } } });
+export async function remove(store, key, options = {}) {
+  await executerSuppressions({ [store]: [key] }, options);
   emit('change', { store, id: key });
 }
 
 // Même forme pour un lot : une seule transaction, toutes les copies lues avant.
-export async function removeMany(store, keys) {
+export async function removeMany(store, keys, options = {}) {
   if (!keys.length) return;
-  const existing = await db.getMany(store, keys);
-  const payloads = Object.create(null); // une clé homonyme d'une propriété native reste une clé, pas un héritage
-  keys.forEach((key, i) => { payloads[key] = existing[i] || null; });
-  await db.mutate({ deletes: { [store]: keys }, payloads: { [store]: payloads } });
+  await executerSuppressions({ [store]: keys }, options);
   emit('change', { store });
 }
 
@@ -479,19 +649,33 @@ export async function removeMany(store, keys) {
 // filtre (installCapture : library_activity seulement sous le réglage d'historique, R-E-15) — removeBatch ne le contourne jamais. `conditions` (ronde 1 de
 // la tâche 3) : vérifiées par db.mutate dans la MÊME transaction (une condition d'index fausse → TransitionRefusee, rien de supprimé, aucun change) ; un
 // patch ou une fusion y est refusé avant toute écriture (TypeError) : une suppression n'écrit aucune fiche, un statut ne change que par transitionner.
-export async function removeBatch(deletes, { conditions = null } = {}) {
+export async function removeBatch(deletes, { conditions = null, recettes = [] } = {}) {
   for (const [store, items] of Object.entries(conditions ?? {})) for (const c of (Array.isArray(items) ? items : [])) if (c?.patch != null || c?.fusion != null) throw new TypeError('removeBatch ne porte ni patch ni fusion (' + store + ')');
+  const entrees = await executerSuppressions(deletes, { conditions, recettes });
+  for (const [store] of entrees) emit('change', { store });
+}
+
+async function executerSuppressions(deletes, { conditions: initiales = null, recettes = [] } = {}) {
   const entrees = Object.entries(deletes || {}).filter(([, keys]) => Array.isArray(keys) && keys.length);
-  if (!entrees.length) return;
+  if (!entrees.length) return [];
+  const conditions = Object.fromEntries(Object.entries(initiales || {}).map(([s, xs]) => [s, [...xs]]));
   const payloads = {};
   for (const [store, keys] of entrees) {
     const existing = await db.getMany(store, keys);
     const sac = Object.create(null); // une clé homonyme d'une propriété native reste une clé, pas un héritage
     keys.forEach((key, i) => { sac[key] = existing[i] || null; });
     payloads[store] = sac;
+    if (contenuRecette.has(store)) for (const [i, key] of keys.entries()) if (existing[i]) conditionUnique(conditions, store, key, ancienne => ({ key, fusion: courant => {
+      lireCondition(ancienne, courant, store, key); return null;
+    } }));
   }
-  await db.mutate({ deletes: Object.fromEntries(entrees), payloads, conditions });
-  for (const [store] of entrees) emit('change', { store });
+  const protection = await protegerMutationRecettes({}, conditions, recettes, { deletes });
+  if (entrees.some(([s]) => contenuRecette.has(s))) for (const c of protection.recettes) conditionUnique(protection.conditions, 'recipes', c.recipe_id, ancienne => ({ key: c.recipe_id, fusion: courant => {
+    if (lireCycleRecette(courant).id !== null) throw new ErreurCycleRecette('suppression_interdite', c.recipe_id);
+    return lireCondition(ancienne, courant, 'recipes', c.recipe_id);
+  } }));
+  await db.mutate({ deletes: Object.fromEntries(entrees), payloads, conditions: protection.conditions, recettes: protection.recettes });
+  return entrees;
 }
 
 // Efface tout ce qui est à cet appareil sauf son identité ; jamais capturé (spec § 5.1).
@@ -555,7 +739,11 @@ export function groupBy(rows, key) {
 // --- Fichiers (stockage d'objets local, dédupliqué par empreinte) --------
 // Une ligne reçue du serveur arrive sans octets : le blob est écrit même si la ligne existe déjà (spec § 5.4).
 // Aucun refus local : un type hors liste est gardé, visible, marqué non synchronisable.
-export async function putFile(sha256, blob, meta = {}) {
+export async function putFile(sha256, blob, meta = {}, options = {}) {
+  if (options.recettes?.length) {
+    await saveBatch({}, { ...options, fichiers: [{ sha256, blob, meta }] });
+    return db.get('files', sha256);
+  }
   const existing = await db.get('files', sha256);
   if (existing && existing.blob instanceof Blob) return existing;
   const { origin, ...brut } = meta;
@@ -598,6 +786,8 @@ export async function getFiles(sha256s) {
 // - ni l'un ni l'autre : le saveBatch existant.
 // Vérification RAPIDE d'abord (ronde 1) : la ligne du journal est lue AVANT le premier putFile, et un import terminé, en vol, inconnu, déjà créé ou
 // doublé refuse tout de suite — sinon N blobs (jusqu'à 25 Mo chacun) resteraient orphelins dans `files` ; la condition en transaction reste le mur.
+// Avec `recettes`, les octets sont préparés en mémoire puis écrits dans la même transaction que les pages, la séance et le journal.
+// La garde de compte/cycle refuse donc aussi les octets d’un geste tardif.
 // Rend { session, pages, docs, importId } ; startScanSession navigue et notifie, lui. Une image très légère garde son signalement (issues).
 export const SMALL_IMAGE_BYTES = 80 * 1024;
 // Le signalement d'une image très légère est une DONNÉE stockée dans `issues` (comportement antérieur à l'import ciblé) : UNE définition, lue
@@ -625,7 +815,7 @@ export async function ouvrirImport({ id = newId('imp'), kind, recipe_id = null, 
   const ecrit = await saveBatch({ imports: [ligne] }, { conditions });
   return ecrit.imports[0];
 }
-export async function ajouterPages(files, { edition_id = null, session_id = null, import_id = null, import: nouvelImport = null } = {}) {
+export async function ajouterPages(files, { edition_id = null, session_id = null, import_id = null, import: nouvelImport = null, recettes = [] } = {}) {
   if (import_id && nouvelImport) throw new TypeError('ajouterPages : import_id et import ne se donnent pas ensemble');
   if (nouvelImport && !KINDS_PAGES.includes(nouvelImport.kind)) throw new TypeError('ajouterPages : kind d’import inconnu (' + String(nouvelImport.kind) + ')');
   // Vague finale (Important, « Relire les pages ») : `import.page_ids` = les pages DÉJÀ liées à la recette (celles de sa version courante), placées en
@@ -650,11 +840,12 @@ export async function ajouterPages(files, { edition_id = null, session_id = null
   const session = existante
     ? { ...existante, page_ids: [...(existante.page_ids || [])], document_ids: [...(existante.document_ids || [])] }
     : { id: newId('ss'), status: 'open', edition_id, started_at: nowIso(), page_ids: [], document_ids: [], device_id: deviceId() };
-  const docs = [], pages = [];
+  const docs = [], pages = [], fichiers = [];
   let position = session.page_ids.length;
   for (const file of files) {
     const sha256 = await sha256Hex(file);
-    await putFile(sha256, file, { original_filename: file.name });
+    if (recettes.length) fichiers.push({ sha256, blob: file, meta: { original_filename: file.name } });
+    else await putFile(sha256, file, { original_filename: file.name });
     const pdf = estPdf(file), epub = estEpub(file);
     const doc = { id: newId('doc'), edition_id: session.edition_id || edition_id || null, source_type: pdf ? 'pdf' : epub ? 'epub' : 'photo', original_filename: file.name, blob_path: `files/${sha256}`, sha256, size: file.size, mime: file.type, scan_session_id: session.id, captured_at: nowIso() };
     docs.push(doc);
@@ -674,16 +865,18 @@ export async function ajouterPages(files, { edition_id = null, session_id = null
       if (c.scan_session_id && c.scan_session_id !== session.id) throw new TypeError('ajouterPages : l’import ' + import_id + ' pointe la séance ' + String(c.scan_session_id) + ', pas ' + session.id);
       return { page_ids: [...(c.page_ids || []), ...neufs], scan_session_id: c.scan_session_id ?? session.id };
     };
-    await transitionner('imports', import_id, { attendus: ATTENDUS_AJOUT, patch, puts: lignes });
+    await transitionner('imports', import_id, { attendus: ATTENDUS_AJOUT, patch, puts: lignes, recettes, fichiers });
     return { session, pages, docs, importId: import_id };
   }
   if (nouvelImport) {
     // Le mur (dans la transaction, I-10 et I-2) : la ligne n'existe pas, et aucun import ouvert ne porte cette recette (sans recipe_id — un index —, I-2 ne joue pas).
     const { ligne, conditions } = nouvelleLigneImport({ id: nouvelImport.id, kind: nouvelImport.kind, recipe_id: nouvelImport.recipe_id, edition_id: nouvelImport.edition_id ?? session.edition_id, scan_session_id: session.id, page_ids: [...new Set([...deja, ...neufs])], device_id: nouvelImport.device_id });
-    await saveBatch({ ...lignes, imports: [ligne] }, { conditions });
+    const capture = recettes.find(c => c.recipe_id === nouvelImport.recipe_id);
+    if (capture) Object.assign(ligne, { expected_cycle_id: capture.expected_cycle_id, owner_id: capture.owner_id });
+    await saveBatch({ ...lignes, imports: [ligne] }, { conditions, recettes, fichiers });
     return { session, pages, docs, importId: ligne.id };
   }
-  await saveBatch(lignes);
+  await saveBatch(lignes, { recettes, fichiers });
   return { session, pages, docs, importId: null };
 }
 

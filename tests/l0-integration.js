@@ -20,7 +20,7 @@ export async function runL0IntegrationTests({ eq, ok }) {
   try {
     await run('lecture positionnelle', () => withRepo(async repo => {
       const r = recetteL0(), v = versionL0(), tr = traductionL0();
-      await repo.saveBatch({ recipes: [r], recipe_versions: [v], recipe_translations: [tr] });
+      await repo.saveBatch({ recipes: [r], recipe_versions: [v], recipe_translations: [tr] }, { conditions: { recipes: [{ key: r.id, absente: true }] } });
       const before = await repo.get('recipe_translations', tr.id);
       const root = await renderRecipe({ id: r.id }, { lang: 'fr' }, await getData(true));
       document.body.append(root);
@@ -42,7 +42,7 @@ export async function runL0IntegrationTests({ eq, ok }) {
       tr.translated_content.ingredients = ['sel', 'beurre'];
       if (type === 'ancienne') delete tr.alignment_format;
       if (type === 'inconnue') tr.alignment_format = 9;
-      await repo.saveBatch({ recipes: [r], recipe_versions: [v], recipe_translations: [tr] });
+      await repo.saveBatch({ recipes: [r], recipe_versions: [v], recipe_translations: [tr] }, { conditions: { recipes: [{ key: r.id, absente: true }] } });
       const before = await repo.get('recipe_translations', tr.id);
       const root = await renderRecipe({ id: r.id }, { lang: 'fr' }, await getData(true));
       document.body.append(root);
@@ -58,7 +58,7 @@ export async function runL0IntegrationTests({ eq, ok }) {
     await run('durée choisie depuis la fiche', () => withRepo(async repo => {
       const r = recetteL0(), v = versionL0();
       v.steps[0].timers = [{ label: '30–90 seconds', seconds: 30, seconds_max: 90 }];
-      await repo.saveBatch({ recipes: [r], recipe_versions: [v] });
+      await repo.saveBatch({ recipes: [r], recipe_versions: [v] }, { conditions: { recipes: [{ key: r.id, absente: true }] } });
       const ctx = await getData(true); ctx.settings = { ...ctx.settings, ui_locale: 'en' };
       setUiLocale('en');
       const root = await renderRecipe({ id: r.id }, {}, ctx); document.body.append(root);
@@ -79,7 +79,7 @@ export async function runL0IntegrationTests({ eq, ok }) {
     await run('transport et archive', () => withRepo(async (repo, source) => {
       const r = recetteL0(), v = versionL0(), tr = traductionL0();
       const ancienne = { ...tr, id: 'l0-ancienne', locale: 'en' }; delete ancienne.alignment_format;
-      await repo.saveBatch({ recipes: [r], recipe_versions: [v], recipe_translations: [tr, ancienne] });
+      await repo.saveBatch({ recipes: [r], recipe_versions: [v], recipe_translations: [tr, ancienne] }, { conditions: { recipes: [{ key: r.id, absente: true }] } });
       const attendue = await repo.get('recipe_translations', tr.id), ancienneAttendue = await repo.get('recipe_translations', ancienne.id);
       const transport = creerTransportFactice({ serveur: true });
       const moteur = createMoteur({ db: source, getUserId: () => 'u1', transport, fenetre: { document: { visibilityState: 'hidden' } } });

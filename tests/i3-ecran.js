@@ -22,7 +22,7 @@ const reponse = (v) => new Response(JSON.stringify({ content: [{ type: 'text', t
 const config = { url: 'https://assistant.example', anonKey: 'publique-factice' };
 const depsDe = (repo, extra = {}) => ({ repo, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {}, sessionAssistant: async () => session,
   enLigne: () => true, config, fetch: async () => reponse(proposition()), ...extra });
-async function preparer(repo) { await repo.saveBatch({ recipes: [recipe()], recipe_versions: [source()] }); }
+async function preparer(repo) { await repo.saveBatch({ recipes: [recipe()], recipe_versions: [source()] }, { conditions: { recipes: [{ key: recipe().id, absente: true }] } }); }
 async function versionTM() {
   const D = await import('../src/domain/thermomix.js'); const v = source();
   const contexte = D.construireContexteThermomix({ version: v, selection: ['s1'] });

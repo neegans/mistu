@@ -1,3 +1,7 @@
+import { revoirLectureImport } from '../domain/contexte-import.js';
+import { recetteActive } from '../domain/cycle-recette.js';
+import { mentionCycleRecette } from './corbeille.js';
+import { capturerRecette } from './recette-garde.js';
 // Éditeur de présentation : formulaire disponible hors ligne, appel explicite et comparaison avant conservation.
 import { el, toast } from '../core/dom.js';
 import { t } from '../core/i18n.js';
@@ -15,6 +19,7 @@ const niveaux = () => ({ facile: t('Facile'), intermediaire: t('Intermédiaire')
 const origines = () => ({ source: t('Source'), estimation_ia: t('Estimation IA'), manuel: t('Saisi par moi') });
 export function texteErreurReperes(e) {
   const code = e?.code || e?.raison || e?.message, refus = texteRefusAssistant({ ...e, raison: code }); if (refus) return refus;
+  if (['cycle_change','lecture_changee','recette_retiree'].includes(code)) return t('La recette a changé. Rouvre sa fiche avant d’enregistrer.');
   if (code === 'hors_ligne') return t('Tu es hors ligne. Ton brouillon est conservé.');
   if (code === 'non_connecte') return t('Connecte-toi pour utiliser l’assistant.');
   if (code === 'annule' || code === 'interrompu') return t('Appel interrompu. Ton brouillon est conservé ; aucune relance automatique.');
@@ -66,6 +71,8 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   const sessionDe = deps.sessionAssistant || (() => sessionAssistant(ctx)), enLigne = deps.enLigne || (() => navigator.onLine !== false);
   let recipe = await repo.get('recipes', params.id);
   if (!recipe) return el('p', { class: 'status warn' }, t('Recette introuvable.'));
+  if (!recetteActive(recipe)) return mentionCycleRecette(recipe);
+  const contexteRecette = await capturerRecette(repo, recipe, { ctx });
   let row = null;
   if (query.import) {
     try { row = await P.lireBrouillonReperes(query.import, { repo }); }
@@ -89,8 +96,9 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   const comparaison = el('div', { class: 'reperes-comparaison', dataset: { role: 'comparaison-reperes' } });
   const inputs = new Map(), controls = [], confirmations = [];
   const readonly = () => !!row && row.device_id !== repo.deviceId(), terminal = () => !!row && TERMINES.includes(row.status);
-  const perime = () => !!row?.validation_erreur, vivant = () => !closed && (!mounted || root.isConnected);
-  const d = extra => ({ ...deps, repo, enLigne, documentId: DOCUMENT_ID, ...extra });
+  const cycleDivergent = () => !!row && (row.expected_cycle_id ?? null) !== contexteRecette.expected_cycle_id;
+  const perime = () => !!row?.validation_erreur || cycleDivergent(), vivant = () => !closed && (!mounted || root.isConnected);
+  const d = extra => ({ ...deps, repo, enLigne, contexteRecette, documentId: DOCUMENT_ID, ...extra });
   const message = texte => { if (vivant()) status.textContent = texte; };
   function geste(fn) { if (!vivant()) return Promise.resolve(); let p; try { p = Promise.resolve(fn()); } catch (e) { p = Promise.reject(e); } p = p.catch(e => message(texteErreurReperes(e))); operations.add(p); p.then(() => operations.delete(p)); return p; }
   const action = (texte, role, fn, primary = false) => el('button', { type: 'button', class: primary ? 'btn primary' : 'btn', dataset: { role }, onClick: () => geste(fn) }, texte);
@@ -107,7 +115,7 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   root.attendreEcritures = async () => { await queue.catch(() => {}); while (operations.size) await Promise.all([...operations]); await queue.catch(() => {}); };
   async function ensure() {
     if (importId) return importId;
-    if (!opening) opening = P.ouvrirReperes({ recipeId: recipe.id, versionId }, d()).then(r => { row = r; importId = r.id; if (vivant()) adresse(`#${lien}/reperes${buildQuery({ import: importId, ...(versionId ? { v: versionId } : {}) })}`); return r.id; }).catch(async e => {
+    if (!opening) opening = P.ouvrirReperes({ recipeId: recipe.id, versionId, contexteRecette }, d()).then(r => { row = r; importId = r.id; if (vivant()) adresse(`#${lien}/reperes${buildQuery({ import: importId, ...(versionId ? { v: versionId } : {}) })}`); return r.id; }).catch(async e => {
       opening = null;
       if (e.code === 'import_ouvert' && vivant()) { const existant = (await repo.all('imports')).find(i => i.recipe_id === recipe.id && !TERMINES.includes(i.status)); const cible = existant && cibleReprise(existant);
         feedback.replaceChildren(el('p', { class: 'status warn' }, t('Un brouillon ou un import est déjà ouvert pour cette recette. Reprends-le ou termine-le explicitement.')), ...(cible ? [el('a', { class: 'btn', href: '#' + cible }, t('Reprendre le brouillon existant'))] : [])); }
@@ -117,10 +125,10 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   }
   function persist() {
     const snapshot = clone(saisie), champs = [...modifies];
-    queue = queue.catch(() => {}).then(async () => { if (accountChanged || readonly() || terminal()) return; const id = await ensure(); if (accountChanged) return; row = await P.modifierBrouillonReperes(id, { saisie: snapshot, champs_modifies: champs }, d()); });
+    queue = queue.catch(() => {}).then(async () => { if (accountChanged || readonly() || terminal() || perime()) return; const id = await ensure(); if (accountChanged) return; row = await P.modifierBrouillonReperes(id, { saisie: snapshot, champs_modifies: champs }, d()); });
     queue.catch(e => message(texteErreurReperes(e))); return queue;
   }
-  function changed(k) { modifies.add(k); relecture = false; relu.checked = false; persist(); synchroniser(); }
+  function changed(k) { if (perime()) return; modifies.add(k); relecture = false; relu.checked = false; persist(); synchroniser(); }
   function control(name, champ, type = 'text', options = {}) {
     const node = el(type === 'textarea' ? 'textarea' : 'input', { ...(type === 'textarea' ? { rows: 3 } : { type }), name, value: saisie[name], ...options, onInput: e => { saisie[name] = e.target.value; changed(champ); } });
     inputs.set(name, node); controls.push({ node, champ }); return node;
@@ -148,7 +156,7 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   const manuel = action(t('Enregistrer mes corrections'), 'enregistrer-reperes', async () => {
     if (busy || saving || readonly() || terminal()) return; saving = true; synchroniser();
     try { const corrections = correctionsDe(saisie, modifies); await persist(); if (!vivant()) return;
-      recipe = await P.enregistrerCorrectionsReperes({ recipeId: recipe.id, versionId, corrections, contexte, importId }, d());
+      recipe = await P.enregistrerCorrectionsReperes({ recipeId: recipe.id, versionId, corrections, contexte, importId, contexteRecette }, d());
       row = await P.lireBrouillonReperes(importId, d()); if (vivant()) { dire(t('Informations enregistrées')); nav(retour); }
     } finally { saving = false; synchroniser(); }
   });
@@ -172,13 +180,25 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
     if (busy || saving || !relecture || readonly() || terminal()) return;
     saving = true; synchroniser();
     try { const corrections = correctionsDe(saisie, modifies); await persist(); if (!vivant()) return;
-      recipe = await P.garderReperes({ importId, relu: true, corrections }, d()); row = await P.lireBrouillonReperes(importId, d());
+      recipe = await P.garderReperes({ importId, relu: true, corrections, contexteRecette }, d()); row = await P.lireBrouillonReperes(importId, d());
       if (vivant()) { dire(t('Informations enregistrées')); nav(retour); }
     } finally { saving = false; synchroniser(); }
   }, true);
   const annuler = action(t('Annuler l’appel'), 'annuler-reperes', async () => { if (!tenue) return; controller?.abort(); if (importId) row = await P.annulerReperes(importId, d()); synchroniser(); });
   const ignorer = action(t('Ignorer ce brouillon'), 'ignorer-reperes', async () => { if (busy || saving || readonly()) return; await queue; if (importId) row = await P.ignorerReperes(importId, d()); if (vivant()) nav(retour); });
   const actualiser = action(t('Actualiser le brouillon'), 'actualiser-reperes', async () => { if (!importId || busy || saving) return; row = await P.lireBrouillonReperes(importId, d()); afficherComparaison(); synchroniser(); });
+  const revoir = action(t('Relire le résultat conservé'), 'revoir-lecture-cycle', async () => {
+    if (busy || saving || readonly() || !cycleDivergent()) return;
+    saving = true; synchroniser();
+    try {
+      await queue;
+      await revoirLectureImport(importId, {repo, contexte:contexteRecette});
+      row = await P.lireBrouillonReperes(importId, d());
+      remplirProposition();
+      message(t('Le résultat est conservé. Relis-le et confirme les vérifications avant de le garder.'));
+    } finally { saving = false; synchroniser(); }
+  });
+  const avisCycle = el('div', {class:'status warn'}, el('p', null, t('Cette proposition date d’avant le retrait de la recette. Une nouvelle relecture est nécessaire.')), revoir);
   const copier = action(t('Copier ce brouillon sur cet appareil'), 'copier-reperes', async () => { const copie = await P.copierBrouillonReperes(importId, d()); if (vivant()) nav(`${lien}/reperes${buildQuery({ import: copie.id })}`); });
   function afficherComparaison() {
     comparaison.replaceChildren(); if (!row?.resultat) return;
@@ -195,6 +215,8 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   }
   function synchroniser() {
     if (closed) return;
+    avisCycle.hidden = !(cycleDivergent() && row?.status === 'a_verifier' && row?.resultat);
+    revoir.disabled = busy || saving || readonly();
     const verrou = busy || saving || readonly() || terminal() || row?.status === 'en_cours' || perime();
     for (const { node, champ } of controls) node.disabled = verrou || (!version && champ !== 'description_fr');
     for (const b of confirmations) b.disabled = verrou;
@@ -213,7 +235,7 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
     el('p', { class: 'muted' }, t('Une courte description en français pour comprendre le plat, avec son niveau et ses temps.')),
     el('p', { class: 'muted' }, t('Demande une proposition à relire ou saisis tes informations. Tes corrections sont conservées lors des prochaines propositions.')),
     !version ? el('p', { class: 'status' }, t('Cette référence peut recevoir une description. Importe les étapes pour renseigner la difficulté et les durées.')) : el('details', null, el('summary', null, t('Version affichée utilisée pour ces informations')), el('ul', null, ...contexte.source.ingredients.map(s => el('li', null, s))), el('ol', null, ...contexte.source.etapes.map(s => el('li', null, s)))),
-    el('div', { class: 'actions' }, proposer, annuler), disponibilite, status, feedback, formulaire, comparaison, validation, el('div', { class: 'actions' }, manuel, garder, ignorer, actualiser, copier));
+    el('div', { class: 'actions' }, proposer, annuler), disponibilite, status, feedback, avisCycle, formulaire, comparaison, validation, el('div', { class: 'actions' }, manuel, garder, ignorer, actualiser, copier));
   if (row?.resultat) remplirProposition();
   if (readonly()) message(t('Ce brouillon se modifie sur l’appareil qui l’a créé.'));
   else if (row?.validation_erreur) message(texteErreurReperes({ code: row.validation_erreur }));

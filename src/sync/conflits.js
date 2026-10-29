@@ -9,14 +9,35 @@
 import { syncNow } from './clock.js';
 import { nettoyerChaines } from './lots.js';
 import { fusionnerFichier, memeRemote, HASH_FICHIER } from './fichiers.js';
+import { CLE_CYCLE_CONFIRME, recettesDe } from './cycle.js';
+import { lireCycleRecette } from '../domain/cycle-recette.js';
+
+async function protectionContenu(db,conflit,copie) {
+  if(!['recipes','recipe_versions','recipe_translations','substitutions','dish_recipe_links'].includes(conflit.store)) return {conditions:{},recettes:[]};
+  let id=conflit.store==='recipes'?conflit.record_id:copie?.recipe_id;
+  let version=null;
+  if(!id&&copie?.recipe_version_id) {version=await db.get('recipe_versions',copie.recipe_version_id);id=version?.recipe_id;}
+  if(!id) return null;
+  const contexte=conflit.recipe_contexts?.find(c=>c.recipe_id===id);
+  const expected=contexte?.expected_cycle_id??(conflit.store==='recipes'?lireCycleRecette(copie).id:null);
+  const owner=(await db.get('sync_state','user_id'))?.value??null;
+  const valide=row=>{if(row==null)return expected===null;const cycle=lireCycleRecette(row);return cycle.etat==='active'&&cycle.id===expected;};
+  if(!valide(await db.get('recipes',id))) return null;
+  const conditions={recipes:[{key:id,fusion:row=>{if(!valide(row)) throw Error('Cycle du conflit changé');return null;}}],sync_state:[{key:'user_id',fusion:row=>{if((row?.value??null)!==owner)throw Error('Compte du conflit changé');return null;}}]};
+  if(version) conditions.recipe_versions=[{key:version.id,fusion:row=>{if(row?.recipe_id!==id)throw Error('Source du conflit changée');return null;}}];
+  return {conditions,recettes:[{recipe_id:id,expected_cycle_id:expected,owner_id:owner,records:[{store:conflit.store,id:conflit.record_id}]}]};
+}
 
 // Rend `true` si le geste a été appliqué. `garderIci` écrit avec origin 'local' EXPRÈS : c'est la capture qui remet
 // la fiche en file, et c'est précisément le renvoi voulu. Le retrait du conflit voyage dans la même transaction et
 // reste interne (sync_conflicts n'est pas un magasin synchronisé : la capture ne le regarde pas).
 export async function garderIci(db, conflit) {
+  if(conflit?.kind==='cycle') return false;
   if (conflit?.store === 'assistant_config') return false; // K-5 : ce magasin n'a jamais de conflit à trancher
   if (conflit?.renvoye === true) return false; // R-L3-30 : la version d'ici part déjà, rien à trancher ici
   if (conflit?.store === 'files') return garderIciFichier(db, conflit);
+  const protection=await protectionContenu(db,conflit,conflit.local);
+  if(!protection) return false;
   // Version locale nulle : la fiche a été supprimée ici pendant l'aller-retour. « Garder celle d'ici » veut alors
   // dire garder la suppression — jamais écrire une fiche sans clé, que la base refuserait. Le payload porte un
   // updated_at NEUF : sans lui, la capture mettrait en file une tombale sans heure, que le serveur refuserait
@@ -26,6 +47,7 @@ export async function garderIci(db, conflit) {
       deletes: { [conflit.store]: [conflit.record_id], sync_conflicts: [conflit.id] },
       origin: 'local',
       payloads: { [conflit.store]: { [conflit.record_id]: nettoyerChaines({ ...(conflit.server?.data || {}), updated_at: syncNow() }) } },
+      ...protection,
     });
     return true;
   }
@@ -36,11 +58,12 @@ export async function garderIci(db, conflit) {
   // revenir le conflit, indéfiniment — la boucle I4, ici même, dans le geste censé la clore. Un `Blob` traverse
   // intact : les octets d'une photo ne sont pas du texte.
   const fiche = nettoyerChaines({ ...conflit.local, updated_at: syncNow() });
-  await db.mutate({ puts: { [conflit.store]: [fiche] }, deletes: { sync_conflicts: [conflit.id] }, origin: 'local' });
+  await db.mutate({ puts: { [conflit.store]: [fiche] }, deletes: { sync_conflicts: [conflit.id] }, origin: 'local', ...protection });
   return true;
 }
 
 export async function garderAilleurs(db, conflit) {
+  if(conflit?.kind==='cycle') return false; // la résolution doit conserver/réconcilier la commande explicite
   if (conflit?.store === 'assistant_config') return false; // K-5 : ce magasin n'a jamais de conflit à trancher
   const serveur = conflit.server;
   // R-L3-30 : refusé sur un conflit renvoyé — c'est ce geste-là qui écrasait la version d'ici par celle qui a
@@ -53,9 +76,11 @@ export async function garderAilleurs(db, conflit) {
   // Un conflit dont le serveur n'a pas joint sa version (clé nommée sans contenu) : il n'y a rien à appliquer. Aucune
   // fiche n'est inventée et le conflit RESTE — mieux vaut un conflit qui attend qu'une perte muette.
   if (!serveur || (!serveur.deleted_at && (!serveur.data || typeof serveur.data !== 'object'))) return false;
+  const protection=await protectionContenu(db,conflit,serveur.data||conflit.local);
+  if(!protection) return false;
   const puts = {};
   const deletes = { sync_conflicts: [conflit.id] };
-  let conditions = null;
+  let conditions = protection.conditions;
   // Tombale : la suppression du serveur est appliquée ici. Sinon la version du serveur est écrite avec EXACTEMENT
   // son updated_at. Origine 'remote' dans les deux cas : rien ne repart (le serveur a déjà cette version).
   if (conflit.store === 'files') {
@@ -106,7 +131,31 @@ export async function purgerAnciens(db, maintenantMs = Date.now(), joursMax = 30
   const limite = maintenantMs - joursMax * 86400000;
   // Un `at` illisible ne se date pas : le conflit reste plutôt que d'être retiré par accident (la personne le voit
   // dans Réglages et peut trancher). Origine 'remote' : un retrait de journal n'est pas un geste sur les données.
-  const vieux = (await db.getAll('sync_conflicts')).filter((c) => Date.parse(c.at) < limite).map((c) => c.id);
+  const vieux = (await db.getAll('sync_conflicts')).filter((c) => c.kind!=='cycle' && Date.parse(c.at) < limite).map((c) => c.id);
   if (vieux.length) await db.mutate({ deletes: { sync_conflicts: vieux }, origin: 'remote' });
   return vieux.length;
+}
+
+// Geste explicite après consultation de la copie : un état serveur confirmé est obligatoire.
+// Les enfants refusés gardent leur copie : leur réponse serveur décrit le parent, pas leur propre contenu.
+export async function abandonnerConflitCycle(db, conflit) {
+  if(conflit?.kind!=='cycle'||conflit.store!=='recipes') return false;
+  const id=conflit.record_id,owner=(await db.get('sync_state','user_id'))?.value??null;
+  const confirmation=await db.get('sync_state',CLE_CYCLE_CONFIRME(id));
+  if(!confirmation?.value?.data||confirmation.value.user_id!==owner) return false;
+  const locale=await db.get('recipes',id),file=await db.getAll('outbox');
+  const concerne=file.filter(e=>(e.user_id==null||e.user_id===owner)&&recettesDe(e).includes(id));
+  const retirer=concerne.filter(e=>e.store==='recipes'&&e.id===id);
+  const bloquer=concerne.filter(e=>!retirer.includes(e));
+  const identique=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  const garde=(attendu)=>courant=>{if(!identique(courant,attendu)) throw Error('La copie à relire a changé');return null;};
+  try {
+    await db.mutate({origin:'remote',puts:{recipes:[confirmation.value.data],...(bloquer.length?{outbox:bloquer.map(e=>({...e,lifecycle_blocked:true,last_error:'cycle'}))}:{})},
+      deletes:{sync_conflicts:[conflit.id],outbox:retirer.map(e=>e.seq)},conditions:{
+        sync_state:[{key:'user_id',fusion:row=>{if((row?.value??null)!==owner)throw Error('Compte changé');return null;}},{key:confirmation.key,fusion:garde(confirmation)}],
+        sync_conflicts:[{key:conflit.id,fusion:garde(conflit)}],recipes:[{key:id,fusion:garde(locale)}],
+        outbox:concerne.map(e=>({key:e.seq,fusion:garde(e)}))
+      }});
+    return true;
+  } catch(e) {if(e.message==='La copie à relire a changé'||e.message==='Compte changé')return false;throw e;}
 }

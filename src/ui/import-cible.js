@@ -1,3 +1,7 @@
+import { capturerRecette } from './recette-garde.js';
+import { memoireCycleImport, revoirLectureImport } from '../domain/contexte-import.js';
+import { recetteActive } from '../domain/cycle-recette.js';
+import { mentionCycleRecette } from './corbeille.js';
 // L'écran d'import ciblé #/recipes/<id>/importer (lot A « Importer une recette repérée », spec docs/superpowers/specs/2026-10-18-import-cible-design.md :
 // § 4.1 entrées, § 4.2 l'écran, § 4.3 extraction et enregistrement, § 4.4 cas et textes ; invariants I-2, I-3, I-4, I-7, I-9, I-10 ; Review Focus 2 et 4).
 // Une référence « Repérée dans ton livre » (ou une recette partielle) s'ouvre déjà rattachée : la personne ajoute ses pages (persistées AVANT tout
@@ -199,6 +203,14 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     if (annule()) { liberer(); return refus('annule'); }
     if (!session) { liberer(); return refus('non_connecte'); }
     if (!preparer && !pageIds.length) { liberer(); return refus('sans_page'); } // lot E : une sorte sans PAGES passe par sa préparation
+    let contexteRecette = null;
+    if (ligne?.recipe_id) {
+      const cible = ctx?.recipesById?.get(ligne.recipe_id) || await repo.get('recipes', ligne.recipe_id);
+      if (!cible || !recetteActive(cible)) return refus('transition');
+      contexteRecette = await capturerRecette(repo, cible, { ctx });
+    }
+    const recettesHistoriques = contexteRecette ? [{...contexteRecette,historique:true}] : [];
+    tenue.recettes = recettesHistoriques;
     let envoi; // lot C : { images, pageIds } — les pages EFFECTIVEMENT envoyées, dans l'ordre des images
     try { envoi = preparer ? await preparer({ ligne, repo }) : await imagesDe(repo, pageIds); } // lot E (D-E20) : `preparer`, même contrat qu'imagesDe
     catch (e) { liberer(); return { issue: 'refuse', raison: e?.code === 'octets_absents' ? 'octets_absents' : 'image', code: e?.code ?? null }; }
@@ -210,13 +222,13 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     // de CET appareil, dont le battement est ici ; sinon son appareil d'origine la jugeait à 90 s sur battement_at et l'interrompait pendant le vol.
     // Lot E, ronde 1 de T5 (même règle) : une COUVERTURE d'un autre appareil relancée ici par sa route de reprise (#/add/livre?import=) aussi.
     const ici = (kind === 'classement' || kind === 'couverture') && typeof repo.deviceId === 'function' ? repo.deviceId() : null;
-    const enVol = { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, ...(ici ? { device_id: ici } : {}), ...(kind === 'index' ? { resultat: null, reponse_brute: null, model: null, duree_ms: null, finished_at: null, ordre_applique_at: null } : {}) };
+    const enVol = { ...(contexteRecette ? memoireCycleImport(contexteRecette) : {}), status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, ...(ici ? { device_id: ici } : {}), ...(kind === 'index' ? { resultat: null, reponse_brute: null, model: null, duree_ms: null, finished_at: null, ordre_applique_at: null } : {}) };
     // Vague finale (m2) : le départ vaut pour les pages LUES — une page retirée, ajoutée ou déplacée pendant la réduction (autre geste, autre onglet)
     // refuse le départ (rien ne part, le redessin montre la ligne) : jamais une page envoyée qui ne serait pas liée, ni une page liée jamais lue.
     const memesPages = (c) => { if (JSON.stringify(Array.isArray(c.page_ids) ? c.page_ids : []) !== JSON.stringify(pageIds)) throw new TransitionRefusee('imports', importId, c.status); return enVol; };
     try {
       if (lecture) importId = await partirLecture(repo, lecture, pageIds, enVol, suivi);
-      else await repo.transitionner('imports', importId, { attendus, patch: memesPages }); // lot D (S-3) : lireLeLot passe ['a_lancer'] — jamais une ligne passée echec ; memesPages (lot A, m2) gardé
+      else await repo.transitionner('imports', importId, { attendus, patch: memesPages, recettes: contexteRecette ? [contexteRecette] : [] }); // lot D (S-3) : lireLeLot passe ['a_lancer'] — jamais une ligne passée echec ; memesPages (lot A, m2) gardé
     } catch (e) {
       liberer();
       if (estRefus(e)) return { issue: 'refuse', raison: 'transition', statut: e.statut }; // un autre onglet a enregistré ou ignoré entre-temps (I-10)
@@ -230,8 +242,8 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     // `appels + 1` au départ du fetch (spec § 4.3.1) : écrit juste avant l'appel réseau, par une fonction LIBRE (jamais objet.fetch : Illegal invocation).
     const fetchReel = fetchInjecte ?? globalThis.fetch;
     const fetchCompte = async (url, options) => {
-      try { await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: (c) => ({ appels: (Number.isInteger(c.appels) ? c.appels : 0) + 1 }) }); }
-      catch (e) { if (!estRefus(e)) logError('import_cible.appels', { error: e, id: importId }); }
+      try { await repo.transitionner('imports', importId, { recettes:recettesHistoriques, attendus: ['en_cours'], patch: (c) => ({ appels: (Number.isInteger(c.appels) ? c.appels : 0) + 1 }) }); }
+      catch (e) { if (['compte_change','contexte_change','cycle_invalide','source_absente'].includes(e?.code)) throw e; if (!estRefus(e)) logError('import_cible.appels', { error: e, id: importId }); }
       return fetchReel(url, options);
     };
     const provider = new PasserelleProvider({}, { session, fetch: fetchCompte });
@@ -244,25 +256,25 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
       // Un `annule` arrive aussi par annulerVol, qui écrit la même chose : la première écriture gagne, la seconde est refusée sans bruit.
       const raison = raisonDe(e);
       const patch = { status: 'echec', erreur: { raison, extra: extraDe(e) }, document_id_vol: null, duree_ms: Date.now() - t0, ...(typeof e?.texteBrut === 'string' ? { reponse_brute: e.texteBrut } : {}), ...(typeof e?.modele === 'string' ? { model: e.modele } : {}) };
-      try { await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch }); }
+      try { await repo.transitionner('imports', importId, { recettes:recettesHistoriques, attendus: ['en_cours'], patch }); }
       catch (err) { if (!estRefus(err)) logError('import_cible.echec', { error: err, id: importId }); }
       return { issue: 'echec', raison };
     }
     const duree_ms = Date.now() - t0;
     // I-3 : le résultat vit dans le journal AVANT tout rendu ou toute écriture de recette. Patch-OBJET (son statut est lu par les espions des tests).
     try {
-      await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'a_verifier', resultat: reponse.resultat, reponse_brute: brute(reponse.texteBrut), model: reponse.modele ?? null, duree_ms, document_id_vol: null, erreur: null } });
+      await repo.transitionner('imports', importId, { recettes:recettesHistoriques, attendus: ['en_cours'], patch: { status: 'a_verifier', resultat: reponse.resultat, reponse_brute: brute(reponse.texteBrut), model: reponse.modele ?? null, duree_ms, document_id_vol: null, erreur: null } });
     } catch (e) {
       if (estRefus(e)) {
         // Réponse arrivée APRÈS « Annuler » ou un interrompu (spec § 3.1, Review Focus 4) : echec → a_verifier n'existe pas ; reponse_brute seule
         // est gardée (diagnostic), rien n'est écrit sur la recette, l'état reste echec.
-        try { await repo.transitionner('imports', importId, { attendus: ['echec'], patch: { reponse_brute: brute(reponse.texteBrut) } }); }
+        try { await repo.transitionner('imports', importId, { recettes:recettesHistoriques, attendus: ['echec'], patch: { reponse_brute: brute(reponse.texteBrut) } }); }
         catch (err) { if (!estRefus(err)) logError('import_cible.tardive', { error: err, id: importId }); }
         return { issue: 'echec', raison: 'annule' };
       }
       // Écriture locale impossible après une réponse (spec § 4.3.2) : tentative echec(incertain) ; si elle échoue aussi, la ligne reste en_cours et
       // deviendra interrompu au démarrage (même phrase, I-4) — c'est ici seulement que l'incident est journalisé.
-      try { await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'echec', erreur: { raison: 'incertain', extra: {} }, document_id_vol: null, duree_ms } }); }
+      try { await repo.transitionner('imports', importId, { recettes:recettesHistoriques, attendus: ['en_cours'], patch: { status: 'echec', erreur: { raison: 'incertain', extra: {} }, document_id_vol: null, duree_ms } }); }
       catch (err) { logError('import_cible.incertain', { error: err, id: importId }); return { issue: 'echec', raison: 'incertain', ecrit: false }; }
       return { issue: 'echec', raison: 'incertain' };
     }
@@ -309,7 +321,7 @@ export async function annulerVol(importId) {
   if (!tenue) return false;
   const { controller, repo } = tenue;
   controller.abort();
-  try { await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'echec', erreur: { raison: 'annule', extra: {} }, document_id_vol: null } }); }
+  try { await repo.transitionner('imports', importId, { recettes:tenue.recettes || [], attendus: ['en_cours'], patch: { status: 'echec', erreur: { raison: 'annule', extra: {} }, document_id_vol: null } }); }
   catch (e) { if (!estRefus(e)) logError('import_cible.annuler', { error: e, id: importId }); }
   notifier();
   return true;
@@ -414,6 +426,8 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   const oublierQuestion = () => { etat.question = null; etat.cleQuestion = null; etat.rattache = null; etat.verdict = null; etat.ecriteMain = false; };
   root.etatRoute = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, pageIds: [...(Array.isArray(etat.ligne?.page_ids) ? etat.ligne.page_ids : [])], vol: !!etat.ligne && volEnCours()?.importId === etat.ligne.id, discordance: etat.verdict });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
+  if (!recetteActive(recipe)) return mentionCycleRecette(recipe);
+  const contexteRecette = await capturerRecette(repo, recipe, { ctx });
   // D-11 : une recette qui a déjà son texte (et pas d'adresse : voir plus haut) n'a pas d'entrée ici — le dire, revenir à la fiche.
   if (recipe.availability === 'available') { toast(t('Cette recette a déjà son texte.')); navigate(`/recipes/${encodeURIComponent(recipe.id)}`); return root; }
 
@@ -456,7 +470,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   }
   // Une transition SUR PLACE (même statut, sous ATTENDUS_PAGES) : l'ordre des pages, le retrait d'une page, le pointeur de la photo du plat.
   const transitionSurPlace = async (patch) => {
-    try { await repo.transitionner('imports', etat.ligne.id, { attendus: ATTENDUS_PAGES, patch }); }
+    try { await repo.transitionner('imports', etat.ligne.id, { attendus: ATTENDUS_PAGES, patch, recettes:[contexteRecette] }); }
     catch (e) { if (!estRefus(e)) logError('import_cible.pages', { error: e, id: etat.ligne?.id }); }
   };
 
@@ -487,8 +501,8 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     if (!files?.length) return;
     etat.occupe = true;
     try {
-      if (etat.ligne) await repo.ajouterPages(files, { import_id: etat.ligne.id });
-      else await repo.ajouterPages(files, { edition_id: recipe.edition_id ?? null, import: { id: repo.newId('imp'), kind: 'recette', recipe_id: recipe.id, edition_id: recipe.edition_id ?? null, page_ids: await pagesDejaLiees() } });
+      if (etat.ligne) await repo.ajouterPages(files, { import_id: etat.ligne.id, recettes:[contexteRecette] });
+      else await repo.ajouterPages(files, { recettes:[contexteRecette], edition_id: recipe.edition_id ?? null, import: { id: repo.newId('imp'), kind: 'recette', recipe_id: recipe.id, edition_id: recipe.edition_id ?? null, page_ids: await pagesDejaLiees() } });
     } catch (e) {
       if (!estRefus(e)) { logError('import_cible.ajout', { error: e }); toast(t('Ces photos n’ont pas pu être ajoutées. Réessaie.')); }
     } finally { etat.occupe = false; }
@@ -521,7 +535,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     if (!/^[1-9]\d{0,3}$/.test(s)) { champ.value = p?.printed_page ?? ''; return; }
     const n = parseInt(s, 10);
     let ecrit = false;
-    try { const courante = await repo.get('source_pages', pageId); if (courante) { await repo.save('source_pages', { ...courante, printed_page: n }); ecrit = true; } }
+    try { const courante = await repo.get('source_pages', pageId); if (courante) { await repo.save('source_pages', { ...courante, printed_page: n }, {recettes:[contexteRecette]}); ecrit = true; } }
     catch (e) { logError('import_cible.page_imprimee', { error: e, id: pageId }); }
     if (!ecrit) { champ.value = p?.printed_page ?? ''; toast(t('Le numéro de page n’a pas pu être enregistré. Réessaie.')); return; }
     if (p) p.printed_page = n;
@@ -544,8 +558,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     catch (e) { etat.occupe = false; toast(messageErreurImage(e)); dessiner(); return; } // une image refusée n'est pas une écriture refusée
     try {
       const sha256 = await sha256Hex(blob);
-      await repo.putFile(sha256, blob, { original_filename: files[0].name });
-      await repo.transitionner('imports', etat.ligne.id, { attendus: ATTENDUS_PAGES, patch: { photo_sha256: sha256, photo_origin: origin } });
+      await repo.transitionner('imports', etat.ligne.id, { attendus: ATTENDUS_PAGES, patch: { photo_sha256: sha256, photo_origin: origin }, recettes: [contexteRecette], fichiers: [{ sha256, blob, meta: { original_filename: files[0].name } }] });
     } catch (e) {
       if (!estRefus(e)) { logError('import_cible.photo', { error: e }); toast(t('La photo n’a pas pu être enregistrée. Réessaie.')); }
     } finally { etat.occupe = false; }
@@ -588,7 +601,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   async function changerLesPages() {
     const L = etat.ligne; if (!L || etat.occupe) return;
     oublierQuestion();
-    try { await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: { status: 'a_lancer', resultat: null } }); }
+    try { await repo.transitionner('imports', L.id, { recettes:[contexteRecette], attendus: ['a_verifier'], patch: { status: 'a_lancer', resultat: null } }); }
     catch (e) { if (!estRefus(e)) logError('import_cible.changer_pages', { error: e, id: L.id }); }
     await redessiner();
   }
@@ -648,6 +661,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   // L'enregistrement (§ 4.3.5) : UNE transaction conditionnée a_verifier → enregistre avec la fiche, la version, les pages et la séance. Refusée (un
   // autre onglet a tranché juste avant, I-10) → rien n'est écrit et rien n'est dit « importé » ; réussie → bilan SEULEMENT si l'écran est encore monté.
   async function enregistrer(L, fab, reference) {
+    if ((L.expected_cycle_id ?? null) !== contexteRecette.expected_cycle_id || (Object.hasOwn(L, 'owner_id') && L.owner_id !== contexteRecette.owner_id)) { toast(t('La recette a changé. Rouvre-la pour continuer.')); return; }
     // Ronde 1 : une séance refusée dans la transaction (disparue, ou d'un statut hors open/done) n'est plus relue — le geste suivant écrit sans elle (§ 4.8.1 point 2).
     const seance = L.scan_session_id && etat.seanceRefusee !== L.scan_session_id ? await repo.get('scan_sessions', L.scan_session_id) : null;
     const puts = { recipe_versions: [fab.version], source_pages: fab.pageUpdates };
@@ -679,7 +693,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     const cle = cleLecture(L);
     const cloture = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { status: 'enregistre', reponse_brute: null, finished_at: maintenant() }; };
     try {
-      await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: cloture, puts, conditions });
+      await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: cloture, puts, conditions, recettes: [contexteRecette] });
     } catch (e) {
       if (estRefus(e) && e.store === 'scan_sessions') { etat.seanceRefusee = L.scan_session_id; toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); } // lot D : la séance a disparu (ou porte un statut inconnu) ; le geste suivant écrit sans elle
       else if (!estRefus(e)) { logError('import_cible.enregistrer', { error: e, id: L.id }); toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); }
@@ -777,7 +791,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     etat.occupe = true;
     let fait = false;
     try {
-      await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: (c) => { if (cleLecture(c) !== cle || c.kind !== 'recette') throw new TransitionRefusee('imports', L.id, c.status); return { recipe_id: null }; } });
+      await repo.transitionner('imports', L.id, { recettes:[contexteRecette], attendus: ['a_verifier'], patch: (c) => { if (cleLecture(c) !== cle || c.kind !== 'recette') throw new TransitionRefusee('imports', L.id, c.status); return { recipe_id: null }; } });
       fait = true;
     } catch (e) { if (!estRefus(e)) { logError('import_cible.nouvelle_recette', { error: e, id: L.id }); toast(t('Une erreur est survenue')); } } // ronde 1 : un échec qui n'est pas un refus est dit
     finally { etat.occupe = false; }
@@ -831,6 +845,16 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
         bloc.append(el('div', { class: 'status', role: 'status' }, t('Lecture des pages par l’assistant…')),
           el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', disabled: true }, t('Extraire et enregistrer')), el('button', { type: 'button', class: 'btn', dataset: { role: 'annuler' }, onClick: annuler }, t('Annuler'))));
       } else bloc.append(el('div', { class: 'status warn' }, t('En cours sur un autre écran')), el('div', { class: 'row' }, retour())); // I-7 : sans « Annuler »
+      return bloc;
+    }
+    if (statut === 'a_verifier' && (L.expected_cycle_id ?? null) !== contexteRecette.expected_cycle_id) {
+      bloc.append(el('p', null, t('Cette lecture a commencé avant le retrait. Relis-la avant de la conserver.')),
+        el('button', { class: 'btn', disabled: etat.occupe, onClick: async () => {
+          etat.occupe = true; dessiner();
+          try { await revoirLectureImport(L.id, { repo, contexte: contexteRecette }); oublierQuestion(); }
+          catch { toast(t('La recette a changé. Rouvre-la pour continuer.')); }
+          finally { etat.occupe = false; await redessiner(); }
+        } }, t('Revoir cette lecture')));
       return bloc;
     }
     if (statut === 'a_verifier') {

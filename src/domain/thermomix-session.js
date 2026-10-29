@@ -13,7 +13,7 @@ export function portionsRepas(item, meal) {
 }
 
 // Validation sur les versions relues ; les conditions empêchent une mutation entre la garde et l'écriture locale.
-export async function enregistrerSessionCuisine(session, { repo }) {
+export async function enregistrerSessionCuisine(session, { repo, recettes = [] }) {
   const conditions = [];
   for (const id of new Set(session.selected_version_ids)) {
     const version = await repo.get('recipe_versions', id);
@@ -29,6 +29,6 @@ export async function enregistrerSessionCuisine(session, { repo }) {
   }
   // Les conditions de repo sont des fusions sans modification : aucun écrasement de la version.
   const gardes = conditions.map(({ key, verifier }) => ({ key, fusion: c => { verifier(c); return null; } }));
-  await repo.saveBatch({ cook_sessions: [session] }, { conditions: { recipe_versions: gardes } });
+  await repo.saveBatch({ cook_sessions: [session] }, { recettes, conditions: { recipe_versions: gardes } });
   return session;
 }

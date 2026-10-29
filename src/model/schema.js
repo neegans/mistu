@@ -2,12 +2,12 @@
 // Chaque magasin correspond à une entité ; les libellés FR/EN des plats et ingrédients sont embarqués dans leur document.
 
 export const DB_NAME = 'cuisine-os';
-export const DB_VERSION = 4;
-export const APP_VERSION = '0.22.0';
+export const DB_VERSION = 5;
+export const APP_VERSION = '0.23.0';
 
 export const ARCHIVE_FORMAT = 'cuisine-os-archive';
-export const ARCHIVE_FORMAT_VERSION = 1;
-export const SUPPORTED_ARCHIVE_VERSIONS = [1];
+export const ARCHIVE_FORMAT_VERSION = 2;
+export const SUPPORTED_ARCHIVE_VERSIONS = [1, 2];
 
 export const STORES = {
   books:               { keyPath: 'id', indexes: [] },
@@ -17,7 +17,7 @@ export const STORES = {
   scan_sessions:       { keyPath: 'id', indexes: [] },
   dishes:              { keyPath: 'id', indexes: [] },
   dish_recipe_links:   { keyPath: 'id', indexes: [['dish_id', 'dish_id'], ['recipe_id', 'recipe_id']] },
-  recipes:             { keyPath: 'id', indexes: [['edition_id', 'edition_id']] },
+  recipes:             { keyPath: 'id', indexes: [['edition_id', 'edition_id'], ['trashed_at', 'trashed_at']] },
   recipe_versions:     { keyPath: 'id', indexes: [['recipe_id', 'recipe_id']] },
   recipe_translations: { keyPath: 'id', indexes: [['recipe_version_id', 'recipe_version_id']] },
   ingredients:         { keyPath: 'id', indexes: [] },

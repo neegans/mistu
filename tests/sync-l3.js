@@ -1609,7 +1609,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     const { SYNC_L3_ACTIONS, gestesL3Pour } = reglages;
     const muet = { db: null, obtenirMoteur: () => null, confirm: async () => false, dire: () => {}, rafraichir: () => {}, invalider: () => {}, journaliser: () => {} };
     const cables = gestesL3Pour(muet);
-    eq([...SYNC_L3_ACTIONS].sort(), ['abandonner', 'envoyerMaintenant', 'garderAilleurs', 'garderIci', 'ignorerConflit', 'reessayer'], 'ronde 1 : six gestes L3 nommés (R-L3-29 ajoute « Ignorer »)');
+    eq([...SYNC_L3_ACTIONS].sort(), ['abandonner', 'abandonnerConflitCycle', 'envoyerMaintenant', 'garderAilleurs', 'garderIci', 'ignorerConflit', 'reessayer'], 'L1 : les gestes L3 incluent l’abandon explicite d’un conflit de cycle');
     eq(Object.keys(cables).sort(), [...SYNC_L3_ACTIONS].sort(), 'ronde 1 : le câblage réel expose exactement les gestes nommés, pas un de plus');
     ok(SYNC_L3_ACTIONS.every((a) => typeof cables[a] === 'function'), 'ronde 1 : … et chacun est bien une fonction');
 
@@ -1867,7 +1867,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.22\.0-\d+'/.test(source), 'sw.js : VERSION incrémentée (format cuisine-os-vMAJOR.MINOR.PATCH-N), l’ancien cache est purgé à l’activation');
+    ok(/VERSION = 'cuisine-os-v0\.23\.0-\d+'/.test(source), 'sw.js : VERSION incrémentée (format cuisine-os-vMAJOR.MINOR.PATCH-N), l’ancien cache est purgé à l’activation');
     // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
     // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
     // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever). Le contrôle porte

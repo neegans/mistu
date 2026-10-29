@@ -14,7 +14,7 @@ export async function runSyncTests({ eq, ok }) {
     eq(table.key, STORES[store].keyPath, `${store} : clé = keyPath`);
     const indexNames = (STORES[store].indexes || []).map(([name]) => name).sort();
     const generated = table.generated.map((g) => g.name).filter((n) => !['size', 'mime'].includes(n) || store !== 'files').sort();
-    eq(generated, indexNames, `${store} : colonnes générées = index de STORES`);
+    eq(generated, indexNames.filter(n => !(store === 'recipes' && n === 'trashed_at')), `${store} : colonnes générées = index synchronisés de STORES (corbeille locale exclue)`);
   }
   eq(TABLES.files.generated.map((g) => `${g.name}:${g.type}`).sort(), ['mime:text', 'size:bigint'], 'files : size bigint et mime text en plus');
   ok(TABLES.recipe_versions.required.includes('recipe_id') && TABLES.source_pages.required.includes('document_id'), 'champs de relation obligatoires déclarés');
@@ -67,7 +67,7 @@ export async function runSyncTests({ eq, ok }) {
   // --- Schéma v2 et archive (spec § 5.1, I3)
   const schema = await import('../src/model/schema.js');
   const { createArchive, inspectArchive, applyArchive, verifyRestored } = await import('../src/domain/backup.js');
-  eq(schema.DB_VERSION, 4, 'DB_VERSION 4 (lot A : magasin imports)');
+  eq(schema.DB_VERSION, 5, 'DB_VERSION 5 (L1 : index de corbeille)');
   eq(schema.STORES.outbox, { keyPath: 'seq', autoIncrement: true, indexes: [['store_id', ['store', 'id']]] }, 'outbox autoIncrement');
   ok(schema.STORES.sync_state.keyPath === 'key' && schema.STORES.sync_conflicts.keyPath === 'id', 'sync_state et sync_conflicts');
   ok(schema.SYNC_INTERNAL_STORES.every((s) => !schema.ARCHIVE_DATA_STORES.includes(s)), 'internes hors archive');
@@ -199,7 +199,7 @@ export async function runSyncTests({ eq, ok }) {
     // Qu'elles ne soient pas EN FILE est prouvé par l'assertion « ordre des captures » juste en dessous.
     const amorcees = [...(await db.getAll('unit_definitions')), ...(await db.getAll('unit_conventions')), ...(await db.getAll('ingredients'))];
     eq([amorcees.length, amorcees.filter((r) => r.updated_at).length], [96, 96], 'amorçage : les 96 fiches de référence portent un updated_at');
-    await repo.save('recipes', { id: 'r1' });
+    await repo.save('recipes', { id: 'r1' }, { conditions: { recipes: [{ key: 'r1', absente: true }] } });
     await repo.remove('recipes', 'r1');
     const out = await db.getAll('outbox');
     // R-L3-22 : les trois putFile ci-dessus ne laissent AUCUNE entrée — seuls les gestes sur une fiche en laissent.

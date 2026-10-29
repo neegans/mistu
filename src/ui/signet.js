@@ -1,3 +1,6 @@
+import { capturerRecette } from './recette-garde.js';
+import { lireCycleRecette } from '../domain/cycle-recette.js';
+import { TEXTE_RECETTE_RETIREE, TEXTE_CYCLE_INVALIDE } from './corbeille.js';
 // Garder un lien web (spec UX § 11) : une adresse et un titre suffisent pour retrouver une page dans ta bibliothèque.
 // L'app n'ouvre pas la page et n'en lit rien — c'est la personne qui la nomme : aucun réseau, aucune version créée (I-E).
 // L'adresse est validée dans le modèle ET à l'écriture (S13) ; la vue recette la revalide encore au rendu par
@@ -62,11 +65,13 @@ export function fabriquerSignet(m, { newId, langue, reperes = null }) {
 
 // Deuxième porte de la borne S13 : une adresse hostile ou trop longue qui arriverait d'ailleurs que de l'écran
 // (un état bricolé, un appel direct) est refusée ICI, avant toute écriture.
-export async function enregistrerSignet(etat, { repo: r = repo, langue = getUiLocale(), existantes = [] } = {}) {
+export async function enregistrerSignet(etat, { repo: r = repo, langue = getUiLocale(), existantes = [], contexte = null, ctx = null } = {}) {
   const m = signetModel(etat);
   if (!m.valide) throw new Error('signet_invalide');
   if (doublonDAdresse(existantes, m.href)) throw new Error('signet_doublon'); // seconde porte du doublon (D-B7), comme S13
-  return r.save('recipes', fabriquerSignet(m, { newId: r.newId, langue }));
+  const recipe = fabriquerSignet(m, {newId:r.newId,langue});
+  const garde = contexte ? {...contexte,recipe_id:recipe.id} : await capturerRecette(r, recipe, {ctx,creation:true});
+  return r.save('recipes', recipe, {recettes:[garde],conditions:{recipes:[{key:recipe.id,absente:true}]}});
 }
 
 // Un champ texte reste un <label> (field() en rend un) : correct autour d'un input. Son erreur vit dans un <small>
@@ -86,8 +91,8 @@ export function renderSignet(model, gestes = {}) {
     champTexte(t('Adresse *'), 'adresse', model, el('input', { type: 'url', inputmode: 'url', value: model.adresse ?? model.href ?? '', onInput: (e) => g('changerAdresse')(e.target.value) })),
     // D-B7 : toujours rendu (caché sans doublon), pour que la frappe le montre ou le cache SUR PLACE (majSignet).
     el('div', { class: 'status', dataset: { role: 'doublon-adresse' }, hidden: !model.doublon },
-      el('span', null, t('Tu as déjà gardé cette adresse.')), ' ',
-      el('a', { class: 'btn small', href: model.doublon ? `#/recipes/${encodeURIComponent(model.doublon.id)}` : '#/library' }, t('Ouvrir la fiche'))),
+      el('span', {dataset:{role:'texte-doublon'}}, texteDoublon(model.doublon)), ' ',
+      el('a', { class: 'btn small', href: model.doublon ? `#/recipes/${encodeURIComponent(model.doublon.id)}` : '#/library' }, model.doublon && lireCycleRecette(model.doublon).etat === 'retiree' ? t('Consulter et restaurer') : t('Ouvrir la fiche'))),
     champTexte(t('Titre *'), 'titre', model, el('input', { type: 'text', value: model.titre, onInput: (e) => g('changerTitre')(e.target.value) })),
     field(t('Livre (facultatif)'), select(livres, model.editionId, (v) => g('changerLivre')(v))),
     // R-UX-8 : les puces ne vont JAMAIS dans un <label> — field() en rend un, et un clic sur le mot « Cuisines »
@@ -111,7 +116,9 @@ export function majSignet(zone, model) {
   const doublon = zone?.querySelector?.('[data-role="doublon-adresse"]');
   if (doublon) {
     doublon.hidden = !model.doublon;
+    const texte = doublon.querySelector('[data-role=texte-doublon]'); if (texte) texte.textContent = texteDoublon(model.doublon);
     const a = doublon.querySelector('a');
+    if (a) a.textContent = model.doublon && lireCycleRecette(model.doublon).etat === 'retiree' ? t('Consulter et restaurer') : t('Ouvrir la fiche');
     if (a) a.setAttribute('href', model.doublon ? `#/recipes/${encodeURIComponent(model.doublon.id)}` : '#/library');
   }
   const bouton = zone?.querySelector?.('[data-role="enregistrer"]');
@@ -125,6 +132,7 @@ export async function renderSignetRoute(params, query, ctx, { repo: r = repo, na
   // § 6 : préremplissage par la query (depuis « Garder ce lien » de la recherche web — ou un lien profond venu de
   // l'extérieur, S4). L'adresse arrive TELLE QUELLE (jamais tronquée : trop longue, signetModel la refuse — I-A/F9) ;
   // le titre est borné par points de code, Cc/Cf retirés (S2). Rien n'est écrit avant « Enregistrer ».
+  const contexte = await capturerRecette(r, {id:'nouveau-signet'}, {ctx,creation:true});
   const recue = typeof query?.adresse === 'string' && query.adresse.trim() !== '';
   const etat = { adresse: recue ? query.adresse : '', titre: borner(typeof query?.titre === 'string' ? query.titre : '', LIMITES_SIGNET.titre), editionId: '', cuisines: [], enCours: false };
   const livres = [{ value: '', label: t('Aucun — recette indépendante') },
@@ -167,7 +175,7 @@ export async function renderSignetRoute(params, query, ctx, { repo: r = repo, na
       majSignet(zone, modelVu());
       let rec;
       try {
-        rec = await enregistrerSignet({ ...etat, enCours: false }, { repo: r, existantes: ctx?.recipes ?? [] });
+        rec = await enregistrerSignet({ ...etat, enCours: false }, { repo: r, existantes: ctx?.recipes ?? [], contexte, ctx });
       } catch (e) {
         etat.enCours = false;
         majSignet(zone, modelVu());
@@ -181,4 +189,9 @@ export async function renderSignetRoute(params, query, ctx, { repo: r = repo, na
   };
   dessiner();
   return root;
+}
+
+function texteDoublon(recipe) {
+  const etat = recipe ? lireCycleRecette(recipe).etat : 'active';
+  return etat === 'retiree' ? t(TEXTE_RECETTE_RETIREE) : etat === 'invalide' ? t(TEXTE_CYCLE_INVALIDE) : t('Tu as déjà gardé cette adresse.');
 }

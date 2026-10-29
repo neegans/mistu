@@ -24,6 +24,7 @@ import { lancerVol, lancerExtraction, annulerVol, volEnCours, estEnLigne, texteE
 import { sessionAssistant, carteConnexion, messageGardeRefusee, texteDesChamps, TEXTE_CONNEXION } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { messageErreurImage } from './livre-ajout.js';
+import { capturerProprietaire, conditionProprietaire } from './recette-garde.js';
 
 const horloge = () => new Date().toISOString();
 const liste = (v) => (Array.isArray(v) ? v : []);
@@ -669,18 +670,22 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
 // référence, reçoit `recipeId` — la référence relue, encore candidate de l'édition de la ligne (reference_only, sans lien web, sans import ouvert) ; dans la
 // transaction, la clé, la sorte et l'absence de référence regardées, la candidature rejouée (ronde 1) et la condition d'index d'I-2. Aucun appel. Rend { issue: 'rattache' } ou
 // { issue: 'refuse', raison: 'lecture' | 'reference' | 'transition' }.
-export async function rattacherLecture(importId, recipeId, { cle, repo = repoModule } = {}) {
+export async function rattacherLecture(importId, recipeId, { cle, repo = repoModule, compte = null, ctx = null } = {}) {
+  const capture = compte || capturerProprietaire(repo, ctx);
   const refuse = (raison) => ({ issue: 'refuse', raison });
   const ligne = await repo.get('imports', importId);
+  const proprietaire = await capture;
   if (!ligne || ligne.status !== 'a_verifier' || ligne.kind !== 'recette' || ligne.recipe_id != null || cleLecture(ligne) !== cle) return refuse('lecture');
   const reference = typeof recipeId === 'string' ? await repo.get('recipes', recipeId) : null;
+  const contexte = reference && repo.capturerContexteRecette ? await repo.capturerContexteRecette(reference) : null;
   const editionId = typeof ligne.edition_id === 'string' ? ligne.edition_id : null;
   if (!reference || !candidatsReference([reference], { editionId, imports: liste(await repo.all('imports')) }).length) return refuse('reference');
   try {
     await repo.transitionner('imports', importId, {
+      ...(contexte ? { recettes: [contexte] } : {}),
       attendus: ['a_verifier'],
       patch: (c) => { if (cleLecture(c) !== cle || c.kind !== 'recette' || c.recipe_id != null) throw new TransitionRefusee('imports', importId, c.status); return { recipe_id: recipeId }; },
-      conditions: { imports: [{ index: 'recipe_id', valeur: recipeId, exclus: IMPORTS_OUVERTS }] },
+      conditions: { imports: [{ index: 'recipe_id', valeur: recipeId, exclus: IMPORTS_OUVERTS }], sync_state: [conditionProprietaire(proprietaire)] },
       // Ronde 1 : la candidature de la référence rejouée DANS la transaction (une lecture reçue a pu la rendre available entre-temps) ; vérification
       // seule, par le sac `autres` du lot A : la fusion ne rend jamais de fiche, rien n'est écrit sur `recipes`.
       autres: { recipes: [{ key: recipeId, fusion: (r) => { if (!candidatsReference(r ? [r] : [], { editionId }).length) throw new TransitionRefusee('recipes', recipeId, null); return null; } }] },
@@ -702,6 +707,7 @@ export function blocApparierLecture({ ligne, resultat, ctx, repo = repoModule, n
   const occupees = referencesOccupees(liste(ctx?.recipes), { editionId, imports: liste(ctx?.imports) });
   const lu = { cle: 'lu', title: typeof resultat.title === 'string' ? resultat.title : null, printed_page: Number.isInteger(resultat.printed_page) ? resultat.printed_page : null, origine: 'classement' };
   const prop = proposerAppariements([lu], candidats).get('lu');
+  const compte = capturerProprietaire(repo, ctx);
   const cle = cleLecture(ligne);
   const racine = el('div', { class: 'card flat stack', dataset: { role: 'apparier-lecture' } });
   let occupe = false;
@@ -709,7 +715,7 @@ export function blocApparierLecture({ ligne, resultat, ctx, repo = repoModule, n
     if (occupe) return;
     occupe = true;
     try {
-      const r = await rattacherLecture(ligne.id, recipeId, { cle, repo });
+      const r = await rattacherLecture(ligne.id, recipeId, { cle, repo, compte });
       if (r.issue === 'rattache') { if (racine.isConnected) navigate('/recipes/' + encodeURIComponent(recipeId) + '/importer'); return; }
       toast(t('Rien n’a été rattaché : cette lecture ou cette référence a changé entre-temps.'));
       const [L, recipes, imports] = await Promise.all([repo.get('imports', ligne.id), repo.all('recipes'), repo.all('imports')]);

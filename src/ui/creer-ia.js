@@ -1,3 +1,5 @@
+import { recetteActive } from '../domain/cycle-recette.js';
+import { mentionCycleRecette } from './corbeille.js';
 // Écran « Créer une recette avec l'assistant IA » (spec 2026-10-18-creer-avec-l-ia § 3.2, § 5 ; table de décision P7 des
 // amendements). L'état vit AU NIVEAU DU MODULE, comme la recherche web (search.js) : UN vol pour toute l'app (C-1), une mémoire de
 // session (C-4), des vues abonnées purgées par isConnected (P6). Rien n'est écrit avant « Garder » ; « Garder » n'est pas rejouable
@@ -15,6 +17,7 @@ import { assessVersion } from '../domain/diet.js';
 import { DIET_TAGS, RECIPE_TYPES } from '../model/schema.js';
 import { pageHeader, field, select, sessionAssistant, carteConnexion, texteRefusAssistant } from './components.js';
 import { demarrerConnexion } from './settings.js';
+import { capturerRecette } from './recette-garde.js';
 
 let memoire = null; // { cle, demande, filtres, langue, parente, changement, issue, gardee, echec } — ce qui est PARTI, jamais le formulaire
 let vol = null;     // { cle, controller, promesse }
@@ -103,6 +106,8 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
   const versionParente = idParente ? ctx?.versionsById?.get(idParente) : null;
   const ficheParente = versionParente ? ctx?.recipesById?.get(versionParente.recipe_id) : null;
   const parente = versionParente && ficheParente && estCreationIA(versionParente) ? { ...versionParente, title: ficheParente.original_title } : null;
+  if (ficheParente && !recetteActive(ficheParente)) return mentionCycleRecette(ficheParente);
+  const contexteRecette = await capturerRecette(r, parente ? ficheParente : { id: 'nouvelle-recette' }, { ctx, creation: !parente });
   const fournisseur = providerFrom(ctx?.settings, { session: await sessionAssistant(ctx) }); // la passerelle (R-T3-1) : la session décide
   const connecter = () => demarrerConnexion(ctx?.sync?.auth);
   // P7.2 (C-14, P29) : décidée une fois par instance ; jamais un appel derrière une garde.
@@ -152,7 +157,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     if (vol) { dire(t('Une création est déjà en cours : annule-la d’abord.')); partout(); return; }
     const d = demandeCourante();
     if (!d.cle) { render(); return; }
-    const parti = { cle: d.cle, demande: d.demande, filtres: d.filtres, langue: d.langue, parente, changement: d.changement };
+    const parti = { cle: d.cle, demande: d.demande, filtres: d.filtres, langue: d.langue, parente, changement: d.changement, contexteRecette };
     ouvert = false;
     // F2 / C-10 : l'adresse porte ce qui part — les seuls champs de la liste blanche C-16 — pour qu'une reconstruction retrouve la clé.
     remplacer('/recipes/creer' + buildQuery({ q: d.demande, diets: d.filtres.diets.join(','), type: d.filtres.type || '', portions: d.filtres.servings, max: d.filtres.maxMinutes || '', adapter: parente?.id || '', changement: d.changement || '' }));
@@ -160,7 +165,12 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     if (!enLigneIci()) { resoudre(parti, ISSUE_HORS_LIGNE); partout(); return; } // C-14 : dit avant tout appel
     const controller = new AbortController();
     const promesse = Promise.resolve()
-      .then(async () => creer({ demande: d.demande, filtres: d.filtres, langue: d.langue, session: await sessionAssistant(ctx), parente, changement: d.changement }, { enLigne: enLigneIci, signal: controller.signal }))
+      .then(async () => {
+        const session = await sessionAssistant(ctx);
+        if (parente) await r.saveBatch({}, { recettes: [contexteRecette] });
+        if (contexteRecette.contexteValide && !contexteRecette.contexteValide()) throw Error('compte_change');
+        return creer({ demande: d.demande, filtres: d.filtres, langue: d.langue, session, parente, changement: d.changement }, { enLigne: enLigneIci, signal: controller.signal });
+      })
       .catch(() => ISSUE_INTERNE)
       .then((issue) => {
         if (vol?.promesse !== promesse) return; // abandonnée ou remplacée : muette
@@ -187,7 +197,10 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     m.gardee = gardee;
     for (const v of vues) for (const b of v.root.querySelectorAll('[data-role="garder-ia"], [data-role="recommencer-ia"]')) b.disabled = true;
     try {
-      await r.saveBatch(fab.recipe ? { recipes: [fab.recipe], recipe_versions: [fab.version] } : { recipe_versions: [fab.version] });
+      await r.saveBatch(fab.recipe ? { recipes: [fab.recipe], recipe_versions: [fab.version] } : { recipe_versions: [fab.version] }, {
+        recettes: [{ ...m.contexteRecette, recipe_id: fab.version.recipe_id }],
+        ...(fab.recipe ? { conditions: { recipes: [{ key: fab.recipe.id, absente: true }] } } : {}),
+      });
     } catch (e) {
       if (m.gardee === gardee) m.gardee = null;
       logError('creer_ia.garder', { error: e });

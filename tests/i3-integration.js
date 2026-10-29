@@ -52,7 +52,7 @@ export async function runI3IntegrationTests({ eq, ok }) {
   };
   const seed = async (repo, servings = 4) => {
     const f = await fixture(servings);
-    await repo.saveBatch({ recipes: [f.recipe], recipe_versions: [f.source, f.version] });
+    await repo.saveBatch({ recipes: [f.recipe], recipe_versions: [f.source, f.version] }, { conditions: { recipes: [{ key: f.recipe.id, absente: true }] } });
     return f;
   };
   const attendre = async fn => { for (let n = 0; n < 100; n++) { if (await fn()) return; await new Promise(r => setTimeout(r, 10)); } throw Error('comportement non observé'); };
@@ -146,6 +146,7 @@ export async function runI3IntegrationTests({ eq, ok }) {
     const ctx = await getData(true);
     const version = { ...f.version, provenance: { ...f.version.provenance, thermomix_invalide: true } };
     ctx.docs = [{ recipe: f.recipe, version }];
+    ctx.docsActifs = ctx.docs;
     let telechargements = 0; const erreurs = [];
     const erreur = e => { erreurs.push(e.message || String(e.reason)); e.preventDefault(); };
     window.addEventListener('error', erreur); window.addEventListener('unhandledrejection', erreur);

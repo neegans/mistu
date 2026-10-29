@@ -468,7 +468,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
 
   // Index : ajouter des entrées directement depuis la fiche du livre — sous le Sommaire, dont c'est la saisie à la main (lot I1 : « Titre — 116–19 »,
   // les recettes déjà dans le livre ne sont pas recréées ; la fiche se redessine par le bus).
-  gauche.append(el('details', null, el('summary', { class: 'btn' }, t('Ajouter des entrées d’index à la main')), saisieIndexManuelle(edition, { repo, toast, apres: () => refresh() })));
+  gauche.append(el('details', null, el('summary', { class: 'btn' }, t('Ajouter des entrées d’index à la main')), saisieIndexManuelle(edition, { repo, ctx, toast, apres: () => refresh() })));
 
   // Pages et documents (plain, en bas) : les pages qui ne sont pas d'index, et les documents non-photo (spec § 4.3). T4-R1 : la section ne paraît que s'il y a
   // l'un ou l'autre — un livre dont on n'a photographié que la table des matières (ses pages sont dans le Sommaire) n'a pas, en bas, une section vide.

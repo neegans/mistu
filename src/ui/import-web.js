@@ -21,6 +21,10 @@ import { DOCUMENT_ID, BATTEMENT_MS, prendreVol, libererVol, volTenu, volEnCours 
 import { candidatPhotoWeb, pointeurValide } from '../domain/photo-web.js';
 import { assertVocabulaire, originePhotoAdmise } from '../domain/vocabulaire.js';
 import { ligneAnnoncePhotoWeb, rapatrierPhotoWeb } from './photo-plat.js';
+import { capturerRecette } from './recette-garde.js';
+import { recetteActive } from '../domain/cycle-recette.js';
+import { memoireCycleImport, revoirLectureImport } from '../domain/contexte-import.js';
+import { mentionCycleRecette } from './corbeille.js';
 
 const horloge = () => new Date().toISOString();
 const estRefus = (e) => e instanceof TransitionRefusee;
@@ -76,6 +80,10 @@ export async function lancerLecture(importId, { ctx, repo = repoModule, fetch: f
     if (!session) { liberer(); return refus('non_connecte'); }
     const signet = await repo.get('recipes', ligne.recipe_id);
     if (!signet) { liberer(); return refus('inconnu'); } // ronde 1 : la fiche a été effacée entre-temps (tombale reçue) — elle n'existe plus, rien n'est « interdit »
+    if (!recetteActive(signet)) return refus('transition');
+    const contexte = await capturerRecette(repo, ctx?.recipesById?.get(signet.id) || signet, { ctx });
+    const recettesHistoriques = contexte ? [{...contexte,historique:true}] : [];
+    tenue.recettes = recettesHistoriques;
     const lien = lienSignet(signet.source_url);
     if (!lien.ok || !lien.href.startsWith('https:')) { liberer(); return refus('interdit'); } // B-20 : rien ne part, zéro réseau
     const depart = maintenant();
@@ -87,10 +95,10 @@ export async function lancerLecture(importId, { ctx, repo = repoModule, fetch: f
     // (BATTEMENT_MORT_MS, 90 s, sur le battement_at du départ) et la dirait interrompue pendant un vol vivant ; réattribuée, elle relève pour lui de
     // VOL_MORT_MS (10 min depuis le départ synchronisé, bien au-delà du délai client de 135 s ; repo.marquerInterrompus).
     const moi = moiDe(repo);
-    const patchDepart = { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, resultat: null, reponse_brute: null, model: null, duree_ms: null, ...(moi ? { device_id: moi } : {}) };
+    const patchDepart = { ...memoireCycleImport(contexte), status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, resultat: null, reponse_brute: null, model: null, duree_ms: null, ...(moi ? { device_id: moi } : {}) };
     const patch = cle === null ? patchDepart : (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', importId, c.status); return patchDepart; };
     try {
-      await repo.transitionner('imports', importId, { attendus: relire ? ['a_lancer', 'echec', 'a_verifier'] : ['a_lancer', 'echec'], patch });
+      await repo.transitionner('imports', importId, { attendus: relire ? ['a_lancer', 'echec', 'a_verifier'] : ['a_lancer', 'echec'], patch, recettes: [contexte] });
     } catch (e) {
       liberer();
       if (estRefus(e)) return { issue: 'refuse', raison: 'transition', statut: e.statut }; // un autre onglet a tranché entre-temps (I-10)
@@ -103,8 +111,8 @@ export async function lancerLecture(importId, { ctx, repo = repoModule, fetch: f
     battement = setInterval(() => { repo.battre(importId, maintenant()).catch(() => {}); }, battementMs);
     const fetchReel = fetchInjecte ?? globalThis.fetch;
     const fetchCompte = async (url, options) => {
-      try { await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: (c) => ({ appels: (Number.isInteger(c.appels) ? c.appels : 0) + 1 }) }); }
-      catch (e) { if (!estRefus(e)) logError('import_web.appels', { error: e, id: importId }); }
+      try { await repo.transitionner('imports', importId, { recettes:recettesHistoriques, attendus: ['en_cours'], patch: (c) => ({ appels: (Number.isInteger(c.appels) ? c.appels : 0) + 1 }) }); }
+      catch (e) { if (['compte_change','contexte_change','cycle_invalide','source_absente'].includes(e?.code)) throw e; if (!estRefus(e)) logError('import_web.appels', { error: e, id: importId }); }
       return fetchReel(url, options); // fonction LIBRE (jamais objet.fetch : Illegal invocation)
     };
     const t0 = Date.now();
@@ -113,21 +121,21 @@ export async function lancerLecture(importId, { ctx, repo = repoModule, fetch: f
     if (r.etat !== 'lue') {
       const raison = RAISONS_ECHEC.includes(r.raison) ? r.raison : 'interne';
       const patch = { status: 'echec', erreur: { raison, extra: r.extra ?? {} }, document_id_vol: null, duree_ms, ...(GARDE_BRUTE.includes(raison) && typeof r.reponseBrute === 'string' ? { reponse_brute: r.reponseBrute } : {}), ...(typeof r.modele === 'string' ? { model: r.modele } : {}) };
-      try { await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch }); }
+      try { await repo.transitionner('imports', importId, { recettes:recettesHistoriques, attendus: ['en_cours'], patch }); }
       catch (err) { if (!estRefus(err)) logError('import_web.echec', { error: err, id: importId }); } // déjà echec(annule) : la première écriture gagne
       return { issue: 'echec', raison };
     }
     try {
-      await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'a_verifier', resultat: r.resultat, reponse_brute: r.reponseBrute, model: r.modele ?? null, duree_ms, document_id_vol: null, erreur: null } });
+      await repo.transitionner('imports', importId, { recettes:recettesHistoriques, attendus: ['en_cours'], patch: { status: 'a_verifier', resultat: r.resultat, reponse_brute: r.reponseBrute, model: r.modele ?? null, duree_ms, document_id_vol: null, erreur: null } });
     } catch (e) {
       if (estRefus(e)) {
         // Réponse arrivée après « Annuler » (ou un interrompu) : echec → a_verifier n'existe pas ; la réponse brute seule est gardée, rien d'autre.
-        try { await repo.transitionner('imports', importId, { attendus: ['echec'], patch: { reponse_brute: r.reponseBrute } }); }
+        try { await repo.transitionner('imports', importId, { recettes:recettesHistoriques, attendus: ['echec'], patch: { reponse_brute: r.reponseBrute } }); }
         catch (err) { if (!estRefus(err)) logError('import_web.tardive', { error: err, id: importId }); }
         return { issue: 'echec', raison: 'annule' };
       }
       // Écriture impossible après une réponse (I-B7) : echec(incertain) ; si elle échoue aussi, la ligne reste en_cours (interrompu au démarrage).
-      try { await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'echec', erreur: { raison: 'incertain', extra: {} }, document_id_vol: null, duree_ms } }); }
+      try { await repo.transitionner('imports', importId, { recettes:recettesHistoriques, attendus: ['en_cours'], patch: { status: 'echec', erreur: { raison: 'incertain', extra: {} }, document_id_vol: null, duree_ms } }); }
       catch (err) { logError('import_web.incertain', { error: err, id: importId }); return { issue: 'echec', raison: 'incertain', ecrit: false }; }
       return { issue: 'echec', raison: 'incertain' };
     }
@@ -144,7 +152,7 @@ export async function annulerLecture(importId) {
   const tenue = volTenu(importId);
   if (!tenue) return false;
   tenue.controller.abort();
-  try { await tenue.repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'echec', erreur: { raison: 'annule', extra: {} }, document_id_vol: null } }); }
+  try { await tenue.repo.transitionner('imports', importId, { recettes:tenue.recettes || [], attendus: ['en_cours'], patch: { status: 'echec', erreur: { raison: 'annule', extra: {} }, document_id_vol: null } }); }
   catch (e) { if (!estRefus(e)) logError('import_web.annuler', { error: e, id: importId }); }
   notifier();
   return true;
@@ -164,12 +172,14 @@ export async function demarrerLectureWeb({ recipe = null, adresse = null, titre 
   if (!lien.href.startsWith('https:')) return refus('interdit');
   let ligne = null; let recipeId = null;
   if (recipe) {
+    if (!recetteActive(recipe)) return refus('transition');
+    const contexte = await capturerRecette(repo, recipe, { ctx });
     recipeId = recipe.id;
     ligne = ouvertDe(ctx?.imports, recipe.id, repo);
     if (!ligne) {
-      const neuve = fabriquerImportWeb({ id: repo.newId('imp'), signet: recipe, deviceId: repo.deviceId() });
+      const neuve = { ...fabriquerImportWeb({ id: repo.newId('imp'), signet: recipe, deviceId: repo.deviceId() }), ...memoireCycleImport(contexte) };
       try {
-        await repo.saveBatch({ imports: [neuve] }, { conditions: { imports: [{ key: neuve.id, absente: true }, { index: 'recipe_id', valeur: recipe.id, exclus: IMPORTS_OUVERTS }] } });
+        await repo.saveBatch({ imports: [neuve] }, { recettes: [contexte], conditions: { imports: [{ key: neuve.id, absente: true }, { index: 'recipe_id', valeur: recipe.id, exclus: IMPORTS_OUVERTS }] } });
         ligne = neuve;
       } catch (e) {
         if (!estRefus(e)) throw e;
@@ -243,7 +253,7 @@ async function marquerIllisible(repo, ligne) {
   try { await repo.transitionner('imports', ligne.id, { attendus: ['a_verifier'], patch }); }
   catch (e) { if (!estRefus(e)) logError('import_web.revalidation', { error: e, id: ligne.id }); }
 }
-export async function enregistrerLecture(importId, { repo = repoModule, remplacer = null, maintenant = horloge, choisir = chooseDialog, cle = null, ctx = null, fetch: fetchInjecte = undefined, enLigne = () => enLigneFlag, photoAnnoncee = null } = {}) {
+export async function enregistrerLecture(importId, { repo = repoModule, remplacer = null, maintenant = horloge, choisir = chooseDialog, cle = null, ctx = null, fetch: fetchInjecte = undefined, enLigne = () => enLigneFlag, photoAnnoncee = null, contexte = null } = {}) {
   const ligne = await repo.get('imports', importId);
   if (!ligne || ligne.kind !== 'web' || ligne.status !== 'a_verifier') return refus('statut');
   if (cle !== null && cleLecture(ligne) !== cle) return refus('lecture'); // la lecture affichée a été remplacée : rien d'écrit, l'écran se redessine
@@ -256,6 +266,9 @@ export async function enregistrerLecture(importId, { repo = repoModule, remplace
   const fondement = (f) => JSON.stringify([f.signet.current_version_id ?? null, versionHumaine(f.versions)]);
   let fiche = await relire();
   if (!fiche) return refus('inconnu');
+  if (!recetteActive(fiche.signet)) return refus('transition');
+  const garde = contexte || await capturerRecette(repo, fiche.signet, { ctx });
+  if ((ligne.expected_cycle_id ?? null) !== garde.expected_cycle_id || (Object.hasOwn(ligne, 'owner_id') && ligne.owner_id !== garde.owner_id)) return refus('transition');
   let choix = remplacer;
   while (choix === null && versionHumaine(fiche.versions)) {
     // Défaut « non » (comme I-5 du lot A) : la première option est « Ajouter sans remplacer ».
@@ -282,15 +295,16 @@ export async function enregistrerLecture(importId, { repo = repoModule, remplace
     return r;
   };
   try {
-    await repo.transitionner('imports', ligne.id, { attendus: ['a_verifier'], patch: cloture, puts: { recipe_versions: [fab.version] }, ...(choix === false ? {} : { conditions: { recipes: [{ key: fiche.signet.id, fusion: ficheDans }] } }) });
+    await repo.transitionner('imports', ligne.id, { attendus: ['a_verifier'], patch: cloture, puts: { recipe_versions: [fab.version] }, recettes: [garde], ...(choix === false ? {} : { conditions: { recipes: [{ key: fiche.signet.id, fusion: ficheDans }] } }) });
   } catch (e) {
+    if (e?.name === 'ErreurCycleRecette') return refus(e.code === 'source_absente' ? 'inconnu' : 'transition');
     if (estRefus(e)) return refus(e.store === 'recipes' ? 'inconnu' : 'transition'); // enregistré, ignoré ou relu par un autre onglet juste avant : rien d'écrit
     throw e;
   }
   // Lot F (§ 4.3 point 2, I-F4, R-F-2) : APRÈS la transaction réussie, et seulement alors — « Ajouter sans remplacer » compris —, la descente de
   // l'image annoncée part SANS être attendue ; elle ne lève jamais et n'écrit rien sur la version ni sur le journal. La fiche s'ouvre sur
   // « Récupération de la photo du plat… ».
-  if (fab.photoWeb) rapatrierPhotoWeb(fiche.signet.id, { candidat: fab.photoWeb, ctx, repo, fetch: fetchInjecte, enLigne });
+  if (fab.photoWeb) rapatrierPhotoWeb(fiche.signet.id, { candidat: fab.photoWeb, ctx, repo, fetch: fetchInjecte, enLigne, contexte: garde });
   return { issue: 'enregistre', recipeId: fiche.signet.id, versionId: fab.version.id };
 }
 
@@ -305,6 +319,8 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
   const etat = { ligne: null, lu: null, versions: [], occupe: false, photoAnnoncee: null };
   root.etatRouteWeb = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, vol: !!etat.ligne && volEnCours()?.importId === etat.ligne.id, remplacement: etat.versions.length ? versionHumaine(etat.versions) : null });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
+  if (!recetteActive(recipe)) return mentionCycleRecette(recipe);
+  const contexte = await capturerRecette(repo, recipe, { ctx });
   const lien = lienSignet(recipe.source_url);
   const https = lien.ok && lien.href.startsWith('https:');
   const connecter = () => demarrerConnexion(ctx?.sync?.auth);
@@ -369,7 +385,7 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
     // le redessin la montre.
     const cle = cleLecture(L);
     const patch = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { status: 'ignore', finished_at: maintenant() }; };
-    try { await repo.transitionner('imports', L.id, { attendus: ['a_lancer', 'a_verifier', 'echec'], patch }); }
+    try { await repo.transitionner('imports', L.id, { recettes:[{...contexte,historique:true}], attendus: ['a_lancer', 'a_verifier', 'echec'], patch }); }
     catch (e) { if (!estRefus(e)) logError('import_web.ignorer', { error: e, id: L.id }); await redessiner(); return; }
     if (root.isConnected) navigate(`/recipes/${encodeURIComponent(recipe.id)}`);
   }
@@ -377,7 +393,7 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
     const L = etat.ligne; if (!L || etat.occupe) return;
     etat.occupe = true; dessiner();
     let r = null;
-    try { r = await enregistrerLecture(L.id, { repo, maintenant, choisir, cle: cleLecture(L), ctx, fetch: fetchInjecte, enLigne, photoAnnoncee: etat.photoAnnoncee }); }
+    try { r = await enregistrerLecture(L.id, { repo, maintenant, choisir, cle: cleLecture(L), ctx, fetch: fetchInjecte, enLigne, photoAnnoncee: etat.photoAnnoncee, contexte }); }
     catch (e) { logError('import_web.enregistrer', { error: e, id: L.id }); toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); }
     finally { etat.occupe = false; }
     if (r?.issue === 'enregistre' && root.isConnected) { toast(t('Recette enregistrée')); navigate(`/recipes/${encodeURIComponent(recipe.id)}?v=${encodeURIComponent(r.versionId)}`); return; }
@@ -466,7 +482,15 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
   function dessiner() {
     const L = etat.ligne; const statut = L?.status ?? null;
     const illisible = statut === 'a_verifier' && !etat.lu; // voir charger() : jamais rendue comme une lecture, jamais une levée
-    const zone = statut === 'en_cours' ? zoneVol(L) : illisible ? zoneEchec(L, { raison: 'illisible', extra: {} }) : statut === 'a_verifier' ? zoneLue(etat.lu) : statut === 'echec' ? zoneEchec(L) : zoneLancer();
+    const autreCycle = statut === 'a_verifier' && (L.expected_cycle_id ?? null) !== contexte.expected_cycle_id;
+    const zone = autreCycle ? el('div', { class: 'card stack', role: 'status' },
+      el('p', null, t('Cette lecture a commencé avant le retrait. Relis-la avant de la conserver.')),
+      el('button', { class: 'btn', disabled: etat.occupe, onClick: async () => {
+        etat.occupe = true; dessiner();
+        try { await revoirLectureImport(L.id, { repo, contexte }); }
+        catch { toast(t('La recette a changé. Rouvre-la pour continuer.')); }
+        finally { etat.occupe = false; await redessiner(); }
+      } }, t('Revoir cette lecture'))) : statut === 'en_cours' ? zoneVol(L) : illisible ? zoneEchec(L, { raison: 'illisible', extra: {} }) : statut === 'a_verifier' ? zoneLue(etat.lu) : statut === 'echec' ? zoneEchec(L) : zoneLancer();
     root.replaceChildren(enTete(), zone);
     veiller();
   }

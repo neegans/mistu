@@ -1,3 +1,8 @@
+import { runL1CorbeilleDomaineTests } from './l1-corbeille-domaine.js';
+import { runL1CorbeilleArchiveTests } from './l1-corbeille-archive.js';
+import { runL1CorbeilleSyncTests } from './l1-corbeille-sync.js';
+import { runL1CorbeilleUiTests } from './l1-corbeille-ui.js';
+import { runL1CorbeilleMutationsTests } from './l1-corbeille-mutations.js';
 import { runL0TraductionsTests } from './l0-traductions.js';
 import { runL0CuisineTests } from './l0-cuisine.js';
 import { runL0RepasCoursesTests } from './l0-repas-courses.js';
@@ -299,11 +304,17 @@ for (const suite of [runL0TraductionsTests, runL0CuisineTests, runL0RepasCourses
   catch (error) { ok(false, `Suite L0 interrompue : ${error?.message || String(error)}`); }
 }
 
+// L1 : corbeille, écritures tardives, archives et synchronisation.
+for (const suite of [runL1CorbeilleDomaineTests, runL1CorbeilleArchiveTests, runL1CorbeilleSyncTests, runL1CorbeilleUiTests, runL1CorbeilleMutationsTests]) {
+  try { await suite({ eq, ok, close }); }
+  catch (error) { ok(false, `Suite L1 interrompue : ${error?.message || String(error)}`); }
+}
+
 // --- Compte total épinglé (F2). Une assertion qui DISPARAÎT — un bloc supprimé, une boucle qui ne tourne plus, une
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 7396,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 7655,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

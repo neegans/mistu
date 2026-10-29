@@ -4,6 +4,7 @@ import { ligneImportNeuve, IMPORTS_OUVERTS } from './import-cible.js';
 import { appelerAssistant, echecDomaine, sessionValide } from './passerelle.js';
 import { construireContexteReperes, validerReponseReperes, fabriquerPropositionReperes, fabriquerCorrectionsReperes, fusionnerReperes } from './reperes.js';
 import { TransitionRefusee } from '../core/db.js';
+import { contexteRecetteImport, memoireCycleImport, verifierCycleImport, verifierCaptureImport } from './contexte-import.js';
 const TERMINES = ['enregistre', 'ignore'], MODIFIABLES = ['a_lancer', 'a_verifier', 'echec'];
 const CHAMPS = ['description_fr', 'difficulte', 'temps'];
 const SAISIE = ['description_fr', 'niveau', 'raison', 'total_min', 'total_max', 'actif_min', 'actif_max', 'cuisson_min', 'cuisson_max', 'attentes_min', 'attentes_max', 'attentes_incluses', 'complet', 'explication'];
@@ -15,7 +16,7 @@ export class ErreurReperesParcours extends Error {
   constructor(code, extra = {}) { super(code); this.name = 'ErreurReperesParcours'; this.code = code; this.raison = code; this.extra = extra; }
 }
 const erreur = code => new ErreurReperesParcours(code);
-const convertir = e => e instanceof ErreurReperesParcours ? e : erreur(typeof e?.raison === 'string' && /^[a-z0-9_:-]{1,100}$/u.test(e.raison) ? e.raison : 'illisible');
+const convertir = e => e instanceof ErreurReperesParcours ? e : erreur(typeof (e?.raison || e?.code) === 'string' && /^[a-z0-9_:-]{1,100}$/u.test(e.raison || e.code) ? (e.raison || e.code) : 'illisible');
 const device = repo => { const id = repo.deviceId(); if (!propreId(id)) throw erreur('appareil_absent'); return id; };
 const proprietaire = (row, repo) => { if (row.device_id !== device(repo)) throw erreur('autre_appareil'); };
 const verifierLigne = row => { if (!row || row.kind !== 'reperes' || !propreId(row.id) || !propreId(row.recipe_id) || !(row.source_version_id === null || propreId(row.source_version_id))) throw erreur('brouillon_absent'); return row; };
@@ -46,12 +47,12 @@ function saisieValide(saisie) {
   if (!objet(saisie) || Object.keys(saisie).some(k => !SAISIE.includes(k) || typeof saisie[k] !== 'string' || saisie[k].length > 1200 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(saisie[k]))) throw erreur('requete');
   return { ...saisie };
 }
-export async function ouvrirReperes({ recipeId, versionId = null } = {}, { repo } = {}) {
+export async function ouvrirReperes({ recipeId, versionId = null, contexteRecette = null } = {}, { repo } = {}) {
   if (!propreId(recipeId) || !(versionId === null || propreId(versionId))) throw erreur('source_absente');
   const refs = { recipe_id: recipeId, source_version_id: versionId }, { recipe, source } = await lireSources(refs, repo);
   const row = { ...ligneImportNeuve({ id: repo.newId('imp'), kind: 'reperes', recipe_id: recipeId, device_id: device(repo) }), ...refs,
-    contexte: construire(recipe, source), phase: 'saisie', revision_brouillon: 0, tentative_id: null, saisie: {}, champs_modifies: [], copie_de: null };
-  try { await repo.saveBatch({ imports: [row] }, { conditions: { ...conditionsSource(row, recipe, source), imports: [{ key: row.id, absente: true }, { index: 'recipe_id', valeur: recipeId, exclus: IMPORTS_OUVERTS }] } }); }
+    ...memoireCycleImport(contexteRecette || await contexteRecetteImport(repo, recipe)), contexte: construire(recipe, source), phase: 'saisie', revision_brouillon: 0, tentative_id: null, saisie: {}, champs_modifies: [], copie_de: null };
+  try { await repo.saveBatch({ imports: [row] }, { recettes: [contexteRecette || await contexteRecetteImport(repo, recipe, row)], conditions: { ...conditionsSource(row, recipe, source), imports: [{ key: row.id, absente: true }, { index: 'recipe_id', valeur: recipeId, exclus: IMPORTS_OUVERTS }] } }); }
   catch (e) { if (e instanceof TransitionRefusee && e.store === 'imports') throw erreur('import_ouvert'); throw convertir(e); }
   return lireBrouillonReperes(row.id, { repo });
 }
@@ -60,19 +61,20 @@ export async function lireBrouillonReperes(importId, { repo } = {}) {
   // Une source périmée reste lisible pour récupérer les saisies ; aucune écriture ne l'accepte.
   let resultat = null, validation_erreur = null;
   try { verifierContexte(row, recipe, source); if (row.resultat != null) resultat = validerReponseReperes(row.resultat, row.contexte); } catch (e) { validation_erreur = convertir(e).code; }
+  try { verifierCycleImport(recipe, row); } catch (e) { validation_erreur ||= convertir(e).code; }
   let saisie = {}; try { saisie = saisieValide(row.saisie ?? {}); } catch { validation_erreur ||= 'requete'; }
   const champs_modifies = Array.isArray(row.champs_modifies) && row.champs_modifies.length <= 3 && row.champs_modifies.every(k => CHAMPS.includes(k)) ? [...new Set(row.champs_modifies)] : [];
   if (!Array.isArray(row.champs_modifies) || row.champs_modifies.length !== champs_modifies.length) validation_erreur ||= 'requete';
   return { ...row, saisie, champs_modifies, resultat, validation_erreur, lecture_seule: row.device_id !== device(repo) };
 }
-export async function modifierBrouillonReperes(importId, patch = {}, { repo } = {}) {
-  const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo);
+export async function modifierBrouillonReperes(importId, patch = {}, { repo, contexteRecette = null } = {}) {
+  const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo); verifierCaptureImport(row, contexteRecette);
   if (!MODIFIABLES.includes(row.status)) throw erreur(row.status === 'en_cours' ? 'appel_en_cours' : 'brouillon_ferme');
   if (!objet(patch) || Object.keys(patch).some(k => !['saisie', 'champs_modifies'].includes(k))) throw erreur('requete');
   const saisie = saisieValide({ ...row.saisie, ...patch.saisie }), champs = patch.champs_modifies ?? row.champs_modifies ?? [];
   if (!Array.isArray(champs) || champs.some(k => !CHAMPS.includes(k))) throw erreur('requete');
   const { recipe, source } = await lireSources(row, repo); verifierContexte(row, recipe, source);
-  await repo.transitionner('imports', importId, { attendus: MODIFIABLES, patch: current => { memeBrouillon(current, row, repo); return { saisie, champs_modifies: [...new Set(champs)], revision_brouillon: revision(row) + 1 }; }, conditions: conditionsSource(row, recipe, source) });
+  await repo.transitionner('imports', importId, { attendus: MODIFIABLES, patch: current => { memeBrouillon(current, row, repo); return { saisie, champs_modifies: [...new Set(champs)], revision_brouillon: revision(row) + 1 }; }, recettes: [await contexteRecetteImport(repo, recipe, row, {contexte:contexteRecette})], conditions: conditionsSource(row, recipe, source) });
   return lireBrouillonReperes(importId, { repo });
 }
 export function construireDemandeReperes(contexte) {
@@ -107,7 +109,7 @@ async function ecrireEchec(row, code, extra, session, deps) {
   } }); } catch (e) { if (e instanceof TransitionRefusee || ['brouillon_modifie', 'tentative_perimee'].includes(e.code)) return deps.repo.get('imports', row.id); throw e; }
 }
 export async function proposerReperes({ importId, session, documentId } = {}, deps = {}) {
-  const { repo } = deps; let row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo);
+  const { repo, contexteRecette = null } = deps; let row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo); verifierCaptureImport(row, contexteRecette);
   if (row.status === 'en_cours') throw erreur('appel_en_cours');
   if (!MODIFIABLES.includes(row.status)) throw erreur('brouillon_ferme');
   const { recipe, source } = await lireSources(row, repo), contexte = verifierContexte(row, recipe, source);
@@ -121,7 +123,7 @@ export async function proposerReperes({ importId, session, documentId } = {}, de
     memeBrouillon(current, row, repo); if (!compteIdentique(session, deps)) throw erreur('compte_change');
     return { status: 'en_cours', phase: 'appel', tentative_id: repo.newId('rep'), appels: (Number.isSafeInteger(current.appels) ? current.appels : 0) + 1,
       document_id_vol: documentId, started_at: quand, battement_at: quand, finished_at: null, resultat: null, reponse_brute: null, erreur: null, model: null };
-  }, conditions: conditionsSource(row, recipe, source) }); } catch (e) { if (e instanceof TransitionRefusee) throw erreur('appel_en_cours'); throw convertir(e); }
+  }, recettes: [await contexteRecetteImport(repo, recipe, row, {contexte:contexteRecette})], conditions: conditionsSource(row, recipe, source) }); } catch (e) { if (e instanceof TransitionRefusee) throw erreur('appel_en_cours'); throw convertir(e); }
   try {
     const r = await appelerAssistant('creation', { max_tokens: 4000, system: demande.system, messages: [{ role: 'user', content: demande.user }] }, { fetch: deps.fetch, session, config: deps.config, signal: deps.signal, tentativeMs: deps.tentativeMs ?? 135000, corpsMax: 128 * 1024 });
     if (!compteIdentique(session, deps)) throw erreur('compte_change');
@@ -134,7 +136,7 @@ export async function proposerReperes({ importId, session, documentId } = {}, de
     try { return await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: current => {
       verifierTentative(current, row, repo, session, deps); if (deps.signal?.aborted) throw erreur('annule');
       return { status: 'a_verifier', phase: 'relecture', resultat, model, reponse_brute: null, erreur: null, document_id_vol: null, finished_at: (deps.maintenant ?? maintenantParDefaut)() };
-    }, conditions: conditionsSource(row, recipe, source) }); }
+    }, recettes: [await contexteRecetteImport(repo, recipe, row, { historique: true, contexte:contexteRecette })], conditions: conditionsSource(row, recipe, source) }); }
     catch (e) { if (e instanceof TransitionRefusee || ['brouillon_modifie', 'tentative_perimee'].includes(e.code)) return repo.get('imports', importId); throw e; }
   } catch (e) { if (e.code === 'compte_change') throw e; return ecrireEchec(row, convertir(e).code, {}, session, deps); }
 }
@@ -158,9 +160,9 @@ export async function copierBrouillonReperes(importId, deps = {}) {
   await deps.repo.transitionner('imports', copie.id, { attendus: ['a_lancer'], patch: { copie_de: row.id, saisie: row.saisie, champs_modifies: row.champs_modifies ?? [] } });
   return lireBrouillonReperes(copie.id, deps);
 }
-export async function garderReperes({ importId, relu, corrections = {} } = {}, { repo, maintenant = maintenantParDefaut } = {}) {
+export async function garderReperes({ importId, relu, corrections = {}, contexteRecette = null } = {}, { repo, maintenant = maintenantParDefaut } = {}) {
   if (relu !== true) throw erreur('relecture_requise');
-  const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo);
+  const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo); verifierCaptureImport(row, contexteRecette);
   const deja = async current => {
     if (current?.status !== 'enregistre' || current.phase !== 'termine' || current.conservation !== 'proposition') return null;
     memeBrouillon(current, row, repo);
@@ -181,17 +183,18 @@ export async function garderReperes({ importId, relu, corrections = {} } = {}, {
   try { await repo.transitionner('imports', importId, { attendus: ['a_verifier'], patch: current => {
     memeBrouillon(current, row, repo); if (current.tentative_id !== row.tentative_id || canon(current.resultat) !== canon(row.resultat)) throw erreur('tentative_perimee');
     return { status: 'enregistre', phase: 'termine', conservation: 'proposition', finished_at: quand };
-  }, conditions }); } catch (e) { if (e instanceof TransitionRefusee) { const current = await deja(await repo.get('imports', importId)); if (current) return current; } throw convertir(e); }
+  }, recettes: [await contexteRecetteImport(repo, recipe, row, {contexte:contexteRecette})], conditions }); } catch (e) { if (e instanceof TransitionRefusee) { const current = await deja(await repo.get('imports', importId)); if (current) return current; } throw convertir(e); }
   return repo.get('recipes', row.recipe_id);
 }
-export async function enregistrerCorrectionsReperes({ recipeId, versionId = null, corrections, contexte: attendu, importId = null } = {}, { repo, maintenant = maintenantParDefaut } = {}) {
+export async function enregistrerCorrectionsReperes({ recipeId, versionId = null, corrections, contexte: attendu, importId = null, contexteRecette = null } = {}, { repo, maintenant = maintenantParDefaut } = {}) {
   const refs = { recipe_id: recipeId, source_version_id: versionId }, { recipe, source } = await lireSources(refs, repo);
   let row = null; if (importId) { row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo); if (row.recipe_id !== recipeId || row.source_version_id !== versionId) throw erreur('source_absente'); if (!MODIFIABLES.includes(row.status)) throw erreur('brouillon_ferme'); }
-  const contexte = construire(recipe, source), garde = row || { ...refs, contexte: attendu || contexte };
+  const contexte = construire(recipe, source), garde = row || { ...refs, ...memoireCycleImport(contexteRecette || await contexteRecetteImport(repo, recipe)), contexte: attendu || contexte };
+  const contexteMutation = contexteRecette || await contexteRecetteImport(repo, recipe, garde);
   verifierContexte(garde, recipe, source);
   let manuelles; const quand = maintenant(); try { manuelles = fabriquerCorrectionsReperes(corrections, contexte, quand); } catch (e) { throw convertir(e); }
   const conditions = conditionsSource(garde, recipe, source, current => ({ ...current, reperes: fusionnerReperes(current.reperes, { corrections: manuelles }) }));
-  if (row) await repo.transitionner('imports', importId, { attendus: MODIFIABLES, patch: current => { memeBrouillon(current, row, repo); return { status: 'enregistre', phase: 'termine', conservation: 'manuelle', finished_at: quand }; }, conditions });
-  else await repo.saveBatch({}, { conditions });
+  if (row) await repo.transitionner('imports', importId, { attendus: MODIFIABLES, patch: current => { memeBrouillon(current, row, repo); return { status: 'enregistre', phase: 'termine', conservation: 'manuelle', finished_at: quand }; }, recettes: [contexteMutation], conditions });
+  else await repo.saveBatch({}, { recettes: [contexteMutation], conditions });
   return repo.get('recipes', recipeId);
 }

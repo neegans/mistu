@@ -42,7 +42,7 @@ export async function runImportCibleTests({ eq, ok }) {
 
   // --- Schéma (spec § 3.1, § 3.7, K-9)
   const S = await import('../src/model/schema.js');
-  eq(S.DB_VERSION, 4, 'schéma : DB_VERSION 4');
+  eq(S.DB_VERSION, 5, 'schéma : DB_VERSION 4');
   const noms = Object.keys(S.STORES);
   eq([noms[noms.indexOf('assistant_config') + 1], noms[noms.indexOf('imports') + 1]], ['imports', 'settings'], 'schéma : imports juste après assistant_config, avant settings');
   eq(S.STORES.imports, { keyPath: 'id', indexes: [['edition_id', 'edition_id'], ['recipe_id', 'recipe_id'], ['status', 'status']] }, 'schéma : clé et index d’imports');
@@ -144,7 +144,7 @@ export async function runImportCibleTests({ eq, ok }) {
     let off = on('change', (p) => notifs.push(p));
     let rendu;
     try {
-      rendu = await repo.transitionner('imports', 'imp_t', { attendus: ['a_lancer'], patch: { status: 'en_cours', erreur: { raison: 'x\u0007' } }, puts: { recipes: [{ id: 'rc_t', availability: 'available', original_title: 'T\u0007' }] } });
+      rendu = await repo.transitionner('imports', 'imp_t', { attendus: ['a_lancer'], patch: { status: 'en_cours', erreur: { raison: 'x\u0007' } }, puts: { recipes: [{ id: 'rc_t', availability: 'available', original_title: 'T\u0007' }] }, conditions: { recipes: [{ key: 'rc_t', absente: true }] } });
     } finally { off(); }
     const apres = await db.get('imports', 'imp_t');
     const rc = await db.get('recipes', 'rc_t');
@@ -154,7 +154,7 @@ export async function runImportCibleTests({ eq, ok }) {
     eq(notifs, [{ store: 'imports', id: 'imp_t' }, { store: 'recipes' }], 'transitionner : un change pour la fiche conditionnée, puis un par magasin des puts (comme saveBatch) \u2014 ronde 1');
     eq((await db.getAll('outbox')).map((e) => [e.store, e.id, e.op]).sort(), [['imports', 'imp_t', 'put'], ['recipes', 'rc_t', 'put']], 'transitionner : la capture voit la fiche conditionnée ET les puts (même transaction)');
     let refus = null;
-    try { await repo.transitionner('imports', 'imp_t', { attendus: ['a_lancer'], patch: { status: 'echec' }, puts: { recipes: [{ id: 'rc_non', availability: 'available' }] } }); } catch (e) { refus = e; }
+    try { await repo.transitionner('imports', 'imp_t', { attendus: ['a_lancer'], patch: { status: 'echec' }, puts: { recipes: [{ id: 'rc_non', availability: 'available' }] }, conditions: { recipes: [{ key: 'rc_non', absente: true }] } }); } catch (e) { refus = e; }
     eq([refus?.name, refus?.store, refus?.key, refus?.statut, (await db.get('imports', 'imp_t')).status, await db.get('recipes', 'rc_non'), (await db.getAll('outbox')).length], ['TransitionRefusee', 'imports', 'imp_t', 'en_cours', 'en_cours', undefined, 2], 'transitionner : condition fausse → TransitionRefusee nommée, rien d’écrit, rien en file');
     // Ronde 1 \u2014 K-6 par repo.transitionner : la garde noDelete tient aussi derrière l'enveloppe du repo.
     let garde = null;
@@ -315,7 +315,7 @@ export async function runImportCibleTests({ eq, ok }) {
     eq([V.assertVocabulaire({ photo_origin: null }, 'recipes'), V.assertVocabulaire({}, 'recipes'), V.assertVocabulaire({ photo_origin: 'web' }, 'recipes')], [true, true, true], 'null et absent tolérés ; web admis');
     eq(['photo', 'image', 'web', 'appareil', '', 7, null, '__proto__', 'constructor'].map((v) => V.originePhotoAdmise(v)), ['photo', 'image', 'web', null, null, null, null, null, null], 'originePhotoAdmise : les trois origines → elles-mêmes ; tout le reste → null');
     eq(S.RELATIONS.filter(([, champ]) => /photo_(sha256|source_url)/.test(champ)), [], 'RELATIONS : aucune relation sur photo_sha256 ni photo_source_url (pointeurs souples)');
-    eq(S.DB_VERSION, 4, 'DB_VERSION 4 inchangée');
+    eq(S.DB_VERSION, 5, 'DB_VERSION 5 (index corbeille)');
     const reference = { id: 'rc_f', edition_id: 'ed1', original_title: 'Tarte', original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: null, source_page_ids: [], current_version_id: null, tags: [], cuisines: [], favorite: false, ingredient_ids: [] };
     const resultat = { title: 'Tarte', servings: 4, prep_minutes: null, cook_minutes: null, ingredients: [{ source_text: '1 pomme', uncertain: false }], steps: [{ text: 'Cuire.' }], printed_page: null, sub_recipes: [], uncertain_fields: [], notes: null, incomplete: false, missing_page: false };
     const opts = { reference, versions: [], pages: [], pageIds: [], edition: null, importId: 'imp_f', modele: 'claude-x', maintenant: '2026-10-19T00:00:00.000Z' };
@@ -2231,7 +2231,7 @@ export async function runImportCibleTests({ eq, ok }) {
           [2, [[pagesX[0], 'lue', 12, [['Tarte fine', '12']]], [pagesX[1], 'lue', null, []]], ['Reprendre', 'Ignorer'], { issue: 'a_verifier' }],
           'Vol d’index (lancerExtraction ; lot I1, format 2) : le journal reçoit une lecture PAR PAGE (page_id = la page lue, dans l’ordre), jamais une recette ; « Reprendre » mène ensuite au panneau');
         // Une référence reçue pendant que la page est montée (synchro) : la ligne prend son titre et ses gestes au redessin, sans navigation.
-        await repo.save('recipes', fiche('rc6z'));
+        await repo.save('recipes', fiche('rc6z'), { conditions: { recipes: [{ key: 'rc6z', absente: true }] } });
         await attendre(() => titre('imp_absente') === 'Tarte rc6z', 'référence reçue');
         eq(boutons(ligne('imp_absente')), ['Reprendre', 'Ignorer'], 'Ajouter (ronde 1) : une référence reçue pendant que la page est montée → titre et gestes au redessin (les recettes sont relues, pas figées au rendu)');
         // La passe finie AVANT le montage de la page (le bus ignore une page pas encore montée) : le redessin suit la passe elle-même.
@@ -2699,6 +2699,7 @@ export async function runImportCibleTests({ eq, ok }) {
     const preparer = async (kind = 'index') => {
       const r = await repo.ajouterPages([await imageDe('a.jpg', '#a33'), await imageDe('b.jpg', '#3a3')], { import: { id: repo.newId('imp'), kind, ...(kind === 'recette' ? { recipe_id: repo.newId('rc') } : {}) } });
       const l = await db.get('imports', r.importId);
+      if (kind === 'recette') await db.put('recipes', { id: l.recipe_id, original_title: 'Recette à extraire', availability: 'reference_only' }, { origin: 'device' });
       await db.put('imports', { ...l, page_ids: [r.pages[0].id, 'pg_absente', r.pages[1].id] });
       return { id: r.importId, pages: r.pages.map((p) => p.id) };
     };

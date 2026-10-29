@@ -61,6 +61,11 @@ export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = 
     const k = cleDe(r);
     const seqs = seqsParCle.get(k) || [];
     if (!seqs.length) continue; // R-L3-8
+    if(r.reason==='cycle') {
+      for(const seq of seqs) quarantaine.push({seq,motif:'cycle'});
+      conflits.push({id:k,store:r.store,record_id:r.id,local:fichesLocales[k]??null,server:r.server||null,at,kind:'cycle'});
+      continue;
+    }
     if (r.reason === 'conflit') {
       for (const s of seqs) retirer.push(s);
       if (r.store === 'assistant_config' || r.store === 'files') {
@@ -91,7 +96,9 @@ export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = 
         }
         continue;
       }
-      conflits.push({ id: k, store: r.store, record_id: r.id, local: fichesLocales[k] ?? null, server: r.server || null, at, kind: 'donnees' });
+      const element=lot.elements.find(e=>cleDe(e)===k);
+      const recipe_contexts=element?.recipe_contexts||(Object.hasOwn(element||{},'expected_cycle_id')?[{recipe_id:element.recipe_id,expected_cycle_id:element.expected_cycle_id}]:null);
+      conflits.push({ id: k, store: r.store, record_id: r.id, local: fichesLocales[k] ?? null, server: r.server || null, at, kind: 'donnees',...(recipe_contexts?{recipe_contexts}:{}) });
     } else {
       // updated_at | cle | forme | taille (R9) : permanent, la fiche est nommée, la personne décide (Réglages).
       const seq = Math.max(...seqs);

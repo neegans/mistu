@@ -8,6 +8,7 @@ import { syncNow } from '../sync/clock.js';
 import { remoteValide, HASH_FICHIER } from '../sync/tables.js';
 import { estOriginalIci } from '../sync/fichiers.js';
 import { isAllowed } from '../sync/mime.js';
+import { lireCycleRecette, memeCycleRecette } from './cycle-recette.js';
 
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf', 'application/epub+zip': 'epub', 'text/plain': 'txt' };
 export const extFor = (mime) => MIME_EXT[mime] || 'bin';
@@ -67,6 +68,7 @@ function validateRows(stores) {
         continue;
       }
       if (ids.has(row[key])) errors.push(name + ' : clé répétée ' + row[key]);
+      if (name === 'recipes' && lireCycleRecette(row).etat === 'invalide') errors.push('Cycle de recette invalide : ' + row[key]);
       ids.add(row[key]);
     }
   }
@@ -229,6 +231,7 @@ export async function inspectArchive(arrayBuffer) {
       if (rows.length !== df.count || !validCount(manifest.counts[df.store]) || rows.length !== manifest.counts[df.store]) errors.push('Décompte différent : ' + df.store);
     }
     errors.push(...validateRows(payload.stores));
+    if (manifest.format_version === 1 && (payload.stores.recipes || []).some(r => lireCycleRecette(r).id !== null)) errors.push('Une archive de format 1 ne porte pas de cycle de corbeille.');
     const hashes = new Set();
     let missing = 0, hashMismatch = 0;
     for (const f of manifest.files) {
@@ -277,6 +280,7 @@ function requireInspection(inspection, mode) {
   // Ronde 1 (#25) : un `missing` présent qui n'est pas un tableau est refusé ici, nommé — pas plus loin, par une clé invalide.
   if (!inspection?.ok || !record(payload) || !Array.isArray(payload.files) || (payload.missing != null && !Array.isArray(payload.missing))) throw new Error('Archive non validée');
   const errors = validateRows(payload.stores);
+  if (inspection.manifest?.format_version === 1 && (payload.stores.recipes || []).some(r => lireCycleRecette(r).id !== null)) errors.push('Une archive de format 1 ne porte pas de cycle de corbeille.');
   const hashes = new Set();
   // Mêmes règles qu'à l'inspection (fichierValide, manquanteValide), plus les octets : F-8, (bytes_size ?? size) === bytes.length.
   for (const file of payload.files) {
@@ -385,8 +389,43 @@ function ligneRestauree(entree, existing, d, blob, { fusion, maintenant }) {
 // La décision R-G-6 se prend DANS la transaction, sur la ligne RELUE (ronde 1, #9 : la condition `fusion` de db.mutate, comme putFile et la
 // réception — un original importé depuis n'est jamais remplacé ; ecrireConditionne lit avant de vider, donc le remplacement aussi) ; le blob
 // d'une entrée qui n'est pas gardée y est construit (synchrone). Effacement et écritures sont validés ou annulés ensemble.
+export class ErreurCycleArchive extends Error {
+  constructor(recettes) { super('La sauvegarde et cet appareil ont des cycles de recette différents.'); this.name = 'ErreurCycleArchive'; this.code = 'cycles_divergents'; this.recettes = recettes; }
+}
+const LIENS_RECETTES_ARCHIVE = ['recipe_versions', 'recipe_translations', 'substitutions', 'dish_recipe_links'];
+function parentsDeplaces(stores, locales) {
+  const versions = new Map((locales.recipe_versions || []).map(v => [v.id, v.recipe_id])), ids = new Set();
+  for (const store of LIENS_RECETTES_ARCHIVE) {
+    const champ = store === 'recipe_versions' || store === 'dish_recipe_links' ? 'recipe_id' : 'recipe_version_id';
+    const entrees = new Map((stores[store] || []).map(row => [row.id, row]));
+    for (const row of locales[store] || []) {
+      const entree = entrees.get(row.id);
+      if (entree && entree[champ] !== row[champ]) ids.add(champ === 'recipe_id' ? row.recipe_id : versions.get(row.recipe_version_id));
+    }
+  }
+  return ids;
+}
+function conflitsCycles(courantes, entrantes, mode, deplaces = new Set()) {
+  const parId = new Map(entrantes.map(r => [r.id, r]));
+  return courantes.filter(r => {
+    const entree = parId.get(r.id);
+    const protege = lireCycleRecette(r).id !== null || lireCycleRecette(r).etat !== 'active';
+    return (protege && deplaces.has(r.id)) || (entree ? !memeCycleRecette(r, entree) : mode === 'replace' && protege);
+  }).map(r => ({ id: r.id, titre: typeof r.original_title === 'string' ? r.original_title : r.id, cycle: lireCycleRecette(r) }));
+}
+export async function conflitsCyclesArchive(db, inspection, { mode = 'merge' } = {}) {
+  requireInspection(inspection, mode);
+  const noms = ['recipes', ...LIENS_RECETTES_ARCHIVE];
+  const lignes = await Promise.all(noms.map(store => db.getAll(store)));
+  const locales = Object.fromEntries(noms.map((store, i) => [store, lignes[i]]));
+  return conflitsCycles(locales.recipes, inspection.payload.stores.recipes || [], mode, parentsDeplaces(inspection.payload.stores, locales));
+}
+
 export async function applyArchive(db, inspection, { mode = 'merge', horodater = null } = {}) {
   requireInspection(inspection, mode);
+  const owner = (await db.get('sync_state', 'user_id'))?.value ?? null;
+  const divergences = await conflitsCyclesArchive(db, inspection, { mode });
+  if (divergences.length) throw new ErreurCycleArchive(divergences);
   const batch = structuredClone(restoredStores(inspection));
   normaliserFiches(batch, { horodater });
   const fusion = mode === 'merge';
@@ -409,7 +448,14 @@ export async function applyArchive(db, inspection, { mode = 'merge', horodater =
   ];
   // K-7 (spec assistant-par-le-compte) : la configuration de l'assistant n'est pas de la bibliothèque — une
   // restauration en remplacement ne la vide pas (elle n'est dans aucune archive : il n'y aurait rien pour la réécrire).
-  await db.mutate({ puts: batch, origin: 'local', conditions: conditions.length ? { files: conditions } : null,
+  const locales = {};
+  const liensGardes = Object.fromEntries(LIENS_RECETTES_ARCHIVE.map(store => [store, [{ toutes: true, verifier: rows => { locales[store] = rows; } }]]));
+  const cycleGarde = { toutes: true, verifier: courantes => { const ecarts = conflitsCycles(courantes, batch.recipes || [], mode, parentsDeplaces(batch, locales)); if (ecarts.length) throw new ErreurCycleArchive(ecarts); } };
+  const versions = new Map((batch.recipe_versions || []).map(v => [v.id, v.recipe_id]));
+  const contextes = (batch.recipes || []).map(r => ({ recipe_id: r.id, expected_cycle_id: lireCycleRecette(r).id, owner_id: owner, archive_import: true,
+    records: Object.entries(batch).flatMap(([store, rows]) => rows.filter(row => store === 'recipes' ? row.id === r.id : row.recipe_id === r.id || (row.recipe_version_id && versions.get(row.recipe_version_id) === r.id)).map(row => ({ store, id: row[STORES[store].keyPath] }))) }));
+  await db.mutate({ puts: batch, origin: 'local', archive_import: true, recettes: contextes, conditions: { ...(conditions.length ? { files: conditions } : {}), ...liensGardes, recipes: [cycleGarde],
+    sync_state: [{ key: 'user_id', fusion: courant => { if ((courant?.value ?? null) !== owner) throw new Error('Le compte a changé pendant la restauration.'); return null; } }] },
     clearStores: mode === 'replace' ? Object.keys(STORES).filter((s) => !SYNC_INTERNAL_STORES.includes(s) && s !== 'assistant_config') : [] });
   return { ...Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length])), files: conditions.length, originauxConserves };
 }

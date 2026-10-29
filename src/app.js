@@ -1,3 +1,4 @@
+import { renderCorbeille } from './ui/corbeille.js';
 // Point d'entrée : initialise la base, la langue de l'interface, la coquille et le routeur ; enregistre le service worker.
 import { el, replace, toast } from './core/dom.js';
 import { route, setNotFound, start, parseHash, refresh } from './core/router.js';
@@ -77,6 +78,7 @@ function registerRoutes() {
   route('/', renderHome);
   route('/search', renderSearch);
   route('/library', renderLibrary);
+  route('/corbeille', renderCorbeille);
   route('/books/:id', renderBook);
   route('/dishes/:id', renderDish);
   route('/recipes/new', (p, q, c) => renderRecipeEdit({ id: null }, q, c));

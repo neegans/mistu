@@ -5,6 +5,9 @@ import { sha256Hex } from '../core/hash.js';
 import { preparerPhotoLocale, messageErreurImage } from '../core/image.js';
 import * as depot from '../model/repo.js';
 import { photoPrincipale, photosDeCuisson } from '../domain/cuisine-personnelle.js';
+import { capturerRecette } from './recette-garde.js';
+import { lireCycleRecette } from '../domain/cycle-recette.js';
+import { mentionCycleRecette } from './corbeille.js';
 import { contexteFichiers } from './components.js';
 import { modifierPhotosCuisson } from './cuisson.js';
 import { poserPhotoPlat, retirerPhotoPlat, figurePhotoPlat } from './photo-plat.js';
@@ -18,23 +21,24 @@ async function lire(repo, id) {
   return { recipe, photo: photoPrincipale(recipe, history) };
 }
 
-export async function modifierPhotoAffichee(recipeId, attendu, { file = null, retirer = false, origin = 'image' } = {}, { repo = depot } = {}) {
+export async function modifierPhotoAffichee(recipeId, attendu, { file = null, retirer = false, origin = 'image' } = {}, { repo = depot, contexte = null } = {}) {
   try {
     const vue = await lire(repo, recipeId);
     if (!vue.recipe) return refuser('fiche_absente');
     if (!identique(vue.photo, attendu)) return refuser('fiche_changee');
     if (!retirer && !file) return refuser('image');
+    contexte ??= await capturerRecette(repo, vue.recipe, {historique:!!attendu?.personnelle});
     if (!attendu?.personnelle) {
       const source = { sha256: attendu?.sha256 || null, candidat: vue.recipe.photo_source_url };
-      return retirer ? retirerPhotoPlat(recipeId, { repo, attendu: source }) : poserPhotoPlat(recipeId, file, { repo, origin, attendu: source });
+      return retirer ? retirerPhotoPlat(recipeId, { repo, attendu: source, contexte }) : poserPhotoPlat(recipeId, file, { repo, origin, attendu: source, contexte });
     }
-    let sha = null;
+    let sha = null; const fichiers = [];
     if (!retirer) {
       let jpeg;
       try { jpeg = await preparerPhotoLocale(file); }
       catch (e) { return { ...refuser('image'), code: e?.code || 'indecodable' }; }
       sha = await sha256Hex(jpeg);
-      await repo.putFile(sha, jpeg, { mime: 'image/jpeg' });
+      fichiers.push({sha256:sha,blob:jpeg,meta:{mime:'image/jpeg'}});
     }
     // Le helper I2 fusionne la ligne courante. La garde ne dépend ni de sa note ni de ses autres photos.
     const garde = { ...repo, saveBatch: (batch, options) => {
@@ -49,9 +53,9 @@ export async function modifierPhotoAffichee(recipeId, attendu, { file = null, re
         } })) };
       return repo.saveBatch(batch, { ...options, conditions });
     } };
-    await modifierPhotosCuisson(attendu.cuisson_id, { ajouter: sha ? [sha] : [], retirer: [attendu.sha256] }, { repo: garde });
+    await modifierPhotosCuisson(attendu.cuisson_id, { ajouter: sha ? [sha] : [], retirer: [attendu.sha256] }, { repo: garde, recettes:[contexte], fichiers });
     return { issue: 'ok', ...(sha ? { sha256: sha } : {}) };
-  } catch (e) { return e?.code === 'fiche_changee' ? refuser('fiche_changee') : { issue: 'echec', raison: 'ecriture' }; }
+  } catch (e) { return ['fiche_changee','cycle_change','cycle_invalide','recette_retiree','compte_change','historique_seul'].includes(e?.code) ? refuser('fiche_changee') : { issue: 'echec', raison: 'ecriture' }; }
 }
 
 export async function renderPhotoGestion({ id }, query = {}, ctx = {}, deps = {}) {
@@ -75,28 +79,29 @@ export async function renderPhotoGestion({ id }, query = {}, ctx = {}, deps = {}
     const suivante = await lire(repo, id); if (fermee) return;
     vue = suivante;
     if (!vue.recipe) { libererImages(); contenu.replaceChildren(el('p', null, t('Recette introuvable.'))); return; }
-    const photo = vue.photo;
+    const photo = vue.photo, cycle = lireCycleRecette(vue.recipe);
+    const editable = cycle.etat === 'active' || (cycle.etat === 'retiree' && photo?.personnelle);
     const titre = vue.recipe.original_title || vue.recipe.display_title || t('Recette');
     const figure = photo ? await figurePhotoPlat({ ...vue.recipe, photo_sha256: photo.sha256 }, { repo, ctxF, personnelle: photo.personnelle }) : null;
     const source = photo?.personnelle && vue.recipe.photo_sha256 ? await figurePhotoPlat(vue.recipe, { repo, ctxF }) : null;
     if (fermee) { figure?.dispose(); source?.dispose(); return; }
     libererImages();
-    contenu.replaceChildren(...[el('h2', { class: 'recipe-title' }, titre),
+    contenu.replaceChildren(...[mentionCycleRecette(vue.recipe), el('h2', { class: 'recipe-title' }, titre),
       photo ? el('p', { class: 'muted' }, photo.personnelle ? t('Ma photo du plat') : t('Image de la recette')) : null,
       figure || el('div', { class: 'photo-absente' }, t('Ajouter une photo')),
-      el('div', { class: 'row photo-gestion-actions' },
+      editable ? el('div', { class: 'row photo-gestion-actions' },
         el('button', { type: 'button', class: 'btn primary', onClick: () => choisir(false) }, t('Choisir une photo')),
         el('button', { type: 'button', class: 'btn', onClick: () => choisir(true) }, t('Prendre une photo')),
-        photo ? el('button', { type: 'button', class: 'btn danger', onClick: retirer }, t('Retirer la photo')) : null),
+        photo ? el('button', { type: 'button', class: 'btn danger', onClick: retirer }, t('Retirer la photo')) : null) : null,
       source ? el('details', { class: 'card' }, el('summary', null, t('Image de la recette')), source) : null,
       el('a', { href: retour, class: 'btn' }, t('Terminer'))].filter(Boolean));
     verrouiller(occupe);
   }
-  async function appliquer(attendu, changement) {
+  async function appliquer(attendu, changement, contexte) {
     if (fermee || occupe || !root.isConnected) return;
     verrouiller(true); message.hidden = true;
     try {
-      const r = await modifierPhotoAffichee(id, attendu, changement, { repo });
+      const r = await modifierPhotoAffichee(id, attendu, changement, { repo, contexte });
       await dessiner();
       if (r.issue !== 'ok') signaler(erreur(r));
       else if (changement.retirer) signaler(vue.photo ? t('Photo retirée. Une autre photo est maintenant affichée.') : t('Photo retirée.'));
@@ -109,15 +114,16 @@ export async function renderPhotoGestion({ id }, query = {}, ctx = {}, deps = {}
     // Le sélecteur peut rester sans résolution après Annuler ; il ne verrouille donc pas l’écran.
     travail = (async () => {
       try {
+        const contexte = await capturerRecette(repo, vue.recipe, {ctx, historique:!!attendu?.personnelle});
         const files = await pickFiles({ accept: 'image/*', multiple: false, ...(capture ? { capture: 'environment' } : {}) });
-        if (files?.length && !fermee) await appliquer(attendu, { file: files[0], origin: capture ? 'photo' : 'image' });
+        if (files?.length && !fermee) await appliquer(attendu, { file: files[0], origin: capture ? 'photo' : 'image' }, contexte);
       } catch { signaler(t('La photo du plat n’a pas pu être changée. Réessaie.')); }
     })();
   }
   function retirer() {
     if (fermee || occupe || !vue.photo) return;
     const attendu = vue.photo;
-    travail = (async () => { if (await confirmDialog(t('Retirer la photo affichée ?'), { okLabel: t('Retirer la photo'), danger: true })) await appliquer(attendu, { retirer: true }); })();
+    travail = (async () => { try { const contexte = await capturerRecette(repo, vue.recipe, {ctx, historique:!!attendu?.personnelle}); if (await confirmDialog(t('Retirer la photo affichée ?'), { okLabel: t('Retirer la photo'), danger: true })) await appliquer(attendu, { retirer: true }, contexte); } catch { signaler(t('La photo du plat n’a pas pu être changée. Réessaie.')); } })();
   }
   root.dispose = () => { if (fermee) return; fermee = true; libererImages(); };
   root.attendreEcritures = () => travail;

@@ -1,3 +1,6 @@
+import { lireCycleRecette } from '../domain/cycle-recette.js';
+import { capturerRecette } from './recette-garde.js';
+import { mentionCycleRecette } from './corbeille.js';
 // Mode cuisine (spec §17, §33) : ingrédients et étape visibles ensemble, grandes commandes, progression conservée,
 // minuterie confiée au système avec états honnêtes, note après cuisson (« À refaire ? »).
 import { el, toast, confirmDialog } from '../core/dom.js';
@@ -30,6 +33,12 @@ export async function renderCook(params, query, ctx, deps = {}) {
     return version && recipe ? { version, recipe, servings, scaled: scaleVersion(version, servings), convention_id: ctx.conventionFor(recipe) } : null;
   }).filter(Boolean);
   if (!items.length) return el('div', { class: 'card' }, t('Version introuvable.'));
+  if (items.some(it => lireCycleRecette(it.recipe).etat === 'invalide')) {
+    return el('div', {class:'stack'}, ...items.map(it => el('section', {class:'card stack'},
+      el('h2', null, it.recipe.display_title || it.recipe.original_title), mentionCycleRecette(it.recipe), noteEnCuisine(it.recipe),
+      el('ol', null, ...(it.version.steps || []).map(s => el('li', null, s.text))),
+      el('a', {class:'btn', href:`#/recipes/${encodeURIComponent(it.recipe.id)}?v=${encodeURIComponent(it.version.id)}`}, t('Fiche')))));
+  }
   const blocageThermomix = panneauGardeThermomix(items);
   if (blocageThermomix) return blocageThermomix;
   let activeIdx = Math.max(0, items.findIndex((it) => it.version.id === (session.active_version_id || session.selected_version_ids[0])));
@@ -38,6 +47,8 @@ export async function renderCook(params, query, ctx, deps = {}) {
   progress.done_step_ids = progress.done_step_ids || [];
   progress.by_version = progress.by_version || {};
   const root = el('div', { class: 'mode-cuisine' });
+  root.append(...items.map(it=>mentionCycleRecette(it.recipe)));
+  const contextesHistoriques = await Promise.all([...new Map(items.map(it => [it.recipe.id,it.recipe])).values()].map(r => capturerRecette(depot, r, {ctx, historique:true})));
   const ctxF = await contexteFichiers(ctx);
   const photos = photosPersonnellesParRecette(ctx.cook_history);
   const fichiers = await (deps.repo ?? repo).getFiles(empreintesPhotos(items.map(it => it.recipe), photos));
@@ -92,7 +103,7 @@ export async function renderCook(params, query, ctx, deps = {}) {
   function modifierSession(it, fusion) {
     const refuser = () => { throw new Error('Recette de la session devenue indisponible'); };
     const contexteValide = () => { if (getSyncGeneration() !== generation) refuser(); };
-    return depot.saveBatch({}, { conditions: {
+    return depot.saveBatch({}, { recettes: contextesHistoriques, conditions: {
       recipes: [{ key: it.recipe.id, fusion: courant => { contexteValide(); if (!courant) refuser(); return null; } }],
       recipe_versions: [{ key: it.version.id, fusion: courant => { contexteValide(); if (!courant || courant.recipe_id !== it.recipe.id) refuser(); return null; } }],
       cook_sessions: [{ key: session.id, fusion: courant => {
@@ -214,10 +225,10 @@ export async function renderCook(params, query, ctx, deps = {}) {
     const mirror = el('div', { class: 'mirror', style: { display: 'none' } });
     let mirrorTimer = null, handoffTimeout = null, carteActive = true;
     nettoyages.push(() => { carteActive = false; clearInterval(mirrorTimer); clearTimeout(handoffTimeout); });
-    const setState = async (state) => { if (!launch) return; launch.handoff_state = state; launch = await depot.save('timer_launches', launch); stateEl.textContent = `${label('timer_state', state)} — ${TIMER_STATE_HELP[state]}`; };
+    const setState = async (state) => { if (!launch) return; launch.handoff_state = state; launch = await depot.save('timer_launches', launch, {recettes:contextesHistoriques}); stateEl.textContent = `${label('timer_state', state)} — ${TIMER_STATE_HELP[state]}`; };
     const request = async (channel, seconds) => {
       launch = createTimerLaunch({ cook_session_id: session.id, recipe_version_id: it.version.id, step_id: step.id, device_id: deviceId(), duration_seconds: seconds, channel });
-      launch = await depot.save('timer_launches', launch);
+      launch = await depot.save('timer_launches', launch, {recettes:contextesHistoriques});
       if (!carteActive) return;
       if (channel === 'shortcut') {
         await setState('opening');
@@ -267,7 +278,7 @@ export async function renderCook(params, query, ctx, deps = {}) {
     bilanOuvert = true;
     const it = items[activeIdx];
     try {
-      const ok = await ouvrirCuissons(items, { ...deps, repo: deps.repo ?? repo, session });
+      const ok = await ouvrirCuissons(items, { ...deps, repo: deps.repo ?? repo, session, recettes: contextesHistoriques });
       if (ok) (deps.navigate ?? navigate)(session.meal_id ? `/meals/${encodeURIComponent(session.meal_id)}` : `/recipes/${encodeURIComponent(it.recipe.id)}`);
     } finally { bilanOuvert = false; }
   }

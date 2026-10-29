@@ -1,3 +1,7 @@
+import { capturerRecette } from './recette-garde.js';
+import { recetteActive } from '../domain/cycle-recette.js';
+import { mentionCycleRecette, TEXTE_NOUVEL_USAGE_REFUSE } from './corbeille.js';
+import { documentsActifs } from './state.js';
 // Composer un repas (spec §26) : éléments avec rôle, portions et verrouillage ; remplacer cible un élément précis ;
 // résumé du temps et des conflits d'appareils ; contraintes du repas distinctes du profil ; duo réussi mémorisé.
 import { el, toast, chooseDialog, promptDialog, confirmDialog, formatDate } from '../core/dom.js';
@@ -40,7 +44,11 @@ async function newMeal(ctx, { navigateTo = true } = {}) {
 }
 
 // Ajouter une recette à un repas (jamais un remplacement implicite). doc = { recipe, version }.
-export async function addToMealFlow(ctx, doc, { role = 'accompagnement', mainDoc = null, mealId = null } = {}) {
+export async function addToMealFlow(ctx, doc, { role = 'accompagnement', mainDoc = null, mealId = null, repo: R = repo, toast: dire = toast, navigate: nav = navigate } = {}) {
+  try {
+  const cibles = [...new Map([doc, mainDoc].filter(Boolean).map(d => [d.recipe.id,d.recipe])).values()];
+  if (cibles.some(r => !recetteActive(r))) { dire(t(TEXTE_NOUVEL_USAGE_REFUSE)); return; }
+  const recettes = await Promise.all(cibles.map(r => capturerRecette(R, r, {ctx})));
   let choice = mealId && ctx.meals.some((m) => m.id === mealId) ? mealId : null;
   if (!choice) {
     const options = [...ctx.meals].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0, 12).map((m) => ({ value: m.id, label: m.title, hint: (m.items || []).length + ' ' + t('élément(s)') }));
@@ -48,7 +56,8 @@ export async function addToMealFlow(ctx, doc, { role = 'accompagnement', mainDoc
     choice = await chooseDialog(t('Ajouter « {r} » à quel repas ?', { r: doc.recipe.display_title || doc.recipe.original_title }), options);
   }
   if (!choice) return;
-  let meal = choice === '__new__' ? await newMeal(ctx, { navigateTo: false }) : ctx.meals.find((m) => m.id === choice);
+  let meal = choice === '__new__' ? null : structuredClone(ctx.meals.find((m) => m.id === choice));
+  if (choice === '__new__') { const titre = await promptDialog(t('Nom du repas'), {value:t('Repas')}); if (titre === null) return; meal={id:R.newId('meal'),title:titre.trim()||t('Repas'),servings:2,serve_at:null,constraints_snapshot:{diets:[]},items:[]}; }
   if (!meal) return;
   meal.items = meal.items || [];
   if (mainDoc && !meal.items.some((it) => it.recipe_id === mainDoc.recipe.id)) {
@@ -56,9 +65,13 @@ export async function addToMealFlow(ctx, doc, { role = 'accompagnement', mainDoc
   }
   if (meal.items.some((it) => it.recipe_version_id === doc.version?.id)) { toast(t('Déjà dans ce repas')); navigate(`/meals/${meal.id}`); return; }
   meal.items.push({ id: repo.newId('mi'), recipe_id: doc.recipe.id, recipe_version_id: doc.version?.id || null, role, servings: meal.servings, locked: false, position: meal.items.length + 1 });
-  await repo.save('meals', meal);
-  toast(t('Ajouté au repas'));
-  navigate(`/meals/${meal.id}`);
+  const idsActifs = new Set(recettes.map(c => c.recipe_id));
+  const anciennes = [...new Set((meal.items || []).map(it => it.recipe_id))].filter(id => !idsActifs.has(id));
+  recettes.push(...await Promise.all(anciennes.map(id => capturerRecette(R, ctx.recipesById.get(id), {ctx,historique:true}))));
+  await R.save('meals', meal, {recettes});
+  dire(t('Ajouté au repas'));
+  nav(`/meals/${meal.id}`);
+  } catch { dire(t(TEXTE_NOUVEL_USAGE_REFUSE)); }
 }
 
 export async function renderMeal(params, query, ctx, deps = {}) {
@@ -68,12 +81,15 @@ export async function renderMeal(params, query, ctx, deps = {}) {
   meal.items = meal.items || [];
   meal.constraints_snapshot = meal.constraints_snapshot || { diets: [] };
   const items = meal.items.map((it) => ({ ...it, recipe: ctx.recipesById.get(it.recipe_id), version: it.recipe_version_id ? ctx.versionsById.get(it.recipe_version_id) : null })).filter((it) => it.recipe);
+  const mentions = items.filter(it=>!recetteActive(it.recipe)).map(it=>mentionCycleRecette(it.recipe));
   const main = items.find((it) => it.role === 'plat_principal') || items[0];
   const root = el('div', null);
-  const save = async champs => {
+  const save = async (champs, recettes = []) => {
     const changements = Object.fromEntries(champs.map(champ => [champ, structuredClone(meal[champ])]));
     try {
-      await (deps.repo ?? repo).saveBatch({}, { conditions: { meals: [{ key: meal.id, fusion: courant => {
+      const actifs = new Set(recettes.map(c => c.recipe_id));
+      recettes = [...recettes, ...await contextesHistoriques(actifs)];
+      await (deps.repo ?? repo).saveBatch({}, { recettes, conditions: { meals: [{ key: meal.id, fusion: courant => {
         if (!courant) throw new TransitionRefusee('meals', meal.id, undefined);
         return { ...courant, ...changements };
       } }] } });
@@ -86,10 +102,11 @@ export async function renderMeal(params, query, ctx, deps = {}) {
   ] }));
   root.append(el('div', { class: 'card sage row' },
     field(t('Portions du repas'), el('input', { type: 'number', min: 1, value: meal.servings, onChange: async (e) => { meal.servings = Number(e.target.value) || 1; for (const it of meal.items) if (!it.servings_custom) it.servings = meal.servings; save(['servings', 'items']); } })),
-    champHeureRepas(meal, deps),
+    champHeureRepas(meal, {...deps, capturerHistorique:contextesHistoriques}),
     field(t('Contraintes de ce repas (invités inclus)'), el('div', { class: 'chips' }, ...DIET_TAGS.map((d) => el('span', { class: `chip clickable ${meal.constraints_snapshot.diets.includes(d) ? 'warn' : 'outline'}`, onClick: () => { const s = meal.constraints_snapshot.diets; meal.constraints_snapshot.diets = s.includes(d) ? s.filter((x) => x !== d) : [...s, d]; save(['constraints_snapshot']); } }, label('diet', d)))),
       t('Liées à ce repas seulement ; le profil personnel n’est pas modifié.'))));
 
+  root.append(...mentions);
   // Éléments
   const photosPersonnelles = photosPersonnellesParRecette(ctx.cook_history);
   const list = el('div', null);
@@ -144,50 +161,71 @@ export async function renderMeal(params, query, ctx, deps = {}) {
 
   async function replaceItem(it) {
     const type = it.recipe.type;
-    const candidates = ctx.docs.filter((d) => d.version && d.recipe.id !== it.recipe.id && (!type || d.recipe.type === type || !d.recipe.type)).sort((a, b) => (a.recipe.type === type ? -1 : 1) - (b.recipe.type === type ? -1 : 1));
+    const candidates = documentsActifs(ctx).filter((d) => d.version && d.recipe.id !== it.recipe.id && (!type || d.recipe.type === type || !d.recipe.type)).sort((a, b) => (a.recipe.type === type ? -1 : 1) - (b.recipe.type === type ? -1 : 1));
     if (!candidates.length) { toast(t('Aucune autre recette disponible')); return; }
+    try {
+    const contextes = new Map(await Promise.all(candidates.slice(0,200).map(async d => [d.recipe.id, await capturerRecette(deps.repo ?? repo, d.recipe, {ctx})])));
     const id = await chooseDialog(t('Remplacer « {r} » par :', { r: it.recipe.original_title }), candidates.slice(0, 200).map((d) => ({ value: d.recipe.id, label: d.recipe.display_title || d.recipe.original_title, hint: d.recipe.type ? label('recipe_type', d.recipe.type) : '' })));
     if (!id) return;
     const d = ctx.docsByRecipe.get(id);
     const x = meal.items.find((y) => y.id === it.id);
     x.recipe_id = d.recipe.id; x.recipe_version_id = d.version.id;
-    if (!(await save(['items']))) return;
+    if (!(await save(['items'], [contextes.get(id)]))) return;
     toast(t('Élément remplacé ; portions, courses et contraintes recalculées.'));
+    } catch { (deps.toast ?? toast)(t(TEXTE_NOUVEL_USAGE_REFUSE)); }
   }
   async function makeList() {
+    try {
+    const recettes = await contextesActifs();
     const list = { id: repo.newId('sl'), title: `${meal.title} — ${t('courses')}`, meal_id: meal.id, items: items.filter((it) => it.version).map((it) => ({ recipe_id: it.recipe.id, recipe_version_id: it.version.id, servings: it.servings || meal.servings, title: it.recipe.display_title || it.recipe.original_title })), checked: {} };
-    await repo.save('shopping_lists', list);
-    navigate(`/lists/${list.id}`);
+    await (deps.repo ?? repo).save('shopping_lists', list, {recettes});
+    (deps.navigate ?? navigate)(`/lists/${list.id}`);
+    } catch { (deps.toast ?? toast)(t(TEXTE_NOUVEL_USAGE_REFUSE)); }
+  }
+  async function contextesHistoriques(exclus = new Set()) {
+    const sources = new Map(items.filter(it => !exclus.has(it.recipe.id)).map(it => [it.recipe.id, it.recipe]));
+    return Promise.all([...sources.values()].map(r => capturerRecette(deps.repo ?? repo, r, {ctx, historique:true})));
+  }
+  async function contextesActifs() {
+    if (items.some(it => !recetteActive(it.recipe))) throw new Error('recette_retiree');
+    return Promise.all([...new Map(items.map(it => [it.recipe.id,it.recipe])).values()].map(r => capturerRecette(deps.repo ?? repo, r, {ctx})));
   }
   async function startCooking() {
     const R = deps.repo ?? repo;
     try {
+      const recettes = await contextesActifs();
       const actuelle = await R.get('meals', meal.id);
       if (!actuelle) return;
       const withV = (await Promise.all((actuelle.items || []).map(async it => ({ ...it, version: it.recipe_version_id ? await R.get('recipe_versions', it.recipe_version_id) : null })))).filter(it => it.version);
       if (!withV.length) return;
       if (withV.some(it => !gardeThermomix(it.version, portionsRepas(it, actuelle)).ok)) { (deps.toast ?? toast)(t(BLOCAGE_THERMOMIX)); return; }
       const session = { id: R.newId('cs'), recipe_id: withV[0].recipe_id, meal_id: meal.id, selected_version_ids: withV.map(it => it.version.id), servings_by_version: Object.fromEntries(withV.map(it => [it.version.id, portionsRepas(it, actuelle)])), servings: actuelle.servings, progress: { done_step_ids: [], by_version: {}, total_steps: withV.reduce((n, it) => n + (it.version.steps || []).length, 0) }, started_at: R.nowIso(), active_device_id: deviceId(), status: 'active', units: ctx.settings.units };
-      await enregistrerSessionCuisine(session, { repo: R });
+      await enregistrerSessionCuisine(session, { repo: R, recettes });
       (deps.navigate ?? navigate)(`/cook/${session.id}`);
-    } catch { (deps.toast ?? toast)(t(BLOCAGE_THERMOMIX)); }
+    } catch { (deps.toast ?? toast)(t(TEXTE_NOUVEL_USAGE_REFUSE)); }
   }
   async function feedback() {
+    try {
+    const recettes = await contextesHistoriques();
     const liked = await chooseDialog(t('Ce repas ?'), [{ value: 'yes', label: t('Excellent — à refaire') }, { value: 'no', label: t('Pas convaincant') }]);
     if (!liked) return;
     const comment = await promptDialog(t('Commentaire (facultatif)'), { multiline: true });
     const rows = [{ id: repo.newId('mf'), meal_id: meal.id, kind: 'meal', liked: liked === 'yes', comment: comment || '', recipe_ids: items.map((it) => it.recipe.id), version_ids: items.map((it) => it.recipe_version_id), created_at: repo.nowIso() }];
     if (liked === 'yes' && main) for (const it of items) if (it.id !== main.id) rows.push({ id: repo.newId('mf'), meal_id: meal.id, kind: 'pair', liked: true, comment: comment || '', recipe_ids: [main.recipe.id, it.recipe.id], version_ids: [main.recipe_version_id, it.recipe_version_id], created_at: repo.nowIso() });
-    await repo.saveBatch({ meal_feedback: rows });
+    await (deps.repo ?? repo).saveBatch({ meal_feedback: rows }, {recettes});
     toast(liked === 'yes' ? t('Duo mémorisé avec son contexte') : t('Retour enregistré'));
     refresh();
+    } catch { (deps.toast ?? toast)(t('La recette a changé. Recharge sa fiche avant de réessayer.')); }
   }
   async function redo() {
+    try {
+    const recettes = await contextesActifs();
     const copy = { ...structuredClone(meal), id: repo.newId('meal'), title: `${meal.title} (${t('refait')})`, serve_at: null, created_at: undefined, updated_at: undefined };
     copy.items = copy.items.map((it) => ({ ...it, id: repo.newId('mi') }));
-    await repo.save('meals', copy);
+    await (deps.repo ?? repo).save('meals', copy, {recettes});
     toast(t('Repas recopié avec ses versions exactes ; l’historique est conservé.'));
-    navigate(`/meals/${copy.id}`);
+    (deps.navigate ?? navigate)(`/meals/${copy.id}`);
+    } catch { (deps.toast ?? toast)(t(TEXTE_NOUVEL_USAGE_REFUSE)); }
   }
 }
 
@@ -244,7 +282,8 @@ function champHeureRepas(meal, deps) {
     enregistrement = true; enregistrer.disabled = true; saisie.disabled = true;
     for (const menu of choix.querySelectorAll('select')) menu.disabled = true;
     try {
-      await R.saveBatch({}, { conditions: { meals: [{ key: meal.id, fusion: courant => {
+      const recettes = deps.capturerHistorique ? await deps.capturerHistorique() : [];
+      await R.saveBatch({}, { recettes, conditions: { meals: [{ key: meal.id, fusion: courant => {
         if (!courant || (courant.serve_at ?? null) !== initial) throw new TransitionRefusee('meals', meal.id, courant?.status);
         return { ...courant, serve_at: instant };
       } }] } });

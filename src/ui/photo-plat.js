@@ -19,6 +19,7 @@ import { section, sessionAssistant, texteRefusAssistant, texteEchecAssistant, me
 import { photoPrincipale } from '../domain/cuisine-personnelle.js';
 import { provenancePhotoPageValide } from '../domain/photo-page.js';
 import { photoVisible } from './photos-visibles.js';
+import { capturerRecette } from './recette-garde.js';
 
 // Ronde 1 : UNE définition du pointeur valide (pointeurValide, photo-web.js) — la zone, le rapatriement et le domaine (candidatPhotoWeb) jugent le même.
 const pointeur = (f) => (pointeurValide(f) ? f.photo_sha256 : null);
@@ -151,32 +152,41 @@ export function ligneAnnoncePhotoWeb() {
 // { key, fusion } du lot G (src/core/db.js), par repo.saveBatch (fiche nettoyée, horodatée, capturée ; le motif de regroupement.js). Une écriture d'ailleurs
 // engagée depuis la dernière lecture du geste n'est jamais défaite. `champs(courante)` rend les champs à poser, ou null (refus : rien d'écrit). Seul ce
 // qui est écrit passe le vocabulaire : une fiche reçue d'une version plus récente garde ses autres champs tels quels (D-F19). → 'ecrite' | 'absente' | 'changee'.
-async function ecrireChamps(repo, recipeId, champs) {
+async function ecrireChamps(repo, recipeId, champs, { contexte = null, fichiers = [] } = {}) {
   let issue = 'ecrite';
-  await repo.saveBatch({}, { conditions: { recipes: [{ key: recipeId, fusion: (courante) => {
-    if (!courante) { issue = 'absente'; return null; }
+  const refuser = valeur => { issue = valeur; const e = new Error(valeur); e.photoIssue = valeur; throw e; };
+  try { await repo.saveBatch({}, { recettes: contexte ? [contexte] : [], fichiers, conditions: { recipes: [{ key: recipeId, fusion: (courante) => {
+    if (!courante) refuser('absente');
     const pose = champs(courante);
-    if (!pose) { issue = 'changee'; return null; }
+    if (!pose) refuser('changee');
     assertVocabulaire(pose, 'recipes');
     return { ...courante, ...pose };
-  } }] } });
+  } }] } }); } catch (e) {
+    if (e?.name === 'ErreurCycleRecette') {
+      if (e.code === 'source_absente') return 'absente';
+      return 'changee';
+    }
+    if (!e.photoIssue) throw e;
+  }
   return issue;
 }
 
 // --- Poser (§ 4.1.3) : le mur local, la fiche relue AVANT putFile (une fiche absente n'entraîne aucune ligne files), puis relue encore (C4) — ronde 1 :
 // DANS la transaction d'écriture ; les trois champs ENSEMBLE ; une photo choisie efface le candidat web (D-F10). Ne lève jamais (sauf une origine hors
 // liste : erreur de programmation).
-export async function poserPhotoPlat(recipeId, file, { repo = repoModule, origin, attendu = null } = {}) {
+export async function poserPhotoPlat(recipeId, file, { repo = repoModule, origin, attendu = null, contexte = null } = {}) {
   if (origin !== 'photo' && origin !== 'image') throw new TypeError('poserPhotoPlat : origine ' + String(origin));
+  let source, garde;
+  try { source = await repo.get('recipes', recipeId); garde = contexte || await capturerRecette(repo, source); }
+  catch { return { issue: 'refuse', raison: 'fiche_changee' }; }
   let jpeg;
   try { jpeg = await preparerPhotoLocale(file); }
   catch (e) { return { issue: 'refuse', raison: 'image', code: e instanceof ErreurImage ? e.code : 'indecodable' }; } // P-16
   try {
-    if (!(await repo.get('recipes', recipeId))) return { issue: 'refuse', raison: 'fiche_absente' };
+    if (!source) return { issue: 'refuse', raison: 'fiche_absente' };
     const sha = await sha256Hex(jpeg);
-    await repo.putFile(sha, jpeg, { mime: 'image/jpeg' });
-    const issue = await ecrireChamps(repo, recipeId, c => attendu && (pointeur(c) !== (attendu.sha256 || null) || (!attendu.sha256 && !adressesEgalesOuNulles(c.photo_source_url, attendu.candidat))) ? null : ({ photo_sha256: sha, photo_origin: origin, photo_source_url: null, photo_provenance: null }));
-    if (issue === 'absente') return { issue: 'refuse', raison: 'fiche_absente' }; // la ligne files reste : orphelin L5
+    const issue = await ecrireChamps(repo, recipeId, c => attendu && (pointeur(c) !== (attendu.sha256 || null) || (!attendu.sha256 && !adressesEgalesOuNulles(c.photo_source_url, attendu.candidat))) ? null : ({ photo_sha256: sha, photo_origin: origin, photo_source_url: null, photo_provenance: null }), { contexte: garde, fichiers: [{ sha256: sha, blob: jpeg, meta: { mime: 'image/jpeg' } }] });
+    if (issue === 'absente') return { issue: 'refuse', raison: 'fiche_absente' };
     if (issue === 'changee') return { issue: 'refuse', raison: 'fiche_changee' };
     derniersEchecs.delete(recipeId);
     return { issue: 'ok', sha256: sha };
@@ -190,10 +200,11 @@ export async function poserPhotoPlat(recipeId, file, { repo = repoModule, origin
 // Aucun appel. Ronde 1 : `attendu` = ce que la zone MONTRAIT ({ sha256, candidat }) — « Retirer » n'enlève que la photo vue, « Ne pas récupérer » que le
 // candidat vu, sans photo ; une fiche changée depuis (un autre onglet a posé une photo, aucune notification d'un document à l'autre) n'est pas touchée :
 // refuse(fiche_changee). Sans `attendu` (appel direct) : aucune condition.
-export async function retirerPhotoPlat(recipeId, { repo = repoModule, attendu = null } = {}) {
+export async function retirerPhotoPlat(recipeId, { repo = repoModule, attendu = null, contexte = null } = {}) {
   const conforme = (c) => attendu == null || (attendu.sha256 ? pointeur(c) === attendu.sha256 : pointeur(c) === null && memeAdresseImage(c.photo_source_url, attendu.candidat));
   try {
-    const issue = await ecrireChamps(repo, recipeId, (c) => (conforme(c) ? { photo_sha256: null, photo_origin: null, photo_source_url: null, photo_provenance: null } : null));
+    const garde = contexte || await capturerRecette(repo, await repo.get('recipes', recipeId));
+    const issue = await ecrireChamps(repo, recipeId, (c) => (conforme(c) ? { photo_sha256: null, photo_origin: null, photo_source_url: null, photo_provenance: null } : null), { contexte: garde });
     if (issue === 'absente') return { issue: 'refuse', raison: 'fiche_absente' };
     if (issue === 'changee') return { issue: 'refuse', raison: 'fiche_changee' };
     derniersEchecs.delete(recipeId);
@@ -215,7 +226,7 @@ export function rapatrierPhotoWeb(recipeId, options = {}) {
   entree.promesse = descendre(recipeId, entree, options).finally(() => { if (enVol.get(recipeId) === entree) enVol.delete(recipeId); notifier(recipeId); });
   return entree.promesse;
 }
-async function descendre(recipeId, entree, { candidat = null, tape = false, ctx = null, repo = repoModule, fetch = undefined, enLigne = () => enLigneFlag } = {}) {
+async function descendre(recipeId, entree, { candidat = null, tape = false, contexte: contexteInitial = null, ctx = null, repo = repoModule, fetch = undefined, enLigne = () => enLigneFlag } = {}) {
   let url = null;
   const refuser = (raison) => {
     if (raison === 'fiche_changee' || raison === 'fiche_absente') derniersEchecs.delete(recipeId);
@@ -230,6 +241,7 @@ async function descendre(recipeId, entree, { candidat = null, tape = false, ctx 
   try {
     const fiche = await repo.get('recipes', recipeId);
     if (!fiche) return refuser('fiche_absente');
+    const contexte = contexteInitial || await capturerRecette(repo, fiche, { ctx });
     const depart = { photo_sha256: fiche.photo_sha256, photo_origin: fiche.photo_origin, photo_source_url: fiche.photo_source_url };
     entree.depart = depart;
     const sha = pointeur(fiche);
@@ -242,6 +254,8 @@ async function descendre(recipeId, entree, { candidat = null, tape = false, ctx 
     if (!enLigne()) return refuser('hors_ligne');
     const session = await sessionAssistant(ctx);
     if (!session) return refuser('non_connecte');
+    try { await repo.saveBatch({}, { recettes: [contexte] }); }
+    catch (e) { return refuser(e?.code === 'source_absente' ? 'fiche_absente' : 'fiche_changee'); }
     const r = await lireImageWeb({ url, session }, { fetch: fetch ?? globalThis.fetch, signal: entree.controller.signal });
     if (r.etat === 'echec') return echouer(r.raison, r.extra ?? {});
     let jpeg;
@@ -254,13 +268,12 @@ async function descendre(recipeId, entree, { candidat = null, tape = false, ctx 
     const relue = await repo.get('recipes', recipeId);
     if (!relue) return refuser('fiche_absente');
     if (!inchangee(relue)) return refuser('fiche_changee');
-    try { await repo.putFile(sha2, jpeg, { mime: 'image/jpeg' }); } catch { return echouer('ecriture'); }
     let issue;
     // les trois ENSEMBLE : la provenance de CETTE image
-    try { issue = await ecrireChamps(repo, recipeId, (c) => (inchangee(c) ? { photo_sha256: sha2, photo_origin: 'web', photo_source_url: url, photo_provenance: null } : null)); }
+    try { issue = await ecrireChamps(repo, recipeId, (c) => (inchangee(c) ? { photo_sha256: sha2, photo_origin: 'web', photo_source_url: url, photo_provenance: null } : null), { contexte, fichiers: [{ sha256: sha2, blob: jpeg, meta: { mime: 'image/jpeg' } }] }); }
     catch { return echouer('ecriture'); }
     if (issue === 'absente') return refuser('fiche_absente');
-    if (issue === 'changee') return refuser('fiche_changee'); // la ligne files reste : orphelin L5
+    if (issue === 'changee') return refuser('fiche_changee');
     derniersEchecs.delete(recipeId);
     return { issue: 'ok', sha256: sha2 };
   } catch {
@@ -271,6 +284,7 @@ async function descendre(recipeId, entree, { candidat = null, tape = false, ctx 
 // --- Le montage (§ 4.1.1) : l'emplacement de tête (un div, jamais null), la section « Photo du plat », les gestes. Monter n'appelle RIEN (I-F11).
 // Les redessins sont sérialisés (P-15) ; les URL blob: d'avant sont relevées juste avant le remplacement et révoquées APRÈS (D-T9).
 export async function monterPhotoPlat(recipe, ctx, { repo = repoModule, pickFiles = pickDom, toast = toastDom, fetch = undefined, enLigne = () => enLigneFlag, ctxF = {}, instant = Date.now } = {}) {
+  const contexte = await capturerRecette(repo, recipe, { ctx });
   const entete = el('div', { dataset: { role: 'emplacement-photo-plat' } });
   const conteneur = el('div', { dataset: { role: 'zone-photo-plat' } });
   const source = el('div', { dataset: { role: 'photo-source' } });
@@ -317,7 +331,7 @@ export async function monterPhotoPlat(recipe, ctx, { repo = repoModule, pickFile
     if (!fichiers?.length) return;
     occupe = true; await redessiner();
     try {
-      const r = await poserPhotoPlat(recipe.id, fichiers[0], { repo, origin });
+      const r = await poserPhotoPlat(recipe.id, fichiers[0], { repo, origin, contexte });
       if (r.issue === 'ok') toast(t('Photo du plat enregistrée.'));
       else if (r.raison === 'image') toast(messageErreurImage({ code: r.code }));
       else if (r.raison === 'fiche_absente') toast(t('Recette introuvable.'));
@@ -329,7 +343,7 @@ export async function monterPhotoPlat(recipe, ctx, { repo = repoModule, pickFile
     const attendu = rendu; // relevé AVANT le redessin « occupe » : l'état que la personne a vu en touchant (ronde 1)
     occupe = true; await redessiner();
     try {
-      const r = await retirerPhotoPlat(recipe.id, { repo, attendu });
+      const r = await retirerPhotoPlat(recipe.id, { repo, attendu, contexte });
       if (r.issue === 'ok') { if (dire) toast(t('Photo du plat retirée.')); }
       else if (r.raison === 'fiche_absente') toast(t('Recette introuvable.'));
       else if (r.raison !== 'fiche_changee') toast(t('La photo du plat n’a pas pu être changée. Réessaie.')); // fiche_changee : le redessin dit l'état vrai
@@ -341,7 +355,7 @@ export async function monterPhotoPlat(recipe, ctx, { repo = repoModule, pickFile
     retirer: () => retirerAvec({ dire: true }),
     abandonner: () => retirerAvec({ dire: false }),
     // Sans await dans le gestionnaire : le vol est posé avant tout await, la zone passe en « Récupération… » par notifier (§ 4.1.3).
-    reessayer: () => (occupe ? Promise.resolve(null) : rapatrierPhotoWeb(recipe.id, { tape: true, ctx, repo, fetch, enLigne })),
+    reessayer: () => (occupe ? Promise.resolve(null) : rapatrierPhotoWeb(recipe.id, { tape: true, ctx, repo, fetch, enLigne, contexte })),
   };
   // Ronde 1 : la vue est enregistrée AVANT le premier dessin et n'est jamais purgée avant d'avoir été vue dans le document (notifier) — une descente finie
   // entre le montage et l'insertion par le routeur la redessine, quel que soit le moment où renderRecipe finit (la garde « setTimeout 0 » d'import-cible.js,

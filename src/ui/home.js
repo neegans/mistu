@@ -1,3 +1,6 @@
+import { recetteActive } from '../domain/cycle-recette.js';
+import { mentionCycleRecette } from './corbeille.js';
+import { recettesActives, documentsActifs } from './state.js';
 // Aujourd'hui : recherche, reprendre ma recette, Redécouvrir, favoris, dernières cuissons, ingrédients à utiliser (spec §17).
 // Lot UI-1 « Carnet » (spec experience-carnet § 4.4, D-UI-5, D-UI-8) : pageHeader au-dessus de la barre (sur le papier, hors de toute carte), les puces
 // d'exemple sous la barre ; « Favoris » et « Dernières cuissons » en grille de cartes-plat — UNE passe repo.getFiles sur les empreintes des cartes
@@ -47,14 +50,14 @@ export async function renderHome(params, query, ctx, { repo: depot = repo } = {}
   // Favoris et Dernières cuissons (D-UI-5, F-3) : les docs à rendre d'abord, puis UNE lecture groupée des lignes files de leurs photos — la carte-plat
   // reçoit sa ligne et décide au rendu (I-UI-5) ; sans empreinte, aucune lecture. Un pointeur qui n'est pas une empreinte (pointeurValide, comme la
   // bibliothèque et la fiche livre) n'est ni lu ni passé. Les URL blob: sont celles d'urlDeBlob : révoquées au changement de route (D-T9).
-  const favs = ctx.docs.filter((d) => d.recipe.favorite).slice(0, 6);
+  const favs = documentsActifs(ctx).filter((d) => d.recipe.favorite).slice(0, 6);
   const recent = [...ctx.cook_history].sort(comparerCuissons).slice(0, 4)
     .map((h) => ({ h, doc: ctx.docsByRecipe.get(h.recipe_id) })).filter((x) => x.doc); // une cuisson d'une fiche inconnue n'est pas rendue (comme avant)
   const photosPersonnelles = photosPersonnellesParRecette(ctx.cook_history);
   const ctxF = await contexteFichiers(ctx);
   const empreintes = empreintesPhotos([...favs, ...recent.map(x => x.doc)].map(d => d.recipe), photosPersonnelles);
   const fichiers = empreintes.length ? await depot.getFiles(empreintes) : new Map();
-  const cartePlat = (d) => recipeCard(d, { photoEnTete: true, fichier: fichierPhoto(d.recipe, photosPersonnelles, fichiers), ctxF });
+  const cartePlat = (d) => { const carte=recipeCard(d, { photoEnTete: true, fichier: fichierPhoto(d.recipe, photosPersonnelles, fichiers), ctxF }); if (!recetteActive(d.recipe)) {carte.querySelector('.carte-plat-actions')?.remove();carte.append(mentionCycleRecette(d.recipe));} return carte; };
   if (favs.length) root.append(sectionPlain(t('Favoris'), grilleCartes(favs.map(cartePlat))));
 
   // Dernières cuissons → Refaire comme la dernière fois : la date et le bouton HORS du <a> de la carte, sous elle, dans la cellule de grille (§ 4.4, H-16).
@@ -62,7 +65,7 @@ export async function renderHome(params, query, ctx, { repo: depot = repo } = {}
     root.append(sectionPlain(t('Dernières cuissons'), grilleCartes(recent.map(({ h, doc }) => el('div', { class: 'cellule-cuisson' },
       cartePlat(doc),
       el('div', { class: 'muted cuisson-date' }, `${formatDate(h.cooked_at)}${etoiles(h.rating) ? ` · ${etoiles(h.rating)}` : ''}${h.redo === false ? ` · ${t('à ne pas refaire')}` : ''}`),
-      el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(h.recipe_id)}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, t('Refaire comme la dernière fois')))))));
+      el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(h.recipe_id)}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, recetteActive(doc.recipe) ? t('Refaire comme la dernière fois') : t('Consulter cette cuisson')))))));
   }
 
   // Ingrédients à utiliser (inventaire)
@@ -74,7 +77,7 @@ export async function renderHome(params, query, ctx, { repo: depot = repo } = {}
       el('a', { class: 'btn small', href: '#/kitchen?tab=inventory' }, t('Voir l’inventaire'))));
   }
 
-  if (!ctx.recipes.length) {
+  if (!recettesActives(ctx).length) {
     root.append(section(t('Bienvenue'), el('p', null, t('Ta bibliothèque est vide. Commence par ajouter un livre, puis photographie sa table des matières ou une recette.')),
       el('div', { class: 'row' }, el('a', { class: 'btn primary', href: '#/add' }, t('Ajouter')), el('a', { class: 'btn', href: '#/settings' }, t('Restaurer une sauvegarde')))));
   }
@@ -83,7 +86,7 @@ export async function renderHome(params, query, ctx, { repo: depot = repo } = {}
 
 async function rediscoverCard(ctx, query, depot = repo) {
   const context = query.q ? parseQuery(query.q).filters : {};
-  const s = pickSuggestion({ editions: ctx.book_editions, books: ctx.books, recipes: ctx.recipes, activity: ctx.library_activity, prefs: ctx.rediscovery_prefs, context });
+  const s = pickSuggestion({ editions: ctx.book_editions, books: ctx.books, recipes: recettesActives(ctx), activity: ctx.library_activity, prefs: ctx.rediscovery_prefs, context });
   if (!s) return el('div');
   const pref = ctx.rediscovery_prefs.find((p) => p.edition_id === s.edition.id) || { edition_id: s.edition.id };
   if (!pref.last_suggested_at || Date.now() - Date.parse(pref.last_suggested_at) > 86400000) {

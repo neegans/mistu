@@ -1,3 +1,5 @@
+import { capturerRecette } from './recette-garde.js';
+import { recettesActives } from './state.js';
 // Fiche Plat (spec §30) : recettes attribuées de plusieurs livres, rapprochements à confirmer, comparaison de 2–3 recettes.
 import { el, toast, chooseDialog, promptDialog, formatDate } from '../core/dom.js';
 import { t } from '../core/i18n.js';
@@ -26,11 +28,11 @@ export async function renderDish(params, query, ctx) {
   const ctxF = await contexteFichiers(ctx);
   const dish = ctx.dishesById.get(params.id);
   if (!dish) return el('div', { class: 'card' }, t('Plat introuvable.'));
-  const links = ctx.dish_recipe_links.filter((l) => l.dish_id === dish.id);
+  const links = ctx.dish_recipe_links.filter((l) => l.dish_id === dish.id && recettesActives(ctx).some(r => r.id === l.recipe_id));
   const confirmed = links.filter((l) => l.state === 'confirmed').map((l) => ctx.docsByRecipe.get(l.recipe_id)).filter(Boolean);
   const proposedLinks = links.filter((l) => l.state === 'proposed');
   const refused = links.filter((l) => l.state === 'refused');
-  const proposals = proposeRecipesForDish(dish, ctx.recipes, links);
+  const proposals = proposeRecipesForDish(dish, recettesActives(ctx), links);
   const selected = new Set((query.cmp || '').split(',').filter(Boolean));
   const root = el('div', null);
   const editionsCount = new Set(confirmed.map((d) => d.recipe.edition_id).filter(Boolean)).size;
@@ -51,7 +53,7 @@ export async function renderDish(params, query, ctx) {
       const extra = el('div', { class: 'row between', style: { marginTop: '.4rem' } },
         el('label', { class: 'check', onClick: (e) => e.stopPropagation() }, check, t('Comparer')),
         el('span', { class: 'muted', style: { fontSize: '.85rem' } }, hist.length ? t('Cuisinée {n}× · dernière le {d}', { n: hist.length, d: formatDate(hist.sort(comparerCuissons)[0].cooked_at) }) : t('Jamais cuisinée')),
-        el('button', { class: 'btn small', onClick: async (e) => { e.preventDefault(); e.stopPropagation(); const l = links.find((x) => x.recipe_id === d.recipe.id); await repo.save('dish_recipe_links', { ...l, state: 'refused', reviewed_at: repo.nowIso() }); refresh(); } }, t('Détacher')));
+        el('button', { class: 'btn small', onClick: async (e) => { e.preventDefault(); e.stopPropagation(); const l = links.find((x) => x.recipe_id === d.recipe.id); await sauverLien({ ...l, state: 'refused', reviewed_at: repo.nowIso() }); } }, t('Détacher')));
       listBox.append(recipeCard(d, { extra, ctxF }));
     }
   };
@@ -97,11 +99,11 @@ export async function renderDish(params, query, ctx) {
 
   if (proposedLinks.length || proposals.length) {
     root.append(section(t('Rapprochements proposés'), el('p', { class: 'muted' }, t('Confirmer tient compte des ingrédients et de la préparation quand ils sont disponibles ; une référence d’index rattachée garde ses différences culinaires inconnues.')),
-      ...proposedLinks.map((l) => proposalRow(ctx.recipesById.get(l.recipe_id), l.evidence, async (state) => { await repo.save('dish_recipe_links', { ...l, state, reviewed_at: repo.nowIso() }); refresh(); })),
-      ...proposals.map((p) => proposalRow(p.recipe, p.evidence, async (state) => { await repo.save('dish_recipe_links', { id: repo.newId('drl'), dish_id: dish.id, recipe_id: p.recipe.id, state, proposed_by: 'title_similarity', evidence: p.evidence, reviewed_at: repo.nowIso() }); refresh(); }))));
+      ...proposedLinks.map((l) => proposalRow(ctx.recipesById.get(l.recipe_id), l.evidence, async (state) => { await sauverLien({ ...l, state, reviewed_at: repo.nowIso() }); })),
+      ...proposals.map((p) => proposalRow(p.recipe, p.evidence, async (state) => { await sauverLien({ id: repo.newId('drl'), dish_id: dish.id, recipe_id: p.recipe.id, state, proposed_by: 'title_similarity', evidence: p.evidence, reviewed_at: repo.nowIso() }); }))));
   }
   if (refused.length) root.append(el('details', { class: 'card' }, el('summary', null, t('Rattachements refusés ({n})', { n: refused.length })),
-    ...refused.map((l) => { const r = ctx.recipesById.get(l.recipe_id); return el('div', { class: 'row between' }, el('span', null, r?.original_title || l.recipe_id), el('button', { class: 'btn small', onClick: async () => { await repo.save('dish_recipe_links', { ...l, state: 'confirmed', reviewed_at: repo.nowIso() }); refresh(); } }, t('Rétablir'))); })));
+    ...refused.map((l) => { const r = ctx.recipesById.get(l.recipe_id); return el('div', { class: 'row between' }, el('span', null, r?.original_title || l.recipe_id), el('button', { class: 'btn small', onClick: async () => { await sauverLien({ ...l, state: 'confirmed', reviewed_at: repo.nowIso() }); } }, t('Rétablir'))); })));
   return root;
 
   function proposalRow(recipe, evidence, onDecide) {
@@ -112,13 +114,19 @@ export async function renderDish(params, query, ctx) {
   }
   async function attachRecipe() {
     const linkedIds = new Set(links.filter((l) => l.state !== 'refused').map((l) => l.recipe_id));
-    const options = ctx.recipes.filter((r) => !linkedIds.has(r.id)).sort((a, b) => a.original_title.localeCompare(b.original_title)).map((r) => ({ value: r.id, label: r.original_title, hint: ctx.editionLabel(ctx.editionsById.get(r.edition_id)) }));
+    const options = recettesActives(ctx).filter((r) => !linkedIds.has(r.id)).sort((a, b) => a.original_title.localeCompare(b.original_title)).map((r) => ({ value: r.id, label: r.original_title, hint: ctx.editionLabel(ctx.editionsById.get(r.edition_id)) }));
     if (!options.length) { toast(t('Toutes les recettes sont déjà rattachées ou refusées')); return; }
+    try {
+    const contextes = new Map(await Promise.all(options.map(async o => [o.value, await capturerRecette(repo, ctx.recipesById.get(o.value), {ctx})])));
     const id = await chooseDialog(t('Quelle recette rattacher à ce plat ?'), options);
     if (!id) return;
     const existing = links.find((l) => l.recipe_id === id);
-    await repo.save('dish_recipe_links', { ...(existing || { id: repo.newId('drl'), dish_id: dish.id, recipe_id: id }), state: 'confirmed', proposed_by: 'user', evidence: t('Rattachement manuel'), reviewed_at: repo.nowIso() });
-    refresh();
+    await sauverLien({ ...(existing || { id: repo.newId('drl'), dish_id: dish.id, recipe_id: id }), state: 'confirmed', proposed_by: 'user', evidence: t('Rattachement manuel'), reviewed_at: repo.nowIso() }, contextes.get(id));
+    } catch { toast(t('La recette a changé. Recharge sa fiche avant de réessayer.')); }
+  }
+  async function sauverLien(ligne, contexte = null) {
+    try {contexte ??= await capturerRecette(repo, ctx.recipesById.get(ligne.recipe_id), {ctx});await repo.save('dish_recipe_links',ligne,{recettes:[contexte]});refresh();}
+    catch {toast(t('La recette a changé. Recharge sa fiche avant de réessayer.'));}
   }
   async function editLabels() {
     const fr = await promptDialog(t('Libellé français (alias séparés par des virgules après un « | »)'), { value: `${dish.labels.fr.label}${dish.labels.fr.aliases?.length ? ' | ' + dish.labels.fr.aliases.join(', ') : ''}` });

@@ -66,10 +66,10 @@ export async function runRechercheWebTests({ eq, ok }) {
   // --- § 8 : version 0.17.0 (lot UI-1 « Carnet » ; 0.16.0 au lot UI-2, aperçus ; 0.15.0 au lot F, plats en images ; 0.14.0 au lot E, 0.13.0 au lot D, 0.12.0 au lot C, 0.11.0 au lot G, 0.10.0 au lot B, 0.9.0 au lot A, 0.8.1 à la présentation du serveur), SHELL
   {
     const sw = await lire('../sw.js');
-    ok(/VERSION = 'cuisine-os-v0\.22\.0-\d+'/.test(sw), 'sw.js : VERSION 0.22.0');
+    ok(/VERSION = 'cuisine-os-v0\.23\.0-\d+'/.test(sw), 'sw.js : VERSION 0.23.0');
     ok(sw.includes("'./src/core/bornes.js'"), 'SHELL : ./src/core/bornes.js');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.22.0', 'APP_VERSION 0.22.0 (lot UI-1, carnet)');
+    eq(APP_VERSION, '0.23.0', 'APP_VERSION 0.23.0 (lot UI-1, carnet)');
   }
 
   // --- § 7.1 : supportsWebSearch lu par l'écran (F6) — seule la passerelle (une SESSION) cherche sur le web
@@ -1239,7 +1239,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         } finally { db.mutate = mutate; }
         const signet = (await db.getAll('recipes')).find((r) => r.source_url === 'https://r.test/a');
         const ligne = (await db.byIndex('imports', 'recipe_id', signet.id))[0];
-        eq(appels[0], { puts: ['imports', 'recipes'], conditions: ['imports', 'recipes'] }, '« Garder et lire » : UNE transaction écrit le signet ET l’import, conditionnée (D-B21)');
+        eq(appels[0], { puts: ['imports', 'recipes'], conditions: ['imports', 'recipes', 'sync_state'] }, '« Garder et lire » : UNE transaction écrit le signet ET l’import, conditionnée (D-B21)');
         eq([signet.original_title, signet.availability, signet.web_reperes, ligne.kind, ligne.recipe_id], ['Pâtes du garde-manger', 'reference_only', { presentation: 'Un plat rapide.', temps_min: 20, difficulte: 'facile', ingredients: 7 }, 'web', signet.id], '« Garder et lire » : le signet porte le titre et l’adresse du résultat, et ses quatre repères (web_reperes) ; l’import est kind web');
         eq([posts, navs.at(-1)], [[{ outil: 'lecture-web', corps: { url: 'https://r.test/a' } }], `/recipes/${signet.id}/importer`], '« Garder et lire » : puis un POST lecture-web avec l’adresse du signet, puis #/recipes/<id>/importer');
 

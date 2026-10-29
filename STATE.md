@@ -1,17 +1,37 @@
-# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — L0 CONSTRUIT LOCALEMENT EN 0.22.0 ; PUBLICATION PRÉCÉDENTE 0.21.1
+# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — L1 CONSTRUIT LOCALEMENT EN 0.23.0 ; PUBLICATION PRÉCÉDENTE 0.21.1
 
-**29 octobre 2026 — SUITE DU PLAN : SPEC L1 PRÊTE POUR RELECTURE.**
-Sur « continu », préparation du lot suivant : [corbeille individuelle](docs/superpowers/specs/2026-10-29-l1-corbeille-individuelle-design.md).
-Branche `l1-corbeille-individuelle`, base `9c823b0` contenant L0. Périmètre proposé : recettes autonomes sans édition,
-retrait/restauration durables, historique lisible, gardes des résultats tardifs et compatibilité des anciens clients.
-L’audit montre qu’un simple marqueur JSON serait effaçable par la synchronisation actuelle ; proposition de commandes de cycle explicites,
-migration serveur additive, index de corbeille (DB5) et archives 2 lisibles par le nouveau client avec les archives 1.
-Deux preuves isolées lues : arbitrage actuel de réception incompatible avec ce seul marqueur, fermeture d’une connexion DB4 lors
-d’un passage témoin en 5 puis `VersionError` de l’ancien ouvreur. Ce ne sont pas des tests d’un L1 déjà construit.
-Revue technique croisée de la proposition : restauration d’archive refusée intégralement en cas de cycle divergent pour préserver tous les liens ;
-cycles mal formés retrouvables en consultation, éligibilité relue lors du geste.
-**Spec en attente de relecture de Neegan ; aucun code L1, aucune migration ni publication effectués.** Cible proposée 0.23.0 ; code local toujours 0.22.0.
-Le bilan L0 ci-dessous reste la dernière suite exécutée. Suite : relecture avant construction, selon la méthode d’`AGENTS.md`.
+**29 octobre 2026 — L1 APPROUVÉ ET CONSTRUIT LOCALEMENT : CORBEILLE INDIVIDUELLE.**
+Neegan approuve la [spec de corbeille individuelle](docs/superpowers/specs/2026-10-29-l1-corbeille-individuelle-design.md) sur « ok ».
+Branche `l1-corbeille-individuelle`, base de spec `cf539fb`, contenant L0 `9c823b0`.
+[Rapport de construction et preuves](docs/superpowers/plans/2026-10-29-l1-corbeille-individuelle.md).
+
+Retrait et restauration des recettes autonomes, Annuler conditionné, corbeille accessible depuis la bibliothèque.
+Versions, sources, notes, photos et historique conservés ; nouveaux choix limités aux recettes actives.
+Écritures tardives refusées même après restauration, avec saisie ou résultat payé conservé pour relecture explicite.
+Gardes atomiques de cycle et de compte, commandes de synchronisation distinctes des modifications, conflits consultables.
+Archives complètes avec refus intégral des cycles divergents et collisions d’enfants.
+
+Application **0.23.0**, cache **cuisine-os-v0.23.0-1**, **IndexedDB 5** (index `trashed_at`), **archive 2** (lecture 1/2).
+Migration additive **0008_corbeille_recettes.sql** préparée ; anciennes migrations inchangées.
+Navigateur **7656/7656** (épingle **7655**, +259 depuis L0, aucune assertion retirée), Node **231/231**,
+migrations `--check` **0**, syntaxe de **93** fichiers et diff propres. Ciblés L1 : domaine **61**, archives **24**,
+synchronisation **58**, écrans **79**, mutations **30**. Zéro erreur JavaScript ou requête externe dans les preuves navigateur.
+
+Application réelle en profil jetable : retrait au clavier, rechargement, restauration, notes/photos intactes,
+ancien éditeur sur un second onglet refusé sans perdre sa saisie, consultation hors ligne et six modules en cache.
+Captures relues à 320/390/768/900/1280, texte à 200 %, aucun débordement horizontal.
+Vrai code L0 0.22.0/DB4 : fermeture lors du passage en DB5, réouverture refusée par `VersionError`, données conservées.
+Trois bases et trois vrais moteurs avec transport/stockage simulés : concurrence hors ligne, réessai après accusé perdu,
+archive sur un troisième appareil puis connexion, photos intactes. PostgreSQL local réel : **42 assertions** et
+deux sessions concurrentes ; une commande acceptée, l’autre refusée sur sa base périmée. Serveur de test arrêté.
+Preuves locales : `.superpowers/sdd/2026-10-29-l1/`.
+
+**Non publié : dernière publication documentée 0.21.1.** Aucun push, déploiement ou SQL distant effectué pour L1.
+La publication devra inclure L0 et appliquer d’abord la migration serveur, après autorisation distincte.
+Aucun compte privé, vrai appel assistant, appareil iPhone/Safari physique ou lecteur d’écran testé.
+L’intégration Auth/PostgREST/Storage Supabase distante et la convergence sur les deux appareils réels restent à vérifier.
+Les conflits d’enfants restent consultables et bloqués jusqu’à reprise volontaire depuis la fiche.
+Livres/groupes, purge, refonte générale et traduction automatique complète restent hors de L1 ; le plan directeur n’est pas terminé.
 
 **29 octobre 2026 — PLAN DIRECTEUR : LOT L0 APPROUVÉ ET CONSTRUIT LOCALEMENT.**
 Neegan fournit `Mistu_Plan_Directeur_Interface_et_Fonctions_0.21.1.md`, conservé à l’identique dans

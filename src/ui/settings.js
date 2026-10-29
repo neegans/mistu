@@ -1,3 +1,4 @@
+import { documentsActifs } from './state.js';
 // Réglages : préférences (langue de l'interface, langue de lecture, unités), sauvegarde complète et restauration vérifiée,
 // exports d'échange, assistant IA, minuterie système, données locales (spec §29.1, §31, §33).
 import { el, toast, confirmDialog, promptDialog, pickFiles, downloadBlob, formatDate } from '../core/dom.js';
@@ -6,7 +7,7 @@ import { refresh, currentPath } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { logError } from '../core/log.js';
 import { reprendreEnvoi, retirerEnvoi, fileDe } from '../sync/outbox.js';
-import { garderIci, garderAilleurs, ignorerRenvoye } from '../sync/conflits.js';
+import { garderIci, garderAilleurs, ignorerRenvoye, abandonnerConflitCycle } from '../sync/conflits.js';
 import { retirerMarqueur } from '../sync/backfill.js';
 import { referencesFichiers, nomFichier, lireErreursFichiers, MAGASINS_FICHIERS } from '../sync/fichiers.js';
 import { createArchive as createArchiveReel, inspectArchive, applyArchive, verifyRestored, compterFichesSynchronisees } from '../domain/backup.js';
@@ -555,6 +556,15 @@ export async function abandonnerEnvoi({ db, seq, confirm, retirer = retirerEnvoi
 // Les deux issues ÉCRIVENT une fiche de la bibliothèque, et elles l'écrivent par la porte d'écriture de la base,
 // qui ne passe par aucun bus : le cache de lecture de state.js garderait la version que la personne vient
 // justement d'écarter. Il est donc invalidé, et seulement quand quelque chose a été écrit.
+export async function abandonnerCopieConflit({db, id, confirm = confirmDialog, appliquer = abandonnerConflitCycle, invalider = invalidate}) {
+  const conflit = await db.get('sync_conflicts', id);
+  if (!conflit || conflit.kind !== 'cycle' || conflit.store !== 'recipes') return false;
+  if (!await confirm(t('Abandonner ces modifications et reprendre l’état reçu ? Consulte la copie avant de confirmer.'), {okLabel:t('Abandonner ces modifications'),danger:true})) return false;
+  const applique = await appliquer(db, conflit);
+  if (applique) invalider();
+  return applique;
+}
+
 export async function garderVersionDIci({ db, id, moteur = null, appliquer = garderIci, invalider = invalidate }) {
   const conflit = await db.get('sync_conflicts', id);
   if (!conflit) return false;
@@ -619,6 +629,12 @@ export function gestesL3Pour({
       rafraichir();
     }),
     // R-L3-29 : ranger l'entrée de journal d'un conflit déjà renvoyé. Rien à invalider — aucune fiche n'est touchée.
+    abandonnerConflitCycle: protege('abandonner_conflit_cycle', async id => {
+      let confirme = false;
+      const applique = await abandonnerCopieConflit({db,id,confirm:async (...args) => (confirme = await confirm(...args)),invalider});
+      if (!applique && confirme && await db.get('sync_conflicts',id)) dire(t('L’état reçu n’a pas pu être confirmé. La copie et le conflit sont conservés ; synchronise puis réessaie.'));
+      rafraichir();
+    }),
     ignorerConflit: protege('ignorer_conflit', async (id) => { await rangerConflitRenvoye({ db, id }); rafraichir(); }),
   };
 }
@@ -716,7 +732,7 @@ function suivreMoteurDeLaPage(moteur) {
 // Les quatre seuls gestes nommés par le modèle, et les cinq gestes de l'ensemble L3. Le rendu ne câble que ce qu'il
 // trouve dans l'objet de gestes : un renommage donne un bouton manquant (visible), jamais un bouton muet.
 export const SYNC_ACTIONS = ['signIn', 'signOut', 'changeAccount', 'envoyerMaintenant'];
-export const SYNC_L3_ACTIONS = ['envoyerMaintenant', 'reessayer', 'abandonner', 'garderIci', 'garderAilleurs', 'ignorerConflit'];
+export const SYNC_L3_ACTIONS = ['envoyerMaintenant', 'reessayer', 'abandonner', 'garderIci', 'garderAilleurs', 'ignorerConflit', 'abandonnerConflitCycle'];
 
 // Départ chez le fournisseur. La route courante est mémorisée (redirectTo part sans fragment, le retour atterrirait
 // sur l’accueil) et RETIRÉE si rien ne part : une route fantôme détournerait le prochain démarrage de cet onglet.
@@ -806,6 +822,16 @@ export function syncSectionL3(model, gestes = {}) {
     noeuds.push(el('h3', null, t('Conflits à trancher')),
       el('p', { class: 'muted' }, t('Choisis celle qui compte ; rien n’est fusionné.')));
     for (const c of conflits) {
+      if (c.kind === 'cycle') {
+        noeuds.push(el('div', {class:'status warn stack',dataset:{conflit:String(c.id)}},
+          el('p', null, t('Cette modification a été faite avant un retrait ou une restauration. Ta copie est conservée.')),
+          el('p', null, c.libelle),
+          el('details', null, el('summary', null, t('Consulter la copie conservée')), el('pre', {style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'22rem',overflow:'auto'}}, c.copieLocale)),
+          c.recipeId ? el('a', {class:'btn',href:`#/recipes/${encodeURIComponent(c.recipeId)}`}, t('Consulter la recette')) : null,
+          c.peutAbandonnerCycle ? rangee(bouton('abandonnerConflitCycle', t('Abandonner ces modifications'), c.id, 'btn danger'))
+            : el('p', {class:'muted'}, t('Restaure la recette si nécessaire, puis reprends les modifications voulues depuis sa fiche. Cette copie reste disponible ici.'))));
+        continue;
+      }
       noeuds.push(el('div', { class: 'status warn', dataset: { conflit: String(c.id) } },
         // R-L3-29 : un conflit DÉJÀ RENVOYÉ n'est pas une question — la version d'ici est repartie et le serveur
         // l'acceptera (elle est plus récente). « Garder celle d'ici » la réhorodaterait et la renverrait encore ;
@@ -1053,6 +1079,7 @@ export function syncSectionModel({ available = false, reason = null, user = null
         dateIci: formatDate(c.local?.updated_at || c.at, { withTime: true }),
         dateAilleurs: formatDate(c.server?.updated_at || c.at, { withTime: true }),
         kind: c.kind,
+        ...(c.kind === 'cycle' ? {copieLocale:JSON.stringify(c.local ?? {},null,2),peutAbandonnerCycle:c.store === 'recipes',recipeId:c.store === 'recipes' ? c.record_id : c.local?.recipe_id || c.server?.data?.id || null} : {}),
         // R-L3-29 : la version d'ici est DÉJÀ repartie — ce n'est pas une question posée à la personne. Jamais
         // deviné : seule la réception pose ce drapeau, et faux veut dire « il y a vraiment un choix à faire ».
         renvoye: c.renvoye === true,
@@ -1096,7 +1123,7 @@ const MOTIFS_ENVOI = {
 export const motifEnvoi = (code) => t(Object.hasOwn(MOTIFS_ENVOI, code) ? MOTIFS_ENVOI[code] : 'Envoi refusé');
 
 function exportBundles(ctx, { includeReferences = false } = {}) {
-  return ctx.docs.filter((d) => includeReferences || d.version).map((d) => ({ recipe: d.recipe, version: d.version, book: d.book, edition: d.edition }));
+  return documentsActifs(ctx).filter((d) => includeReferences || d.version).map((d) => ({ recipe: d.recipe, version: d.version, book: d.book, edition: d.edition }));
 }
 
 export { extFor };

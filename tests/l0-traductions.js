@@ -27,7 +27,7 @@ export async function runL0TraductionsTests({ eq, ok }) {
   try {
     await bloc('positions', async repo => {
       const { recipe, version } = source();
-      await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] });
+      await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
       const avant = [await repo.get('recipes', recipe.id), await repo.get('recipe_versions', version.id)];
       const ed = await renderRecipeEdit({ id: recipe.id }, { kind: 'translation', locale: 'fr' }, await contexte()); scene.append(ed);
       const ings = ed.querySelectorAll('[data-role="traduction-ingredient"]'), steps = ed.querySelectorAll('[data-role="traduction-etape"]');
@@ -46,7 +46,7 @@ export async function runL0TraductionsTests({ eq, ok }) {
     await bloc('recette disparue', async (repo, db) => {
       const { recipe, version } = source();
       recipe.source_page_ids = ['l0-page'];
-      await repo.saveBatch({ recipes: [recipe], recipe_versions: [version], source_pages: [{ id: 'l0-page', kind: 'index', role: 'index', sha256: 'b'.repeat(64), printed_page: null }], scan_sessions: [{ id: 'l0-seance', status: 'open', page_ids: ['l0-page'], recipe_ids: [] }] });
+      await repo.saveBatch({ recipes: [recipe], recipe_versions: [version], source_pages: [{ id: 'l0-page', kind: 'index', role: 'index', sha256: 'b'.repeat(64), printed_page: null }], scan_sessions: [{ id: 'l0-seance', status: 'open', page_ids: ['l0-page'], recipe_ids: [] }] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
       const ed = await renderRecipeEdit({ id: recipe.id }, { kind: 'correction', session: 'l0-seance' }, await contexte()); scene.append(ed);
       saisir(ed.querySelector('input'), 'Mon pain');
       const autre = new Database(db.name, DB_VERSION, STORES);
@@ -59,7 +59,7 @@ export async function runL0TraductionsTests({ eq, ok }) {
       ok(ed.textContent.includes('Tes modifications restent dans ce formulaire.'), 'L0 C02 : refus visible dans le formulaire');
     });
     await bloc('fusions concurrentes', async repo => {
-      const { recipe, version } = source(); await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] });
+      const { recipe, version } = source(); await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
       const ed = await renderRecipeEdit({ id: recipe.id }, { kind: 'correction' }, await contexte()); scene.append(ed);
       const concurrente = { ...await repo.get('recipes', recipe.id), favorite: true, personal_notes: 'note récente', photo_sha256: 'a'.repeat(64), photo_origin: 'photo', reperes: { revision: 1 } };
       await repo.save('recipes', concurrente);
@@ -71,7 +71,7 @@ export async function runL0TraductionsTests({ eq, ok }) {
       await bloc('garde traduction ' + cas, async (repo, db) => {
         const { recipe, version } = source();
         const tr = { id: 'l0-tr', recipe_version_id: version.id, locale: 'fr', alignment_format: 1, translated_content: { title: 'Pain', ingredients: ['sel', '', 'beurre'], steps: ['', 'Cuire.'] }, origin: 'manual', verification_state: 'unverified' };
-        await repo.saveBatch({ recipes: [recipe], recipe_versions: [version], recipe_translations: [tr] });
+        await repo.saveBatch({ recipes: [recipe], recipe_versions: [version], recipe_translations: [tr] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
         const ed = await renderRecipeEdit({ id: recipe.id }, { kind: 'translation', locale: 'fr' }, await contexte()); scene.append(ed);
         saisir(ed.querySelector('[data-role="traduction-ingredient"]'), 'Mon sel');
         if (cas === 'recette') await repo.remove('recipes', recipe.id);
@@ -80,7 +80,7 @@ export async function runL0TraductionsTests({ eq, ok }) {
         if (cas === 'titre') await repo.save('recipes', { ...recipe, original_title: 'Autre titre' });
         if (cas === 'traduction') await repo.save('recipe_translations', { ...tr, translated_content: { ...tr.translated_content, title: 'Autre pain' } });
         if (cas === 'traduction-supprimee') await repo.remove('recipe_translations', tr.id);
-        if (cas === 'version-etrangere') await repo.save('recipe_versions', { ...version, recipe_id: 'autre-recette' });
+        if (cas === 'version-etrangere') await repo.db.put('recipe_versions', { ...version, recipe_id: 'autre-recette' }, { origin: 'device' }); // arrivée concurrente, hors garde des gestes locaux
         const avant = { recipes: await repo.all('recipes'), versions: await repo.all('recipe_versions'), traductions: await repo.all('recipe_translations'), file: await db.getAll('outbox') };
         const hashAvant = location.hash;
         await cliquerSauver(ed, 'Enregistrer la traduction');
@@ -90,7 +90,7 @@ export async function runL0TraductionsTests({ eq, ok }) {
       });
     }
     await bloc('ancienne version encore présente', async repo => {
-      const { recipe, version } = source(); await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] });
+      const { recipe, version } = source(); await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
       const ed = await renderRecipeEdit({ id: recipe.id }, { kind: 'translation', locale: 'fr' }, await contexte()); scene.append(ed);
       await repo.saveBatch({ recipe_versions: [{ ...version, id: 'l0-v2' }], recipes: [{ ...recipe, current_version_id: 'l0-v2' }] });
       saisir(ed.querySelector('[data-role="traduction-ingredient"]'), 'Sel'); await cliquerSauver(ed, 'Enregistrer la traduction');
@@ -100,7 +100,7 @@ export async function runL0TraductionsTests({ eq, ok }) {
     for (const nombre of [2, 3, 4]) await bloc('ancienne longueur ' + nombre, async repo => {
       const { recipe, version } = source();
       const tr = { id: 'l0-ancienne', recipe_version_id: version.id, locale: 'fr', translated_content: { title: 'Ancien pain', ingredients: ['sel', 'sucre', 'beurre', 'levure'].slice(0, nombre), steps: ['Mélanger.', 'Cuire.'] }, verification_state: 'unverified' };
-      await repo.saveBatch({ recipes: [recipe], recipe_versions: [version], recipe_translations: [tr] });
+      await repo.saveBatch({ recipes: [recipe], recipe_versions: [version], recipe_translations: [tr] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
       const avant = await repo.get('recipe_translations', tr.id);
       const ed = await renderRecipeEdit({ id: recipe.id }, { kind: 'translation', locale: 'fr' }, await contexte()); scene.append(ed);
       eq([...ed.querySelectorAll('[data-role="traduction-ingredient"]')].map(n => n.value), nombre === 3 ? tr.translated_content.ingredients : ['', '', ''], 'L0 ancienne : pas de réattribution devinée, longueur ' + nombre);
@@ -116,7 +116,7 @@ export async function runL0TraductionsTests({ eq, ok }) {
       }
     });
     await bloc('source parent disparue', async (repo, db) => {
-      const { recipe, version } = source(); await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] });
+      const { recipe, version } = source(); await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
       const ed = await renderRecipeEdit({ id: recipe.id }, {}, await contexte()); scene.append(ed);
       await repo.remove('recipe_versions', version.id);
       const avant = [await repo.all('recipe_versions'), await repo.get('recipes', recipe.id), await db.getAll('outbox')];
@@ -152,7 +152,7 @@ export async function runL0TraductionsTests({ eq, ok }) {
     ok(D.projectionSourceTraduction({ ...version, ingredients: [...version.ingredients].reverse() }) !== D.projectionSourceTraduction(version), 'L0 garde : ordre culinaire protégé');
     await bloc('borne UI', async repo => {
       const { recipe, version } = source(); version.steps[0].text = 'a'.repeat(10001);
-      await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] });
+      await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
       const avant = await repo.get('recipe_versions', version.id);
       const ed = await renderRecipeEdit({ id: recipe.id }, { kind: 'translation', locale: 'fr' }, await contexte()); scene.append(ed);
       eq(ed.querySelectorAll('[data-role="traduction-etape"]').length, 0, 'L0 limites : vérification avant création des champs');
@@ -160,7 +160,7 @@ export async function runL0TraductionsTests({ eq, ok }) {
       eq(await repo.get('recipe_versions', version.id), avant, 'L0 limites : source hors borne conservée intégralement');
     });
     await bloc('source malformée', async repo => {
-      const { recipe, version } = source(); await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] });
+      const { recipe, version } = source(); await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
       const ctx = await contexte(), malformee = { ...version, ingredients: { texte: 'Source ancienne à conserver' }, steps: null };
       ctx.versionsById.set(version.id, malformee); ctx.versionsByRecipe.set(recipe.id, [malformee]);
       const ed = await renderRecipeEdit({ id: recipe.id }, { kind: 'translation', locale: 'fr', v: version.id }, ctx); scene.append(ed);
@@ -170,7 +170,7 @@ export async function runL0TraductionsTests({ eq, ok }) {
     for (const cas of ['ancienne', 'modification', 'stockage']) await bloc('limite ou erreur ' + cas, async (repo, db) => {
       const { recipe, version } = source();
       const tr = { id: 'l0-ancienne', recipe_version_id: version.id, locale: 'fr', translated_content: { title: 'Pain', ingredients: ['a'.repeat(2001), '', ''], steps: ['', ''] } };
-      await repo.saveBatch({ recipes: [recipe], recipe_versions: [version], ...(cas === 'ancienne' ? { recipe_translations: [tr] } : {}) });
+      await repo.saveBatch({ recipes: [recipe], recipe_versions: [version], ...(cas === 'ancienne' ? { recipe_translations: [tr] } : {}) }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
       const ed = await renderRecipeEdit({ id: recipe.id }, { kind: 'translation', locale: 'fr' }, await contexte()); scene.append(ed);
       const avant = [await repo.all('recipe_translations'), await db.getAll('outbox')];
       if (cas === 'ancienne') {

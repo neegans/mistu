@@ -7,6 +7,7 @@ import { preparerPhotoLocale, messageErreurImage } from '../core/image.js';
 import { displayUrl, typeAffichage } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { sectionPlain, field, vignettePage, gesteTelechargement, relireErreurs } from './components.js';
+import { capturerRecette } from './recette-garde.js';
 import { protegerSaisie } from './state.js';
 import { LIMITES_CUISSON, ErreurCuisson, aujourdHui, photosDeCuisson, textePersonnel, validerTextePersonnel, validerCuisson } from '../domain/cuisine-personnelle.js';
 
@@ -16,6 +17,7 @@ const maintenantParDefaut = () => repoModule.nowIso();
 const gardeExistence = (key, valider) => ({ key, fusion: c => { if (!c || !valider(c)) erreur('reference'); return null; } });
 
 export function messageErreurCuisson(e) {
+  if (['cycle_change', 'recette_retiree', 'cycle_invalide', 'compte_change', 'historique_seul'].includes(e?.code)) return t('La recette a changé. Rouvre sa fiche avant d’enregistrer.');
   if (e?.code === 'date') return t('Choisis une date valide, aujourd’hui ou avant.');
   if (e?.code === 'texte') return t('La note peut contenir 10 000 caractères au plus.');
   if (e?.code === 'photos') return t('Tu peux garder 6 photos au plus par cuisson.');
@@ -29,9 +31,10 @@ export function messageErreurCuisson(e) {
 }
 
 // `id` est stable pour toute la vie du formulaire ; une répétition ne crée ni n'écrase une cuisson.
-export async function enregistrerCuissons(items, { repo = repoModule, session = null, maintenant = maintenantParDefaut } = {}) {
+export async function enregistrerCuissons(items, { repo = repoModule, session = null, maintenant = maintenantParDefaut, recettes = null, ctx = null } = {}) {
   const instant = maintenant(), jour = aujourdHui(instant);
   if (!Array.isArray(items) || !items.length || items.length > 100) erreur('reference');
+  recettes ??= await Promise.all([...new Map(items.map(item => [item.recipe?.id,item.recipe])).values()].map(recipe => capturerRecette(repo, recipe, {ctx, historique:!!session})));
   const ids = new Set();
   const rows = items.map(item => {
     if (typeof item.id !== 'string' || !item.id || ids.has(item.id) || !item.recipe?.id || !item.version?.id || item.version.recipe_id !== item.recipe.id) erreur('reference');
@@ -46,9 +49,10 @@ export async function enregistrerCuissons(items, { repo = repoModule, session = 
       convention_snapshot: session ? item.version.provenance?.convention_snapshot || null : null,
     };
   });
-  // Préparer tous les champs avant d'écrire le premier fichier. Les fichiers validés restent réutilisables après un refus de transaction.
-  for (const item of items) for (const [sha, blob] of (item.fichiers instanceof Map ? item.fichiers : [])) {
-    if (rows.find(r => r.id === item.id).photos.includes(sha)) await repo.putFile(sha, blob, { mime: blob.type });
+  // Les octets et leurs liens sont validés et écrits dans la même transaction.
+  const fichiers = [];
+  for (const item of items) for (const [sha256, blob] of (item.fichiers instanceof Map ? item.fichiers : [])) {
+    if (rows.find(r => r.id === item.id).photos.includes(sha256)) fichiers.push({sha256, blob, meta:{mime:blob.type}});
   }
   const conditions = {
     recipes: [...new Set(rows.map(r => r.recipe_id))].map(id => gardeExistence(id, () => true)),
@@ -59,7 +63,7 @@ export async function enregistrerCuissons(items, { repo = repoModule, session = 
       return null;
     } })),
   };
-  const photos = [...new Set(rows.flatMap(r => r.photos))];
+  const photos = [...new Set(rows.flatMap(r => r.photos))].filter(sha => !fichiers.some(f => f.sha256 === sha));
   if (photos.length) conditions.files = photos.map(sha => gardeExistence(sha, () => true));
   if (session) conditions.cook_sessions = [{ key: session.id, fusion: c => {
     if (!c) erreur('session');
@@ -67,15 +71,19 @@ export async function enregistrerCuissons(items, { repo = repoModule, session = 
     if (c.status !== 'active' || !Array.isArray(c.selected_version_ids) || c.selected_version_ids.length !== rows.length || !rows.every(r => c.selected_version_ids.includes(r.recipe_version_id))) erreur('session');
     return { ...c, progress: { ...c.progress, done_step_ids: [...new Set([...(c.progress?.done_step_ids || []), ...(session.progress?.done_step_ids || [])])] }, status: 'done', ended_at: instant };
   } }];
-  try { await repo.saveBatch({}, { conditions }); }
+  try { await repo.saveBatch({}, { conditions, recettes, fichiers }); }
   catch (e) { if (e?.code === 'deja') return { deja: true, rows: [] }; throw e; }
   return { deja: false, rows };
 }
 
-export async function enregistrerTextePersonnel(store, id, champ, attendu, texte, { repo = repoModule } = {}) {
+export async function enregistrerTextePersonnel(store, id, champ, attendu, texte, { repo = repoModule, recettes = null, recipe = null, ctx = null } = {}) {
   if (!((store === 'recipes' && champ === 'personal_notes') || (store === 'cook_history' && champ === 'notes'))) erreur('reference');
   const valeur = validerTextePersonnel(texte);
-  await repo.saveBatch({}, { conditions: { [store]: [{ key: id, fusion: c => {
+  if (!recettes) {
+    const source = recipe ?? await repo.get('recipes', store === 'recipes' ? id : (await repo.get('cook_history', id))?.recipe_id);
+    recettes = [await capturerRecette(repo, source, {ctx, historique:store === 'cook_history'})].filter(Boolean);
+  }
+  await repo.saveBatch({}, { recettes, conditions: { [store]: [{ key: id, fusion: c => {
     if (!c) erreur('reference');
     if (textePersonnel(c[champ]) !== attendu) erreur('conflit', champ, textePersonnel(c[champ]));
     return { ...c, [champ]: valeur };
@@ -83,7 +91,11 @@ export async function enregistrerTextePersonnel(store, id, champ, attendu, texte
   return valeur;
 }
 
-export async function modifierPhotosCuisson(id, { ajouter = [], retirer = [] } = {}, { repo = repoModule } = {}) {
+export async function modifierPhotosCuisson(id, { ajouter = [], retirer = [] } = {}, { repo = repoModule, recettes = null, fichiers = [], recipe = null, ctx = null } = {}) {
+  if (!recettes) {
+    const source = recipe ?? await repo.get('recipes', (await repo.get('cook_history', id))?.recipe_id);
+    recettes = [await capturerRecette(repo, source, {ctx, historique:true})].filter(Boolean);
+  }
   const ajoutees = photosDeCuisson({ photos: ajouter });
   if (!Array.isArray(ajouter) || ajoutees.length !== new Set(ajouter).size || ajouter.length > 100 || !Array.isArray(retirer)) erreur('photos');
   const conditions = { cook_history: [{ key: id, fusion: c => {
@@ -92,8 +104,9 @@ export async function modifierPhotosCuisson(id, { ajouter = [], retirer = [] } =
     if (photos.length > LIMITES_CUISSON.photos) erreur('photos');
     return { ...c, photos };
   } }] };
-  if (ajoutees.length) conditions.files = ajoutees.map(sha => gardeExistence(sha, () => true));
-  await repo.saveBatch({}, { conditions });
+  const dejaPresentes = ajoutees.filter(sha => !fichiers.some(f => f.sha256 === sha));
+  if (dejaPresentes.length) conditions.files = dejaPresentes.map(sha => gardeExistence(sha, () => true));
+  await repo.saveBatch({}, { conditions, recettes, fichiers });
 }
 
 function choix(options, valeur) {
@@ -180,6 +193,7 @@ export function creerFormulaireCuisson(item, { repo = repoModule, maintenant = m
 
 export function ouvrirCuissons(items, options = {}) {
   const repo = options.repo ?? repoModule, maintenant = options.maintenant ?? maintenantParDefaut;
+  const capture = options.recettes ? Promise.resolve({recettes:options.recettes}) : Promise.all([...new Map(items.map(item => [item.recipe?.id,item.recipe])).values()].map(recipe => capturerRecette(repo, recipe, {ctx:options.ctx, historique:!!options.session}))).then(recettes => ({recettes}), erreur => ({erreur}));
   const stables = items.map(item => ({ ...item, id: item.id || repo.newId('ch') }));
   const forms = stables.map(item => creerFormulaireCuisson(item, { ...options, repo, maintenant }));
   const message = el('p', { role: 'alert', class: 'status warn', hidden: true });
@@ -196,7 +210,8 @@ export function ouvrirCuissons(items, options = {}) {
       enCours = true; enregistrer.disabled = true; annuler.disabled = true; message.hidden = true;
       forms.forEach(f => f.verrouiller(true));
       try {
-        const result = await enregistrerCuissons(stables.map((item, i) => ({ ...item, form: forms[i].lire(), fichiers: forms[i].fichiers })), { ...options, repo, maintenant });
+        const contexte = await capture; if (contexte.erreur) throw contexte.erreur;
+        const result = await enregistrerCuissons(stables.map((item, i) => ({ ...item, form: forms[i].lire(), fichiers: forms[i].fichiers })), { ...options, repo, maintenant, recettes:contexte.recettes });
         (options.toast ?? toastDom)(result.deja ? t('Cette cuisson est déjà enregistrée.') : t('Cuisson enregistrée'));
         fermer(true);
       } catch (e) {
@@ -211,7 +226,7 @@ export function ouvrirCuissons(items, options = {}) {
   });
 }
 
-function ouvrirPhotosCuisson(recipe, cuisson, selection, { repo, pickFiles, toast }) {
+function ouvrirPhotosCuisson(recipe, cuisson, selection, { repo, pickFiles, toast, recettes }) {
   const message = el('p', { role: 'alert', class: 'status warn', hidden: true });
   const signaler = e => { message.hidden = false; message.textContent = ['trop_lourde', 'trop_grande', 'indecodable', 'type'].includes(e?.code) ? messageErreurImage(e) : messageErreurCuisson(e); };
   const photos = creerChoixPhotos({ pickFiles, existantes: photosDeCuisson(cuisson), signaler, avant: () => { message.hidden = true; } });
@@ -229,8 +244,8 @@ function ouvrirPhotosCuisson(recipe, cuisson, selection, { repo, pickFiles, toas
       if (!ajouter.length) { fermer(false); return; }
       enCours = true; photos.verrouiller(true); enregistrer.disabled = true; annuler.disabled = true; message.hidden = true;
       try {
-        for (const sha of ajouter) { const blob = photos.fichiers.get(sha); await repo.putFile(sha, blob, { mime: blob.type }); }
-        await modifierPhotosCuisson(cuisson.id, { ajouter }, { repo });
+        const fichiers = ajouter.map(sha256 => { const blob=photos.fichiers.get(sha256); return {sha256,blob,meta:{mime:blob.type}}; });
+        await modifierPhotosCuisson(cuisson.id, { ajouter }, { repo, recettes, fichiers });
         toast(t('Photos enregistrées.')); fermer(true);
       } catch (e) { signaler(e); }
       finally { enCours = false; photos.verrouiller(false); enregistrer.disabled = false; annuler.disabled = false; }
@@ -241,7 +256,12 @@ function ouvrirPhotosCuisson(recipe, cuisson, selection, { repo, pickFiles, toas
   });
 }
 
-export function ouvrirTextePersonnel({ store, id, champ, valeur, titre }, { repo = repoModule, toast = toastDom, apres = () => {} } = {}) {
+export function ouvrirTextePersonnel({ store, id, champ, valeur, titre }, { repo = repoModule, toast = toastDom, apres = () => {}, recipe = null, ctx = null, recettes = null } = {}) {
+  const capture = (async () => {
+    if (recettes) return {recettes};
+    const source = recipe ?? await repo.get('recipes', store === 'recipes' ? id : (await repo.get('cook_history', id))?.recipe_id);
+    return {recettes:[await capturerRecette(repo, source, {ctx, historique:store === 'cook_history'})].filter(Boolean)};
+  })().catch(erreur => ({erreur}));
   let attendu = textePersonnel(valeur), enCours = false;
   const input = el('textarea', { value: attendu, rows: 7, 'aria-label': titre, style: { width: '100%', minWidth: '0' } });
   const message = el('div', { role: 'alert', class: 'stack' });
@@ -252,7 +272,7 @@ export function ouvrirTextePersonnel({ store, id, champ, valeur, titre }, { repo
   const bouton = el('button', { type: 'button', class: 'btn primary', onClick: async () => {
     if (enCours) return;
     enCours = true; bouton.disabled = true; message.replaceChildren();
-    try { const texte = await enregistrerTextePersonnel(store, id, champ, attendu, input.value, { repo }); fermer(); toast(t('Note enregistrée.')); await apres(texte); }
+    try { const contexte = await capture; if (contexte.erreur) throw contexte.erreur; const texte = await enregistrerTextePersonnel(store, id, champ, attendu, input.value, { repo, recettes:contexte.recettes }); fermer(); toast(t('Note enregistrée.')); await apres(texte); }
     catch (e) {
       message.append(el('p', { class: 'status warn' }, messageErreurCuisson(e)));
       if (e?.code === 'conflit') {
@@ -270,7 +290,7 @@ export function ouvrirTextePersonnel({ store, id, champ, valeur, titre }, { repo
 export async function monterNotesPersonnelles(recipe, options = {}) {
   let valeur = textePersonnel(recipe.personal_notes);
   const contenu = el('div', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }, dataset: { role: 'texte-notes-personnelles' } }, valeur);
-  const btn = el('button', { type: 'button', class: 'btn link', onClick: () => ouvrirTextePersonnel({ store: 'recipes', id: recipe.id, champ: 'personal_notes', valeur, titre: t('Mes notes') }, { ...options, apres: texte => { valeur = texte; contenu.textContent = texte; btn.textContent = texte ? t('Modifier mes notes') : t('Ajouter une note personnelle'); options.apres?.(texte); } }) }, valeur ? t('Modifier mes notes') : t('Ajouter une note personnelle'));
+  const btn = el('button', { type: 'button', class: 'btn link', onClick: () => ouvrirTextePersonnel({ store: 'recipes', id: recipe.id, champ: 'personal_notes', valeur, titre: t('Mes notes') }, { ...options, recipe, apres: texte => { valeur = texte; contenu.textContent = texte; btn.textContent = texte ? t('Modifier mes notes') : t('Ajouter une note personnelle'); options.apres?.(texte); } }) }, valeur ? t('Modifier mes notes') : t('Ajouter une note personnelle'));
   const root = sectionPlain(t('Mes notes'), contenu, btn); root.dataset.role = 'notes-personnelles'; return root;
 }
 
@@ -284,7 +304,7 @@ export function boutonModifierObservation(h, { apres = () => {}, ...options } = 
   return el('button', { type: 'button', class: 'btn small', dataset: { role: 'modifier-observation' }, onClick: () => ouvrirTextePersonnel({ store: 'cook_history', id: h.id, champ: 'notes', valeur, titre: t('Modifier mes observations') }, { ...options, apres: texte => { valeur = texte; apres(texte); } }) }, t('Modifier mes observations'));
 }
 
-export async function monterMesPhotos(recipe, history, { repo = repoModule, ctxF = {}, pickFiles = pickDom, confirmDialog = confirmDom, toast = toastDom, apres = () => {} } = {}) {
+export async function monterMesPhotos(recipe, history, { repo = repoModule, ctxF = {}, ctx = null, lectureSeule = false, consultation = false, pickFiles = pickDom, confirmDialog = confirmDom, toast = toastDom, apres = () => {} } = {}) {
   const root = sectionPlain(t('Mes photos')); root.dataset.role = 'mes-photos';
   const corps = el('div', { class: 'stack' }); root.append(corps);
   let generation = 0, occupe = false;
@@ -302,25 +322,27 @@ export async function monterMesPhotos(recipe, history, { repo = repoModule, ctxF
           const telecharger = gesteTelechargement({ moteur: ctxF.moteur, redessiner: async () => { await relireErreurs(ctxF); await redessiner(); await apres(); } });
           image = el('div', null, el('p', { class: 'muted' }, t('Ta photo n’est pas sur cet appareil.')), vignettePage({ id: 'cuisson-' + h.id, sha256: sha }, file, { ...ctxF, telecharger }));
         }
-        images.append(el('figure', null, image, el('button', { type: 'button', class: 'btn small', onClick: async () => {
+        images.append(el('figure', null, image, lectureSeule ? null : el('button', { type: 'button', class: 'btn small', onClick: async () => {
           if (occupe) return;
           occupe = true; const liberer = protegerSaisie(root);
           try {
+            const recettes = [await capturerRecette(repo, recipe, {ctx, historique:true})];
             if (!await confirmDialog(t('Retirer cette photo de la cuisson ?'), { okLabel: t('Retirer'), cancelLabel: t('Annuler') }) || !root.isConnected) return;
-            await modifierPhotosCuisson(h.id, { retirer: [sha] }, { repo }); await redessiner(); await apres();
+            await modifierPhotosCuisson(h.id, { retirer: [sha] }, { repo, recettes }); await redessiner(); await apres();
           }
           catch (e) { toast(messageErreurCuisson(e)); } finally { occupe = false; liberer(); }
         } }, t('Retirer cette photo'))));
       }
-      groupe.append(el('button', { type: 'button', class: 'btn small', onClick: async () => {
+      if (!lectureSeule) groupe.append(el('button', { type: 'button', class: 'btn small', onClick: async () => {
         if (occupe) return;
         occupe = true; const liberer = protegerSaisie(root);
         try {
+          const recettes = [await capturerRecette(repo, recipe, {ctx, historique:true})];
           const selection = await pickFiles({ accept: 'image/*', multiple: true }); if (!selection?.length || !root.isConnected) return;
           const courante = await repo.get('cook_history', h.id);
           if (!courante || courante.recipe_id !== recipe.id) erreur('reference');
           if (!root.isConnected) return;
-          await ouvrirPhotosCuisson(recipe, courante, selection, { repo, pickFiles, toast });
+          await ouvrirPhotosCuisson(recipe, courante, selection, { repo, pickFiles, toast, recettes });
         } catch (e) { toast(e?.code && ['trop_lourde', 'trop_grande', 'indecodable', 'type'].includes(e.code) ? messageErreurImage(e) : messageErreurCuisson(e)); }
         finally { try { if (root.isConnected) { await redessiner(); await apres(); } } finally { occupe = false; liberer(); } }
       } }, t('Ajouter une photo à cette cuisson')));
@@ -329,7 +351,7 @@ export async function monterMesPhotos(recipe, history, { repo = repoModule, ctxF
     if (g !== generation) { for (const ligne of lignes) for (const img of ligne.querySelectorAll('img')) revoquerUrlDeBlob(img.getAttribute('src')); return; }
     const anciennes = [...corps.querySelectorAll('img')].map(img => img.getAttribute('src')).filter(u => u?.startsWith('blob:'));
     corps.replaceChildren(...lignes); for (const u of anciennes) revoquerUrlDeBlob(u);
-    if (!lignes.length) corps.append(el('p', { class: 'muted' }, t('Ajoute tes photos en enregistrant une cuisson avec « J’ai cuisiné ce plat ».')));
+    if (!lignes.length) corps.append(el('p', { class: 'muted' }, consultation ? t('Aucune photo de cuisson enregistrée.') : t('Ajoute tes photos en enregistrant une cuisson avec « J’ai cuisiné ce plat ».')));
   };
   await redessiner(); return root;
 }

@@ -57,6 +57,11 @@ function listeConditions(conditions) {
     if (!Array.isArray(items)) throw new TypeError('Les conditions de ' + store + ' doivent être un tableau');
     for (const c of items) {
       if (!c || typeof c !== 'object') throw new TypeError('Condition sans clé sur ' + store);
+      // Archive L1 : contrôler l'ensemble courant avant un remplacement, sans fenêtre entre contrôle et vidage.
+      if (c.toutes === true) {
+        if (typeof c.verifier !== 'function' || Object.keys(c).some(k => !['toutes', 'verifier'].includes(k))) throw new TypeError('Condition de magasin invalide sur ' + store);
+        unique(store + '/#all'); liste.push({ store, toutes: true, verifier: c.verifier }); continue;
+      }
       if (c.index != null) {
         const absence = c.absente === true && c.exclus == null;
         if (typeof c.index !== 'string' || !c.index || c.valeur == null || c.key != null || c.patch != null || c.fusion != null || c.attendus != null || (!absence && (!statutsValides(c.exclus) || c.absente != null))) throw new TypeError('Une condition d’index porte index, valeur et des statuts exclus ou absente: true, sans clé ni écriture (' + store + ')');
@@ -92,7 +97,7 @@ function listeConditions(conditions) {
 // change jamais la clé (TypeError, transaction annulée) : la fiche fusionnée s'écrirait sinon À CÔTÉ de l'originale. La portée inclut
 // `outbox` seulement si la base la possède : la capture écrit là, et les bases de test TEST_STORES n'en ont pas.
 // Rend les fiches fusionnées, par magasin ({ [store]: [fiche, …] }) : l'appelant n'a pas à relire la base dans une autre transaction.
-async function ecrireConditionne(db, { puts, deletes, clearStores, origin, payloads, liste }) {
+async function ecrireConditionne(db, { puts, deletes, clearStores, origin, payloads, liste, recettes, lifecycle, archive_import }) {
   const toClear = knownStoreNames(db.stores, clearStores);
   const portee = knownStoreNames(db.stores, [...toClear, ...Object.keys(puts), ...Object.keys(deletes), ...liste.map((c) => c.store), ...(db.stores.outbox ? ['outbox'] : [])]);
   const tx = await db.tx(portee, 'readwrite');
@@ -106,6 +111,11 @@ async function ecrireConditionne(db, { puts, deletes, clearStores, origin, paylo
         const allPuts = { ...puts };
         for (const [i, c] of liste.entries()) {
           const courant = lus[i];
+          if (c.toutes) {
+            const verdict = c.verifier(courant);
+            if (verdict?.then) throw new TypeError('Une vérification transactionnelle reste synchrone');
+            continue;
+          }
           if (c.index) { // aucune fiche de l'index à cette valeur n'a un statut exclu (I-2 : un seul import ouvert par recette)
             const fautive = (Array.isArray(courant) ? courant : []).find((r) => r && (c.absente || c.exclus.includes(r.status)));
             if (fautive) { refus = new TransitionRefusee(c.store, c.index + '=' + String(c.valeur), fautive.status); tx.abort(); return; }
@@ -133,7 +143,7 @@ async function ecrireConditionne(db, { puts, deletes, clearStores, origin, paylo
           allPuts[c.store] = [...(allPuts[c.store] || []), fusion];
           fusionnees[c.store] = [...(fusionnees[c.store] || []), fusion];
         }
-        const extra = db.onMutate ? (db.onMutate({ puts: allPuts, deletes, clearStores, origin, payloads }) || {}) : {};
+        const extra = db.onMutate ? (db.onMutate({ puts: allPuts, deletes, clearStores, origin, payloads, recettes, lifecycle: typeof lifecycle === 'function' ? lifecycle() : lifecycle, archive_import }) || {}) : {};
         for (const [name, rows] of Object.entries(extra)) allPuts[name] = [...(allPuts[name] || []), ...rows];
         ecrire(tx, toClear, allPuts, deletes);
       } catch (error) {
@@ -142,7 +152,7 @@ async function ecrireConditionne(db, { puts, deletes, clearStores, origin, paylo
       }
     };
     for (const [i, c] of liste.entries()) {
-      const request = c.index ? tx.objectStore(c.store).index(c.index).getAll(c.valeur) : tx.objectStore(c.store).get(c.key);
+      const request = c.toutes ? tx.objectStore(c.store).getAll() : c.index ? tx.objectStore(c.store).index(c.index).getAll(c.valeur) : tx.objectStore(c.store).get(c.key);
       request.onsuccess = () => { lus[i] = request.result; if (--restants === 0) ecrireTout(); };
     }
   });
@@ -305,7 +315,7 @@ export class Database {
   // patch fusionné dans la MÊME transaction que tout le reste ; condition fausse → TransitionRefusee, rien d'écrit (ecrireConditionne) ;
   // ce chemin rend les fiches fusionnées par magasin. `null` ou absent : aucune condition, et le chemin ordinaire ne rend rien. Les quatre
   // formes (dont `{ key, fusion }`, lot G) sont décrites au-dessus de listeConditions.
-  async mutate({ puts = {}, deletes = {}, clearStores = [], origin = 'local', payloads = {}, conditions = null } = {}) {
+  async mutate({ puts = {}, deletes = {}, clearStores = [], origin = 'local', payloads = {}, conditions = null, recettes = [], lifecycle = null, archive_import = false } = {}) {
     for (const [name, rows] of Object.entries(puts)) if (!Array.isArray(rows)) throw new TypeError('Les données de ' + name + ' doivent être un tableau');
     for (const [name, keys] of Object.entries(deletes)) if (!Array.isArray(keys)) throw new TypeError('Les clés de ' + name + ' doivent être un tableau');
     // K-6 / S6 : un magasin `noDelete` (assistant_config) n'accepte aucune suppression d'origine locale ou device —
@@ -318,8 +328,8 @@ export class Database {
       }
     }
     const liste = listeConditions(conditions);
-    if (liste.length) return ecrireConditionne(this, { puts, deletes, clearStores, origin, payloads, liste });
-    const extra = this.onMutate ? (this.onMutate({ puts, deletes, clearStores, origin, payloads }) || {}) : {};
+    if (liste.length) return ecrireConditionne(this, { puts, deletes, clearStores, origin, payloads, liste, recettes, lifecycle, archive_import });
+    const extra = this.onMutate ? (this.onMutate({ puts, deletes, clearStores, origin, payloads, recettes, lifecycle: typeof lifecycle === 'function' ? lifecycle() : lifecycle, archive_import }) || {}) : {};
     const allPuts = { ...puts };
     for (const [name, rows] of Object.entries(extra)) allPuts[name] = [...(allPuts[name] || []), ...rows];
     const toClear = knownStoreNames(this.stores, clearStores);

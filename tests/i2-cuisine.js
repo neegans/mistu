@@ -7,7 +7,7 @@ export async function runI2CuisineTests({ eq, ok }) {
   const seed = async (repo) => {
     const recipe = { id: 'r-i2', original_title: 'Soupe', personal_notes: 'Moins de sel', photo_sha256: C, favorite: true };
     const version = { id: 'v-i2', recipe_id: recipe.id, servings: 2, ingredients: [], steps: [], kind: 'extraction' };
-    await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] }); return { recipe, version };
+    await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] }, {conditions:{recipes:[{key:recipe.id,absente:true}]}}); return { recipe, version };
   };
   await run('dates, limites et sélection', async () => {
     const d = await import('../src/domain/cuisine-personnelle.js');
@@ -62,7 +62,7 @@ export async function runI2CuisineTests({ eq, ok }) {
     const { recipe, version } = await seed(repo);
     const r2 = { id: 'r2-i2', original_title: 'Pain' }, v2 = { id: 'v2-i2', recipe_id: r2.id, ingredients: [], steps: [] };
     const session = { id: 'cs-i2', recipe_id: recipe.id, status: 'active', selected_version_ids: [version.id, v2.id], progress: {} };
-    await repo.saveBatch({ recipes: [r2], recipe_versions: [v2], cook_sessions: [session] });
+    await repo.saveBatch({ recipes: [r2], recipe_versions: [v2], cook_sessions: [session] }, {conditions:{recipes:[{key:r2.id,absente:true}]}});
     const items = [
       { recipe, version, id: 'h1', form: { date: '2026-10-28', notes: 'Soupe bonne', photos: [] }, scaled: { ingredients: [] } },
       { recipe: r2, version: v2, id: 'h2', form: { date: '2026-10-28', notes: 'Pain sec', rating: 2, photos: [] }, scaled: { ingredients: [] } },
@@ -91,7 +91,7 @@ export async function runI2CuisineTests({ eq, ok }) {
     const { monterPhotoPlat, reinitialiserPhotoPlat } = await import('../src/ui/photo-plat.js');
     const { recipe, version } = await seed(repo);
     const reference = { id: 'ref-i2', original_title: 'Livre à importer', availability: 'reference_only', personal_notes: 'À essayer dimanche' };
-    await repo.save('recipes', reference);
+    await repo.save('recipes', reference, {conditions:{recipes:[{key:reference.id,absente:true}]}});
     const ctx = async () => {
       const recipes = await repo.all('recipes'), vs = await repo.all('recipe_versions');
       return { recipes, recipesById: new Map(recipes.map(r => [r.id, r])), recipe_versions: vs, versionsByRecipe: repo.groupBy(vs, 'recipe_id'), versionsById: new Map(vs.map(v => [v.id, v])),
@@ -117,7 +117,7 @@ export async function runI2CuisineTests({ eq, ok }) {
       eq(photo.entete.querySelector('img')?.alt, 'Photo du plat', 'I2 retirer la dernière photo revient au livre');
       const r2 = { id: 'rp-i2', original_title: 'Pain', personal_notes: 'Couvrir le saladier' }, v2 = { id: 'vp-i2', recipe_id: 'rp-i2', ingredients: [], steps: [] };
       const session = { id: 'repas-i2', recipe_id: recipe.id, selected_version_ids: [version.id, v2.id], status: 'active', progress: {} };
-      await repo.saveBatch({ recipes: [r2], recipe_versions: [v2], cook_sessions: [session] });
+      await repo.saveBatch({ recipes: [r2], recipe_versions: [v2], cook_sessions: [session] }, {conditions:{recipes:[{key:r2.id,absente:true}]}});
       const sorties = [];
       const cook = await renderCook({ id: session.id }, {}, await ctx(), { repo, maintenant: () => now, toast: () => {}, navigate: url => sorties.push(url) }); scene.append(cook);
       ok(cook.querySelector('[data-role=notes-personnelles-cuisine]')?.textContent.includes(recipe.personal_notes), 'I2 note personnelle visible à côté des étapes');
@@ -234,10 +234,13 @@ export async function runI2CuisineTests({ eq, ok }) {
     try {
       [...vue.querySelectorAll('button')].find(b => b.textContent === 'Ajouter une photo à cette cuisson').click();
       eq(doitRendreApresPasse(passe), false, 'I2 la sélection de fichier en cours protège la fiche');
+      for (let n=0;n<100 && !choisir;n++) await new Promise(resolve=>setTimeout(resolve,5));
       choisir([]);
       for (let n = 0; n < 100 && !doitRendreApresPasse(passe); n++) await new Promise(resolve => setTimeout(resolve, 10));
       eq(doitRendreApresPasse(passe), true, 'I2 annuler le choix de fichier libère le rafraîchissement');
+      choisir = null;
       [...vue.querySelectorAll('button')].find(b => b.textContent === 'Ajouter une photo à cette cuisson').click();
+      for (let n=0;n<100 && !choisir;n++) await new Promise(resolve=>setTimeout(resolve,5));
       vue.remove();
       eq(doitRendreApresPasse(passe), true, 'I2 une vue quittée ne bloque pas la synchronisation des suivantes');
       choisir([]); await new Promise(resolve => setTimeout(resolve, 0));

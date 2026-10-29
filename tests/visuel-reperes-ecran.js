@@ -63,7 +63,7 @@ export async function runVisuelReperesEcranTests({ eq, ok }) {
       } finally { root.dispose(); root.remove(); }
     });
     await run('champs invalides et référence sans version', async repo => {
-      await repo.save('recipes', { id: 'reference', original_title: 'Tomates confites', availability: 'reference_only' });
+      await repo.save('recipes', { id: 'reference', original_title: 'Tomates confites', availability: 'reference_only' }, { conditions: { recipes: [{ key: 'reference', absente: true }] } });
       const root = await renderReperesRoute({ id: 'reference' }, {}, {}, depsDe(repo)); document.body.append(root);
       try { eq(root.querySelector('[name=niveau]').disabled, true, 'Repères écran : référence sans version description seule'); input(root.querySelector('[name=description_fr]'), 'Une recette de tomates.'); await root.attendreEcritures(); root.querySelector('[data-role=enregistrer-reperes]').click(); await root.attendreEcritures(); ok(!!(await repo.get('recipes', 'reference')).reperes, 'Repères écran : référence descriptive enregistrée'); }
       finally { root.dispose(); root.remove(); }

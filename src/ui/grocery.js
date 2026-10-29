@@ -1,3 +1,5 @@
+import { capturerRecette } from './recette-garde.js';
+import { mentionCycleRecette } from './corbeille.js';
 // Liste d'épicerie : consolidation par ingrédient et dimension compatible, quantités par recette consultables, cases persistantes.
 import { el, toast } from '../core/dom.js';
 import { t } from '../core/i18n.js';
@@ -19,6 +21,7 @@ export async function renderShoppingList(params, query, ctx, deps = {}) {
   const copier = el('button', { class: 'btn', onClick: () => transmettre('copier') }, t('Copier'));
   const partager = typeof navigateur.share === 'function' ? el('button', { class: 'btn', onClick: () => transmettre('partager') }, t('Partager')) : null;
   const root = el('div', null, pageHeader(list.title, { back: { href: list.meal_id ? `/meals/${list.meal_id}` : '/meals', label: list.meal_id ? t('Repas') : t('Ma semaine') }, actions: [copier, partager].filter(Boolean) }));
+  root.append(...[...new Set((list.items || []).map(it=>it.recipe_id))].map(id=>ctx.recipesById.get(id)).filter(Boolean).map(mentionCycleRecette));
   root.append(field(t('Contenu à copier ou partager'), select([{ value: 'restants', label: t('Ce qu’il reste à acheter') }, { value: 'complet', label: t('Liste complète') }], mode, value => { mode = value; actualiserSortie(); })), vide);
   actualiserSortie();
   root.append(el('p', { class: 'muted' }, `${items.map((it) => `${it.title}${it.servings ? ` (${it.servings} ${t('portions')})` : ''}`).join(' · ')}`));
@@ -32,8 +35,9 @@ export async function renderShoppingList(params, query, ctx, deps = {}) {
       if (casesEnCours.has(r.key)) return;
       cb.disabled = true; casesEnCours.add(r.key); actualiserSortie();
       try {
+        const recettes = await Promise.all([...new Set((list.items || []).map(it => it.recipe_id))].map(id => capturerRecette(R, ctx.recipesById.get(id), {ctx, historique:true})));
         let casesSauvees;
-        await R.saveBatch({}, { conditions: { shopping_lists: [{ key: list.id, fusion: courant => {
+        await R.saveBatch({}, { recettes, conditions: { shopping_lists: [{ key: list.id, fusion: courant => {
           if (!courant) throw new TransitionRefusee('shopping_lists', list.id, undefined);
           casesSauvees = { ...(courant.checked || {}), [r.key]: valeur };
           return { ...courant, checked: casesSauvees };

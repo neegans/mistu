@@ -68,12 +68,12 @@ export async function sourceDepuisEnvoi(page, image) {
   return dims ? sourceDe({ page_id: page.id, sha256: page.sha256, rotation: rotationDe(page.rotation), largeur: dims.largeur, hauteur: dims.hauteur }) : null;
 }
 
-export async function enregistrerPhotoPage({ repo, recipe, source, blob, importId = null, lectureKey = null }) {
+export async function enregistrerPhotoPage({ repo, recipe, source, blob, importId = null, lectureKey = null, contexte = null }) {
   if (!recipe?.id || !sourceDe(source) || !rectangleValide(source.rectangle) || !(blob instanceof Blob) || blob.type !== 'image/jpeg') throw new Error('recadrage');
+  const garde = contexte || (await repo.capturerContexteRecette?.(recipe)) || { recipe_id: recipe.id, expected_cycle_id: recipe.lifecycle_id ?? null };
   const page = await repo.get('source_pages', source.page_id);
   if (!sourcePhotoIntacte(source, page)) throw new Error('page_modifiee');
   const sha256 = await sha256Hex(blob);
-  await repo.putFile(sha256, blob, { original_filename: 'photo-du-livre.jpg' });
   const photoAvant = recipe.photo_sha256 ?? null;
   const conditions = {
     source_pages: [{ key: source.page_id, fusion: (p) => { if (!sourcePhotoIntacte(source, p)) throw new Error('page_modifiee'); return null; } }],
@@ -89,6 +89,6 @@ export async function enregistrerPhotoPage({ repo, recipe, source, blob, importI
       !relirePhotosPage(i.resultat, i.page_ids).sources.some((s) => JSON.stringify(s) === JSON.stringify(sourceDe(source)))) throw new Error('lecture_modifiee');
     return { ...i, resultat: { ...i.resultat, photo_choice: 'utilisee' } };
   } }];
-  await repo.saveBatch({}, { conditions });
+  await repo.saveBatch({}, { conditions, recettes: [garde], fichiers: [{ sha256, blob, meta: { original_filename: 'photo-du-livre.jpg' } }] });
   return sha256;
 }

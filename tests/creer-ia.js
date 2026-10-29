@@ -8,7 +8,7 @@ import { EN } from '../src/i18n/en.js';
 export async function runCreerIaTests({ eq, ok }) {
   const C = await import('../src/domain/creation-ia.js');
   buildIngredientIndex(INGREDIENTS); // l'index des lignes est global (lines.js:6) : la suite le pose elle-même (F10)
-  eq(APP_VERSION, '0.22.0', 'T1 : APP_VERSION 0.22.0 (lot UI-1)');
+  eq(APP_VERSION, '0.23.0', 'T1 : APP_VERSION 0.23.0 (lot UI-1)');
 
   // --- estCreationIA (C-2, F6)
   const synth = { kind: 'synthesis', provenance: { generated_by: 'ai', creation: { demande: 'x' } } };
@@ -1350,7 +1350,7 @@ export async function runCreerIaTests({ eq, ok }) {
         eq([/\b(actif|total)\b/.test(page.textContent), page.querySelector('.recipe-body')?.contains(page.querySelector('[data-role="notes-ia"]'))], [false, true], 'fiche IA : timeText vide (aucune durée « actif » ni « total ») ; les blocs vivent dans .recipe-body (overflow-wrap, C-7)');
         const marquer = boutons(page, 'Marquer testée');
         eq(marquer.length, 1, 'fiche IA : « Marquer testée » offert sur une synthèse proposée (N-3)');
-        await repoTemp.save('recipe_versions', creation);
+        await repoTemp.saveBatch({ recipes: [fiche], recipe_versions: [creation] }, { conditions: { recipes: [{ key: fiche.id, absente: true }] } });
         marquer[0].click();
         eq(await attendre(async () => (await repoTemp.get('recipe_versions', creation.id))?.status === 'tested'), true, 'fiche IA : « Marquer testée » écrit status tested sur la version de la création');
         const pageTestee = await renderRecipe({ id: fiche.id }, {}, ctxFiche([fiche], [testee]));
@@ -1566,7 +1566,10 @@ export async function runCreerIaTests({ eq, ok }) {
     const creation = { ...fab.version, created_at: '2026-10-18T03:00:00.000Z' };
     const ctxDe = (versions, recipes, session = SESSION) => ({ recipes, docs: [], docsByRecipe: new Map(), ingredientsById: ING, versionsById: new Map(versions.map((v) => [v.id, v])), recipesById: new Map(recipes.map((r) => [r.id, r])), settings: { llm: { provider: 'none' } }, sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session } }, conventionFor: () => null });
     const sansAppel = async () => { throw new Error('aucun appel attendu'); };
-    const monter = async (query, deps = {}, ctx = ctxDe([creation], [fiche])) => { const root = await S.renderCreerIA({}, query, ctx, { creer: sansAppel, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {}, ...deps }); scene.append(root); return root; };
+    // Les scénarios de présentation injectent un dépôt ; le bloc withRepo ci-dessous vérifie les écritures réelles.
+    const depotPresentation = { saveBatch: async () => {}, capturerContexteRecette: async recipe => ({ recipe_id: recipe.id, expected_cycle_id: recipe.lifecycle_id ?? null, owner_id: null }) };
+    const attendreAppel = async pred => { for (let i = 0; i < 200; i++) { if (pred()) return; await new Promise(r => setTimeout(r, 5)); } throw Error('Attente du départ après garde de recette'); };
+    const monter = async (query, deps = {}, ctx = ctxDe([creation], [fiche])) => { const root = await S.renderCreerIA({}, query, ctx, { repo: depotPresentation, creer: sansAppel, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {}, ...deps }); scene.append(root); return root; };
     // Ce que l'assistant rend pour « pour 4 personnes » (son titre n'est pas gardé : une version n'a pas de titre, la fiche garde le sien).
     const adaptee = { etat: 'trouve', raison: null, motif: null, recette: { ...VALIDE, title: 'Saumon au fenouil pour quatre', servings: 4, ingredients: [{ name: 'saumon', quantity: 600, unit: 'g' }, { name: 'fenouil', quantity: 2, unit: 'unité' }] }, avertissements: [], modele: 'm', usage: { entree: 10, sortie: 20 } };
     try {
@@ -1675,14 +1678,14 @@ export async function runCreerIaTests({ eq, ok }) {
       }
 
       await withRepo(async (repo) => {
-        await repo.saveBatch({ recipes: [fiche], recipe_versions: [creation] });
+        await repo.saveBatch({ recipes: [fiche], recipe_versions: [creation] }, { conditions: { recipes: [{ key: fiche.id, absente: true }] } });
         const ficheAvant = await repo.get('recipes', fiche.id);
         const parenteAvant = await repo.get('recipe_versions', creation.id);
         const ctx = ctxDe([parenteAvant], [ficheAvant]);
         const gele = JSON.stringify([ficheAvant, parenteAvant]); // les objets du contexte : jamais modifiés par l'écran
         S.reinitialiserCreation();
         const a = enMain(); const adresses = []; const ecritures = []; const navs = []; const dits = [];
-        const enregistre = { ...repo, newId: repo.newId, saveBatch: async (b) => { ecritures.push(b); return repo.saveBatch(b); } };
+        const enregistre = { ...repo, newId: repo.newId, saveBatch: async (b, options) => { if (Object.values(b).some(rows => rows.length)) ecritures.push(b); return repo.saveBatch(b, options); } };
         const deps = { creer: a.creer, repo: enregistre, remplacerAdresse: (x) => adresses.push(x), navigate: (p) => navs.push(p), toast: (m) => dits.push(m) };
         const root = await monter({ adapter: creation.id }, deps, ctx);
         const ch = bouton(root, 'changement-ia');
@@ -1711,6 +1714,7 @@ export async function runCreerIaTests({ eq, ok }) {
         // P7.1 — un clic = un appel : la parente (la version STOCKÉE, titre de la fiche) et le changement nettoyé ; l'adresse porte le changement (F2)
         const autre = await monter({ q: 'autre chose' }, { creer: a.creer });
         bouton(root, 'creer-ia').click(); await tick();
+        await attendreAppel(() => a.n === 1);
         const [args0] = a.args;
         eq([a.n, args0.parente, args0.changement, args0.demande, args0.filtres, args0.session?.access_token === JETON && !('cfg' in args0), adresses],
           [1, { ...parenteAvant, title: 'Saumon au fenouil' }, 'pour 4 personnes', 'saumon fenouil', { diets: ['sans_lactose'], type: 'plat_principal', servings: 4, maxMinutes: 30 }, true, ['/recipes/creer?q=saumon+fenouil&diets=sans_lactose&type=plat_principal&portions=4&max=30&adapter=rv_x&changement=pour+4+personnes']],
@@ -1730,6 +1734,7 @@ export async function runCreerIaTests({ eq, ok }) {
         bouton(root, 'annuler-ia').click(); await tick();
         const apresAnnuler = [a.deps[0].signal.aborted, S.etatCreation(), bouton(root, 'changement-ia')?.value, bouton(root, 'creer-ia')?.disabled, ecritures.length];
         bouton(root, 'creer-ia').click(); await tick();
+        await attendreAppel(() => a.n === 2);
         a.rendre[1](adaptee); await tick();
         a.rendre[0]({ ...adaptee, recette: { ...adaptee.recette, ingredients: [{ name: 'truite', quantity: 1, unit: 'unité' }] } }); await tick();
         const prop = root.querySelector('.proposition');
@@ -1757,6 +1762,7 @@ export async function runCreerIaTests({ eq, ok }) {
         // F21 — « Recommencer » relance ce qui est PARTI (parente + changement, pas la frappe) ; son échec laisse la proposition payée
         saisir(ch2, 'sans four');
         bouton(root, 'recommencer-ia').click(); await tick();
+        await attendreAppel(() => a.n === 3);
         const args2 = a.args[2];
         a.rendre[2]({ etat: 'indisponible', raison: 'serveur', motif: null }); await tick();
         eq([a.n, args2?.parente?.id, args2?.changement, args2?.demande, textes(root, '[data-role="issue-ia"] small'), root.querySelector('.proposition h2')?.textContent, !!bouton(root, 'garder-ia'), S.etatCreation().memoire.changement, S.etatCreation().memoire.echec?.raison, ecritures.length],

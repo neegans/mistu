@@ -321,6 +321,19 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
       } finally { racine.remove(); UI.reinitialiserImportCible?.(); }
     }));
 
+    for (const changement of ['compte', 'generation']) await bloc('saisie ancienne : ' + changement, () => withRepo(async (repo, db) => {
+      await poser(repo, db); const ed = await db.get('book_editions', 'ed1'), dits = [];
+      const zone = P.saisieIndexManuelle(ed, { repo, toast: m => dits.push(m), ctx: { proprietaireDonnees: null } }); document.body.append(zone);
+      try {
+        if (changement === 'compte') await db.put('sync_state', { key: 'user_id', value: 'nouveau-compte' }, { origin: 'device' });
+        else { const state = await import('../src/ui/state.js'); state.setSyncState({ ...state.getSyncState() }); }
+        zone.querySelector('textarea').value = 'Recette tardive — 12'; zone.querySelector('[data-role="ajouter-saisie"]').click();
+        await attendre(() => dits.length > 0, 'ancien contexte refusé');
+        eq((await db.getAll('recipes')).filter(r => r.original_title === 'Recette tardive').length, 0, 'L1 index : saisie issue d’un ancien ' + changement + ' ne crée rien');
+        eq(zone.querySelector('textarea').value, 'Recette tardive — 12', 'L1 index : refus conserve la saisie après changement de ' + changement);
+      } finally { zone.remove(); }
+    }));
+
     await bloc('saisie à la main : création, et rien de recréé (fiche livre et panneau)', () => withRepo(async (repo, db) => {
       await poser(repo, db, { recettes: [{ id: 'rc_ex', edition_id: 'ed1', original_title: 'Trinity bread', original_language: 'en', availability: 'reference_only', verification_state: 'unverified', printed_page: 24, printed_pages: [{ debut: 24, fin: 26 }], source_page_ids: [], current_version_id: null, tags: [], cuisines: [], favorite: false, created_at: DATE, updated_at: DATE }] });
       const ed = await db.get('book_editions', 'ed1');

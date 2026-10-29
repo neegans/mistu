@@ -103,7 +103,7 @@ export async function runVisuelPhotosTests({ eq, ok }) {
     eq([reessais, !!erreurNode.querySelector('img')], [1, true], 'Photos visibles : seul le réessai explicite lève une erreur fichier');
     const G = await import('../src/ui/photo-gestion.js');
     await withRepo(async (R) => {
-      await R.save('recipes', { id: 'photo-r', original_title: 'Pain', availability: 'reference_only', photo_sha256: sha, photo_origin: 'image', personal_notes: 'Garder' });
+      await R.save('recipes', { id: 'photo-r', original_title: 'Pain', availability: 'reference_only', photo_sha256: sha, photo_origin: 'image', personal_notes: 'Garder' }, {conditions:{recipes:[{key:'photo-r',absente:true}]}});
       await R.putFile(sha, blob); await R.putFile(autre, blob);
       const source = { sha256: sha, personnelle: false, cuisson_id: null };
       const sourceAvant = await R.get('recipes', 'photo-r');
@@ -132,7 +132,7 @@ export async function runVisuelPhotosTests({ eq, ok }) {
       const photos = (await R.get('cook_history', 'photo-h')).photos;
       ok(photos.includes(sha) && !photos.includes(autre), 'Photo gestion : seul le pointeur remplacé change');
       eq((await R.all('cook_history')).length, 1, 'Photo gestion : aucune fausse cuisson créée');
-      await R.save('recipes', { id: 'vide-r', original_title: 'Référence', availability: 'reference_only' });
+      await R.save('recipes', { id: 'vide-r', original_title: 'Référence', availability: 'reference_only' }, {conditions:{recipes:[{key:'vide-r',absente:true}]}});
       const ajoute = await G.modifierPhotoAffichee('vide-r', null, { file: blob, origin: 'photo' }, { repo: R });
       eq([ajoute.issue, (await R.get('recipes', 'vide-r')).availability, (await R.byIndex('cook_history', 'recipe_id', 'vide-r')).length], ['ok', 'reference_only', 0], 'Photo gestion : une référence vide accepte une photo sans version ni cuisson');
       let raceSource = false;
@@ -170,7 +170,7 @@ export async function runVisuelPhotosTests({ eq, ok }) {
       const toile = new OffscreenCanvas(30, 30); toile.getContext('2d').fillStyle = 'red'; toile.getContext('2d').fillRect(0, 0, 30, 30);
       const livre = await toile.convertToBlob({ type: 'image/jpeg' }), shaLivre = await sha256Hex(livre);
       await R.putFile(shaPersonnel, blob); await R.putFile(shaLivre, livre);
-      await R.save('recipes', { id: 'r-deux', original_title: 'Ma recette', photo_sha256: shaLivre, availability: 'reference_only' });
+      await R.save('recipes', { id: 'r-deux', original_title: 'Ma recette', photo_sha256: shaLivre, availability: 'reference_only' }, {conditions:{recipes:[{key:'r-deux',absente:true}]}});
       await R.save('cook_history', { id: 'ch-deux', recipe_id: 'r-deux', cooked_at: '2026-10-28', photos: [shaPersonnel], notes: 'À garder' });
       const transport = creerTransportFactice({ serveur: true }), stockage = creerStockageFactice();
       const moteur1 = createMoteur({ db: premier, getUserId: () => 'u1', transport, stockage, qualite: () => 'originale', fenetre: { document: { visibilityState: 'hidden' } } });

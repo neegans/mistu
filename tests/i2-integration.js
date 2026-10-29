@@ -45,6 +45,7 @@ export async function runI2IntegrationTests({eq,ok}) {
   await run('octets entre appareils', () => withRepo(async (repo,db) => {
     const {sha256Hex}=await import('../src/core/hash.js');
     const sha=await sha256Hex(blob);
+    await repo.saveBatch({recipes:[{id:'r',original_title:'Mon plat',current_version_id:'v'}],recipe_versions:[{id:'v',recipe_id:'r',kind:'extraction',ingredients:[],steps:[]}]},{conditions:{recipes:[{key:'r',absente:true}]}});
     await repo.putFile(sha,blob,{});
     await repo.save('cook_history',{id:'ch-perso',recipe_id:'r',recipe_version_id:'v',cooked_at:'2026-10-28',photos:[sha]});
     await repo.save('library_activity',{id:'consultation-locale-i2',edition_id:'ed-i2',viewed_at:'2026-10-28T12:00:00Z'});

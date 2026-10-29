@@ -6,6 +6,7 @@ import { SYNC_STORES, STORES } from '../model/schema.js';
 import { logError } from '../core/log.js';
 import { projectionFichier, remoteValide } from './tables.js';
 import { conditionFichier, memeRemote, HASH_FICHIER } from './fichiers.js';
+import { idCycle, porteCycle, fusionCycle, CLE_CYCLE_CONFIRME, gardeCompteCycle } from './cycle.js';
 
 // R-L3-12 : les versions AVANT les recettes. Le pointeur d'une recette reçue désigne presque toujours une version
 // créée par le même geste, sur l'autre appareil : lue après la recette, elle serait encore inconnue ici et chaque
@@ -44,6 +45,7 @@ const instant = (valeur) => {
 };
 
 export function decider({ locale, distante, table = null }) {
+  if (table==='recipes' && !distante.deleted_at && (porteCycle(locale)||porteCycle(distante.data)) && idCycle(locale)!==idCycle(distante.data)) return 'cycle';
   if (locale === undefined || locale === null) return distante.deleted_at ? 'ignorer' : 'ecrire';
   // Les deux heures, comparées comme des INSTANTS ; repli sur la chaîne si l'une est illisible, pour rester
   // déterministe. C'est la seule question que I7 pose — et elle se pose aussi à une tombale.
@@ -139,6 +141,7 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
   }
 
   async function appliquerPage(table, lignes, bilan, curseur) {
+    const owner=getUserId();
     const puts = {}; const deletes = {}; const conflits = []; const refile = [];
     // Lot G, ronde 1 (#4, I-G3) : les lignes files ne s'écrivent pas depuis l'instantané lu plus haut (`locale`, hors transaction) mais par une
     // condition `fusion` refaite sur la ligne RELUE dans la transaction de la page (conditionFichier) : une copie téléchargée ou un original
@@ -158,6 +161,19 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       if (refus) return { erreur: refus };
       const locale = await db.get(table, ligne.id);
       const decision = regleDuMagasin(table, decider({ locale, distante: ligne, table }));
+      if (table==='recipes' && !ligne.deleted_at && (decision==='cycle'||porteCycle(ligne.data)||porteCycle(locale))) {
+        const commandes=(await db.getAll('outbox')).filter(e=>e.op==='lifecycle'&&e.id===ligne.id&&(e.user_id==null||e.user_id===getUserId()));
+        const serveur={...ligne.data,updated_at:ligne.updated_at};
+        const resultat=fusionCycle(locale,serveur,commandes);
+        fusions.set(ligne.id,{key:ligne.id,fusion:courant=>{
+          if(idCycle(courant)!==idCycle(locale)) return courant; // geste local fait depuis la lecture : son overlay reste en place
+          return fusionCycle(courant,serveur,commandes).row;
+        }});
+        (puts.sync_state ||= []).push({key:CLE_CYCLE_CONFIRME(ligne.id),value:{data:serveur,server_seq:ligne.server_seq,user_id:getUserId()}});
+        if(resultat.conflit||resultat.bloquees.length) conflits.push({id:`recipes:${ligne.id}`,store:'recipes',record_id:ligne.id,local:locale,server:ligne,at:new Date().toISOString(),kind:'cycle'});
+        for(const e of resultat.bloquees) (puts.outbox ||= []).push({...e,lifecycle_blocked:true,last_error:'cycle'});
+        recues+=1;continue;
+      }
       if (decision === 'renvoyer_seulement') { // K-5 : plus récent ici → repart, SANS entrée de journal
         refile.push(remiseEnFile(table, ligne, locale));
         continue;
@@ -208,14 +224,14 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       if (decision === 'conflit_renvoyer') refile.push(remiseEnFile(table, ligne, locale));
     }
     if (conflits.length) puts.sync_conflicts = conflits;
-    if (refile.length) puts.outbox = refile;
+    if (refile.length) (puts.outbox ||= []).push(...refile);
     // Curseur atomique : il part dans la MÊME transaction que les écritures de sa page. Une page refusée plus haut
     // n'arrive jamais ici, donc rien n'est écrit et le curseur ne bouge pas : la page sera relue telle quelle. Et il
     // ne RECULE jamais — une page dont les server_seq sont sous le curseur est écrite, mais sans le ramener en
     // arrière, sinon tout ce qui est déjà reçu repartirait en boucle.
     const dernier = Math.max(...lignes.map((l) => l.server_seq));
-    puts.sync_state = [{ key: `cursor:${table}`, value: Math.max(curseur, dernier) }];
-    await db.mutate({ puts, deletes, origin: 'remote', conditions: fusions.size ? { files: [...fusions.values()] } : null });
+    (puts.sync_state ||= []).push({ key: `cursor:${table}`, value: Math.max(curseur, dernier) });
+    await db.mutate({ puts, deletes, origin: 'remote', conditions: { ...(fusions.size ? { [table]: [...fusions.values()] } : {}),sync_state:[gardeCompteCycle(owner,getUserId)] } });
     bilan.recues += recues;
     bilan.supprimees += supprimees;
     bilan.conflits += conflits.length;
@@ -229,7 +245,9 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       surProgression({ phase: 'reception', table, n: i + 1, total: liste.length });
       let curseur = (await db.get('sync_state', `cursor:${table}`))?.value || 0;
       for (;;) {
+        const owner=getUserId();
         const { lignes, erreur } = await transport.lire(table, curseur, limite);
+        if(getUserId()!==owner) {bilan.erreur={type:'auth',status:null};return bilan;}
         if (erreur) { bilan.erreur = erreur; logError('sync.pull', { table, reason: erreur.type, status: erreur.status }); return bilan; }
         if (!lignes.length) break;
         const r = await appliquerPage(table, lignes, bilan, curseur);

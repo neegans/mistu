@@ -4,6 +4,7 @@ import { ligneImportNeuve, IMPORTS_OUVERTS } from './import-cible.js';
 import { appelerAssistant, echecDomaine, sessionValide } from './passerelle.js';
 import { construireContexteThermomix, empreinteThermomix, validerReponseThermomix, fabriquerVersionThermomix, lireThermomix } from './thermomix.js';
 import { TransitionRefusee } from '../core/db.js';
+import { contexteRecetteImport, memoireCycleImport, verifierCycleImport, verifierCaptureImport } from './contexte-import.js';
 
 const TERMINES = ['enregistre', 'ignore'];
 const MODIFIABLES = ['a_lancer', 'a_verifier', 'echec'];
@@ -17,7 +18,7 @@ export class ErreurThermomixParcours extends Error {
   constructor(code, extra = {}) { super(code); this.name = 'ErreurThermomixParcours'; this.code = code; this.raison = code; this.extra = extra; }
 }
 const erreur = (code, extra) => new ErreurThermomixParcours(code, extra);
-const convertir = e => e instanceof ErreurThermomixParcours ? e : erreur(typeof e?.raison === 'string' && /^[a-z0-9_:-]{1,100}$/u.test(e.raison) ? e.raison : 'illisible');
+const convertir = e => e instanceof ErreurThermomixParcours ? e : erreur(typeof (e?.raison || e?.code) === 'string' && /^[a-z0-9_:-]{1,100}$/u.test(e.raison || e.code) ? (e.raison || e.code) : 'illisible');
 const device = repo => { const id = repo.deviceId(); if (!propreId(id)) throw erreur('appareil_absent'); return id; };
 const proprietaire = (row, repo) => { if (row.device_id !== device(repo)) throw erreur('autre_appareil'); };
 const estLigne = row => row && row.kind === 'thermomix' && propreId(row.id) && propreId(row.recipe_id) && propreId(row.source_version_id);
@@ -69,16 +70,16 @@ function questionsLues(row) {
   catch { throw erreur('questions_invalides'); }
 }
 
-export async function ouvrirThermomix({ recipeId, versionId, selection = [], demande = '', precisions = {}, langue = 'fr' } = {}, { repo, ...deps } = {}) {
+export async function ouvrirThermomix({ recipeId, versionId, selection = [], demande = '', precisions = {}, langue = 'fr', contexteRecette = null } = {}, { repo, ...deps } = {}) {
   if (!propreId(recipeId) || !propreId(versionId)) throw erreur('source_absente');
   const moi = device(repo), id = repo.newId('imp');
   const refs = { recipe_id: recipeId, source_version_id: versionId };
   const { recipe, source } = await lireSources(refs, repo);
   const contexte = construire(source, recipe, { selection, demande, precisions, langue });
   const row = { ...ligneImportNeuve({ id, kind: 'thermomix', recipe_id: recipeId, device_id: moi }), source_version_id: versionId,
-    contexte, phase: 'selection', revision_brouillon: 0, tentative_id: null, version_id: null, questions: [], copie_de: null };
+    ...memoireCycleImport(contexteRecette || await contexteRecetteImport(repo, recipe)), contexte, phase: 'selection', revision_brouillon: 0, tentative_id: null, version_id: null, questions: [], copie_de: null };
   const conditions = { ...conditionsSource(row, source, recipe), imports: [{ key: id, absente: true }, { index: 'recipe_id', valeur: recipeId, exclus: IMPORTS_OUVERTS }] };
-  try { await repo.saveBatch({ imports: [row] }, { conditions }); }
+  try { await repo.saveBatch({ imports: [row] }, { recettes: [contexteRecette || await contexteRecetteImport(repo, recipe, row)], conditions }); }
   catch (e) { if (e instanceof TransitionRefusee && e.store === 'imports') throw erreur('import_ouvert'); throw convertir(e); }
   return lireBrouillonThermomix(id, { repo, ...deps });
 }
@@ -92,11 +93,12 @@ export async function lireBrouillonThermomix(importId, { repo } = {}) {
     questions = questionsLues(row);
     if (row.resultat != null) resultat = validerReponseThermomix(row.resultat, contexte);
   } catch (e) { validation_erreur = convertir(e).code; }
+  try { verifierCycleImport(recipe, row); } catch (e) { validation_erreur ||= convertir(e).code; }
   return { ...row, contexte, resultat, questions, validation_erreur, lecture_seule: row.device_id !== device(repo) };
 }
 
-export async function modifierThermomix(importId, patch = {}, { repo } = {}) {
-  const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo);
+export async function modifierThermomix(importId, patch = {}, { repo, contexteRecette = null } = {}) {
+  const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo); verifierCaptureImport(row, contexteRecette);
   if (!MODIFIABLES.includes(row.status)) throw erreur(row.status === 'en_cours' ? 'appel_en_cours' : 'brouillon_ferme');
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).some(k => !['selection', 'demande', 'precisions', 'langue'].includes(k))) throw erreur('requete');
   const { recipe, source } = await lireSources(row, repo); verifierContexte(row, source, recipe);
@@ -106,7 +108,7 @@ export async function modifierThermomix(importId, patch = {}, { repo } = {}) {
     memeBrouillon(current, row, repo);
     return { contexte, questions, status: 'a_lancer', phase: 'selection', revision_brouillon: revision(row) + 1,
       resultat: null, reponse_brute: null, erreur: null, model: null, tentative_id: null, document_id_vol: null, version_id: null };
-  }, conditions: conditionsSource(row, source, recipe) });
+  }, recettes: [await contexteRecetteImport(repo, recipe, row, {contexte:contexteRecette})], conditions: conditionsSource(row, source, recipe) });
   return lireBrouillonThermomix(importId, { repo });
 }
 
@@ -162,8 +164,8 @@ async function ecrireEchec(row, code, extra, session, deps) {
 }
 
 export async function proposerThermomix({ importId, session, documentId } = {}, deps = {}) {
-  const { repo } = deps;
-  let row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo);
+  const { repo, contexteRecette = null } = deps;
+  let row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo); verifierCaptureImport(row, contexteRecette);
   if (row.status === 'en_cours') throw erreur('appel_en_cours');
   if (!['a_lancer', 'echec'].includes(row.status)) throw erreur(TERMINES.includes(row.status) ? 'brouillon_ferme' : 'demande_a_modifier');
   const { recipe, source } = await lireSources(row, repo);
@@ -182,7 +184,7 @@ export async function proposerThermomix({ importId, session, documentId } = {}, 
       if (!compteIdentique(session, deps)) throw erreur('compte_change');
       return { status: 'en_cours', phase: 'appel', tentative_id: tentativeId, appels: (Number.isSafeInteger(current.appels) ? current.appels : 0) + 1,
         document_id_vol: documentId, started_at: quand, battement_at: quand, finished_at: null, resultat: null, reponse_brute: null, erreur: null, model: null };
-    }, conditions: conditionsSource(row, source, recipe) });
+    }, recettes: [await contexteRecetteImport(repo, recipe, row, {contexte:contexteRecette})], conditions: conditionsSource(row, source, recipe) });
   } catch (e) { if (e instanceof TransitionRefusee) throw erreur('appel_en_cours'); throw convertir(e); }
 
   try {
@@ -204,7 +206,7 @@ export async function proposerThermomix({ importId, session, documentId } = {}, 
       if (deps.signal?.aborted) throw erreur('annule');
       return { status: 'a_verifier', phase: resultat.type, resultat, questions: resultat.type === 'questions' ? resultat.questions : questionsLues(row),
         erreur: null, reponse_brute: null, model, usage, document_id_vol: null, finished_at: (deps.maintenant ?? maintenantParDefaut)() };
-    }, conditions: conditionsSource(row, source, recipe) }); }
+    }, recettes: [await contexteRecetteImport(repo, recipe, row, { historique: true, contexte:contexteRecette })], conditions: conditionsSource(row, source, recipe) }); }
     catch (e) { if (e instanceof TransitionRefusee || ['brouillon_modifie', 'tentative_perimee'].includes(e.code)) return await repo.get('imports', importId); throw e; }
   } catch (e) {
     if (e.code === 'compte_change') throw e;
@@ -244,9 +246,9 @@ export async function copierBrouillonThermomix(importId, deps = {}) {
   return lireBrouillonThermomix(copie.id, deps);
 }
 
-export async function garderThermomix({ importId, relu } = {}, { repo, maintenant = maintenantParDefaut } = {}) {
+export async function garderThermomix({ importId, relu, contexteRecette = null } = {}, { repo, maintenant = maintenantParDefaut } = {}) {
   if (relu !== true) throw erreur('relecture_requise');
-  const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo);
+  const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo); verifierCaptureImport(row, contexteRecette);
   const deja = async current => {
     if (current?.status !== 'enregistre' || !propreId(current.version_id)) return null;
     verifierLigne(current); proprietaire(current, repo);
@@ -277,7 +279,7 @@ export async function garderThermomix({ importId, relu } = {}, { repo, maintenan
       memeBrouillon(current, row, repo);
       if (current.tentative_id !== row.tentative_id || canon(current.resultat) !== canon(row.resultat)) throw erreur('tentative_perimee');
       return { status: 'enregistre', phase: 'termine', version_id: version.id, reponse_brute: null, finished_at: maintenant() };
-    }, puts: { recipe_versions: [version] }, conditions });
+    }, puts: { recipe_versions: [version] }, recettes: [await contexteRecetteImport(repo, recipe, row, {contexte:contexteRecette})], conditions });
     return await repo.get('recipe_versions', version.id);
   } catch (e) {
     if (e instanceof TransitionRefusee) { const v = await deja(await repo.get('imports', importId)); if (v) return v; }

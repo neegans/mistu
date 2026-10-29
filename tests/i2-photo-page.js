@@ -60,10 +60,10 @@ export async function runI2PhotoPageTests({ eq, ok }) {
     const hash = await (await import('../src/core/hash.js')).sha256Hex(blob);
     const calls = []; let courant = { ...recipe };
     const repo = { get: async (s) => s === 'source_pages' ? page : courant, putFile: async () => { calls.push('file'); return H('b'); },
-      saveBatch: async (_, { conditions }) => { courant = conditions.recipes[0].fusion(courant); calls.push('recipe'); } };
+      saveBatch: async (_, { conditions, fichiers }) => { courant = conditions.recipes[0].fusion(courant); calls.push([fichiers[0]?.sha256, courant.photo_sha256, fichiers[0]?.blob === blob]); } };
     const source = { page_id: 'p1', sha256: H('a'), rotation: 0, largeur: 400, hauteur: 200, rectangle };
     await P.enregistrerPhotoPage({ repo, recipe, source, blob });
-    eq(calls, ['file', 'recipe'], 'P03 : octets avant pointeur');
+    eq(calls, [[hash, hash, true]], 'P03 : octets et pointeur dans la même écriture conditionnée');
     eq([courant.photo_sha256, courant.photo_origin, courant.personal_notes], [hash, 'image', 'À garder'], 'P03 : photo livre sans effacer Mes notes');
     eq(courant.photo_provenance.rectangle, rectangle, 'P03 : géométrie traçable');
     courant.photo_sha256 = H('c'); let conflit = false;
@@ -90,7 +90,7 @@ export async function runI2PhotoPageTests({ eq, ok }) {
       }
       const recipe = { id: 'rc_course', original_title: 'Plat', availability: 'available', source_page_ids: sources.map((s) => s.page_id), photo_sha256: H('a') };
       await repo.saveBatch({ recipes: [recipe], imports: [{ id: 'im_course', recipe_id: recipe.id, kind: 'recette', status: 'enregistre', page_ids: recipe.source_page_ids,
-        resultat: { photo_sources: sources, photo_propositions: sources.map((s) => ({ ...s, rectangle })) } }] });
+        resultat: { photo_sources: sources, photo_propositions: sources.map((s) => ({ ...s, rectangle })) } }] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
       let ouvrirLecture, fichierDemande = false, decisions = 0, repondre;
       const attenteLecture = new Promise((r) => { ouvrirLecture = r; });
       const espion = { ...repo, getFile: async (sha) => { if (sha === sources[1].sha256) { fichierDemande = true; await attenteLecture; } return repo.getFile(sha); } };
@@ -138,7 +138,7 @@ export async function runI2PhotoPageTests({ eq, ok }) {
       const resultat = { title: 'Plat', ingredients: [{ source_text: '1 pomme' }], steps: [], photo_sources: [source], photo_propositions: [{ ...source, rectangle }] };
       await repo.saveBatch({ source_pages: [{ id: 'pg_i2', sha256: hash, rotation: 0, printed_page: 12 }], recipes: [recipe],
         recipe_versions: [{ id: 'rv_i2', recipe_id: recipe.id, ingredients: [], steps: [], notes: 'Texte original' }],
-        imports: [{ id: 'im_i2', recipe_id: recipe.id, kind: 'recette', status: 'enregistre', page_ids: ['pg_i2'], resultat }] });
+        imports: [{ id: 'im_i2', recipe_id: recipe.id, kind: 'recette', status: 'enregistre', page_ids: ['pg_i2'], resultat }] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
       const versionAvant = JSON.stringify(await repo.get('recipe_versions', 'rv_i2'));
       const vue = await panneauPhotoPage(recipe, {}, { repo, ctxF: {}, toast: () => {} });
       const cadreMobile = document.createElement('div'); cadreMobile.style.width = '320px'; cadreMobile.append(vue); document.body.append(cadreMobile);
@@ -166,7 +166,7 @@ export async function runI2PhotoPageTests({ eq, ok }) {
         const filesAvant = (await db.getAll('files')).length;
         const stale = { ...source, rectangle };
         const jpeg = await (await import('../src/domain/photo-page.js')).preparerRecadragePage(original, { rectangle });
-        const concurrent = { ...repo, putFile: async (...a) => { await repo.putFile(...a); await repo.save('source_pages', { id: source.page_id, sha256: hash, rotation: 90 }); } };
+        const concurrent = { ...repo, saveBatch: async (...a) => { await repo.save('source_pages', { id: source.page_id, sha256: hash, rotation: 90 }); return repo.saveBatch(...a); } };
         let refuse = false;
         try { await (await import('../src/domain/photo-page.js')).enregistrerPhotoPage({ repo: concurrent, recipe: relue, source: stale, blob: jpeg }); } catch { refuse = true; }
         ok(refuse, 'P02 : rotation modifiée entre préparation et transaction refusée');

@@ -7,6 +7,7 @@ import { t } from '../core/i18n.js';
 import { buildDocs, buildLabelIndex } from '../domain/search.js';
 import { buildIngredientIndex } from '../domain/lines.js';
 import { loadUnits } from '../domain/units.js';
+import { recetteActive } from '../domain/cycle-recette.js';
 
 let cache = null;
 on('change', () => { cache = null; });
@@ -246,6 +247,7 @@ export async function getData(force = false) {
   buildLabelIndex(d.ingredients);
   buildIngredientIndex(d.ingredients);
   const settings = await repo.getSettings();
+  const proprietaireDonnees = (await repo.db.get('sync_state', 'user_id'))?.value ?? null;
   const ingredientsById = repo.indexBy(d.ingredients);
   const editionsById = repo.indexBy(d.book_editions);
   const booksById = repo.indexBy(d.books);
@@ -257,7 +259,7 @@ export async function getData(force = false) {
   const docs = buildDocs({ recipes: d.recipes, versions: d.recipe_versions, editions: d.book_editions, books: d.books, dishes: d.dishes, links: d.dish_recipe_links, translations: d.recipe_translations, history: d.cook_history });
   const docsByRecipe = new Map(docs.map((x) => [x.recipe.id, x]));
   cache = {
-    ...d, settings, sync, ingredientsById, editionsById, booksById, dishesById, recipesById, versionsById, versionsByRecipe, pagesById, docs, docsByRecipe,
+    ...d, proprietaireDonnees, recettesActives: d.recipes.filter(recetteActive), docsActifs: docs.filter(d => recetteActive(d.recipe)), settings, sync, ingredientsById, editionsById, booksById, dishesById, recipesById, versionsById, versionsByRecipe, pagesById, docs, docsByRecipe,
     editionLabel(edition) {
       if (!edition) return '';
       const book = booksById.get(edition.book_id);
@@ -272,3 +274,7 @@ export async function getData(force = false) {
 }
 
 export function invalidate() { cache = null; }
+
+// Les maps restent exhaustives pour les anciennes références ; seuls les nouveaux choix utilisent ces projections.
+export const recettesActives = ctx => (ctx.recettesActives ?? ctx.recipes ?? []).filter(recetteActive);
+export const documentsActifs = ctx => (ctx.docsActifs ?? ctx.docs ?? []).filter(d => recetteActive(d.recipe));

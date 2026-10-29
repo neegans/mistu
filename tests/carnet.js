@@ -424,8 +424,8 @@ export async function runCarnetTests({ eq, ok }) {
         const recettes = await renderLibrary({}, { tab: 'recettes' }, ctx, fauxMatchMedia(false));
         const inconnu = await renderLibrary({}, { tab: 'zzz' }, ctx, fauxMatchMedia(false));
         eq([segment(livres), action(livres), !!livres.querySelector('.grid.livres'), livres.querySelectorAll('.grid').length, !!livres.querySelector('.grille-plats'), segment(plats), action(plats), !!plats.querySelector('.grille-plats'), segment(recettes), !!recettes.querySelector('.grille-plats'), segment(inconnu), titres(inconnu).length, livres.querySelector('header > a')],
-          ['Livres', ['btn primary', '#/add/livre', 'Ajouter un livre'], true, 1, false, 'Plats', null, false, 'Recettes', true, 'Recettes', 4, null],
-          '?tab=books : Livres actif, « Ajouter un livre » → #/add/livre (neuf, H-15), la grille des couvertures porte .grid.livres (§ 3.3 : minmax 170 px, règle de T1) et reste la seule .grid ; ?tab=dishes : Plats actif, AUCUNE action ; ?tab=recettes et un ?tab inconnu : la grille des plats ; aucun retour « ← … » sous Livres');
+          ['Livres', ['btn primary', '#/add/livre', 'Ajouter un livre'], true, 1, false, 'Plats', ['btn', '#/corbeille', 'Corbeille'], false, 'Recettes', true, 'Recettes', 4, null],
+          '?tab=books : Livres actif, « Ajouter un livre » → #/add/livre (neuf, H-15), la grille des couvertures porte .grid.livres (§ 3.3 : minmax 170 px, règle de T1) et reste la seule .grid ; ?tab=dishes : Plats actif, accès à la corbeille ; ?tab=recettes et un ?tab inconnu : la grille des plats ; aucun retour « ← … » sous Livres');
         eq([[...livres.querySelectorAll('section.plain > h2')].map((h) => h.textContent), livres.querySelectorAll('section.card').length, livres.querySelector('section.plain article.item-link.card h3 a')?.getAttribute('href')],
           [['Liens web gardés'], 0, '#/recipes/rB'], 'sous Livres : « Liens web gardés » (B et E, signets sans livre, en carte horizontale) est une section PLAIN ; aucune section .card (D-UI-8)');
         // Le bouton mobile : a.btn.primary.big.block « Ajouter une recette » sous la grille, [hidden] ≥ 760 px (matchMedia injecté). Ronde 1 : l'abonnement à
@@ -1945,7 +1945,7 @@ export async function runCarnetTests({ eq, ok }) {
         const italienne = { id: 'carnet-langue-it', original_title: 'Pane', original_language: 'it', availability: 'available', current_version_id: 'carnet-langue-v', source_page_ids: [] };
         const version = { id: 'carnet-langue-v', recipe_id: italienne.id, kind: 'extraction', servings: 2, ingredients: [{ id: 'langue-farine', source_text: 'Farina', name_text: 'farina' }], steps: [{ id: 'langue-etape', position: 1, text: 'Impastare.', timers: [] }] };
         const inconnue = { ...italienne, id: 'carnet-langue-inconnue', original_language: null, current_version_id: 'carnet-langue-inconnue-v' };
-        await repo.saveBatch({ recipes: [italienne, inconnue], recipe_versions: [version, { ...version, id: inconnue.current_version_id, recipe_id: inconnue.id }] });
+        await repo.saveBatch({ recipes: [italienne, inconnue], recipe_versions: [version, { ...version, id: inconnue.current_version_id, recipe_id: inconnue.id }] }, {conditions:{recipes:[{key:italienne.id,absente:true},{key:inconnue.id,absente:true}]}});
         const avant = { fiche: await repo.get('recipes', italienne.id), version: await repo.get('recipe_versions', version.id) };
         const scene = document.createElement('div'); document.body.append(scene);
         const ctx = async () => ({ ...await getData(true), sync: {} });

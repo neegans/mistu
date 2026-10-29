@@ -6,6 +6,7 @@ import { rectangleValide, dimensionsImage } from '../core/image.js';
 import * as repoModule from '../model/repo.js';
 import { relirePhotosPage, sourcePhotoIntacte, preparerRecadragePage, enregistrerPhotoPage, clePhotoLecture } from '../domain/photo-page.js';
 import { section, field, contexteFichiers, gesteTelechargement, vignettePage } from './components.js';
+import { capturerRecette } from './recette-garde.js';
 import { protegerSaisie } from './state.js';
 
 const CENTRE = Object.freeze({ x: 0.25, y: 0.25, largeur: 0.5, hauteur: 0.5 });
@@ -14,6 +15,7 @@ const clamp = (x) => Math.max(0, Math.min(1, x));
 
 export async function panneauPhotoPage(recipe, ctx = {}, deps = {}) {
   const repo = deps.repo ?? repoModule, dire = deps.toast ?? toast, confirmer = deps.confirmDialog ?? confirmDialog;
+  const contexte = await capturerRecette(repo, recipe, { ctx });
   const imports = typeof repo.byIndex === 'function' ? await repo.byIndex('imports', 'recipe_id', recipe.id) : (ctx.imports || []);
   const lignes = imports.filter((i) => i?.recipe_id === recipe.id && i.kind === 'recette' && i.status === 'enregistre')
     .sort((a, b) => String(b.finished_at || b.updated_at || '').localeCompare(String(a.finished_at || a.updated_at || '')));
@@ -154,7 +156,7 @@ export async function panneauPhotoPage(recipe, ctx = {}, deps = {}) {
     try {
       if (recetteDepart.photo_sha256 && !await confirmer(t('Remplacer la photo du livre par ce cadrage ?'), { okLabel: t('Remplacer'), cancelLabel: t('Annuler') })) return;
       const image = await preparerRecadragePage(imageSource, { rotation: selection.rotation, rectangle: selection.rectangle });
-      await enregistrerPhotoPage({ repo, recipe: recetteDepart, source: selection, blob: image, importId, lectureKey });
+      await enregistrerPhotoPage({ repo, recipe: recetteDepart, source: selection, blob: image, importId, lectureKey, contexte });
       liberer();
       message.textContent = t('Photo du livre enregistrée.');
       jpeg = null;

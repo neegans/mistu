@@ -47,7 +47,7 @@ export async function runVisuelIntegrationTests({ eq, ok }) {
   });
   await run('référence sans version', () => withRepo(async repo => {
     const r = { ...recipe, current_version_id: null, availability: 'reference_only' };
-    await repo.save('recipes', r);
+    await repo.save('recipes', r, { conditions: { recipes: [{ key: r.id, absente: true }] } });
     const { getData } = await import('../src/ui/state.js');
     const { renderRecipe } = await import('../src/ui/recipe.js');
     const root = await renderRecipe({ id: r.id }, {}, await getData(true), { repo });
@@ -59,7 +59,7 @@ export async function runVisuelIntegrationTests({ eq, ok }) {
     } finally { root.dispose?.(); root.remove(); }
   }));
   await run('cuisine étape prioritaire', () => withRepo(async repo => {
-    await repo.saveBatch({ recipes: [{ ...recipe, availability: 'available' }], recipe_versions: [version], cook_sessions: [{ id: 'visuel-cs', recipe_id: recipe.id, selected_version_ids: [version.id], servings: 4, status: 'active', progress: {} }] });
+    await repo.saveBatch({ recipes: [{ ...recipe, availability: 'available' }], recipe_versions: [version], cook_sessions: [{ id: 'visuel-cs', recipe_id: recipe.id, selected_version_ids: [version.id], servings: 4, status: 'active', progress: {} }] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
     const { getData } = await import('../src/ui/state.js');
     const { renderCook } = await import('../src/ui/cook.js');
     const root = await renderCook({ id: 'visuel-cs' }, {}, await getData(true), { repo });
@@ -95,7 +95,7 @@ export async function runVisuelIntegrationTests({ eq, ok }) {
     const v = { ...version, total_minutes: 60, active_minutes: 20 };
     const r = { ...recipe, availability: 'available' };
     r.reperes = fusionnerReperes(null, { corrections: fabriquerCorrectionsReperes({ temps: null }, construireContexteReperes({ recipe: r, version: v }), '2026-10-28T12:00:00Z') });
-    await repo.saveBatch({ recipes: [r], recipe_versions: [v] });
+    await repo.saveBatch({ recipes: [r], recipe_versions: [v] }, { conditions: { recipes: [{ key: r.id, absente: true }] } });
     const { getData } = await import('../src/ui/state.js');
     const { renderRecipe } = await import('../src/ui/recipe.js');
     const { recipeCard } = await import('../src/ui/components.js');

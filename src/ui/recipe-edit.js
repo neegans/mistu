@@ -1,3 +1,5 @@
+import { recetteActive } from '../domain/cycle-recette.js';
+import { mentionCycleRecette } from './corbeille.js';
 // Éditeur de version : extraction (saisie ou IA), correction ciblée, adaptation personnelle, traduction (spec §3.3, §6, §16).
 // L'original n'est jamais réécrit : chaque enregistrement crée une nouvelle RecipeVersion liée à son parent.
 import { estThermomix } from '../domain/thermomix.js';
@@ -21,6 +23,7 @@ import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes 
 import { lireDansLeJournal, relireDuJournal, phraseEchec, cleLecture, tenirVol, libererVol } from './import-cible.js';
 import { blocApparierLecture } from './regroupement.js';
 import { lireTraduction, verifierSourceTraduction, validerContenuTraduction, projectionSourceTraduction } from '../domain/traductions.js';
+import { capturerRecette } from './recette-garde.js';
 
 const SUBRECIPE_RE = /(?:voir|see|cf\.?)\s+(?:la\s+)?(?:page|p\.)\s*(\d{1,4})|\bp\.\s*(\d{1,4})\b/gi;
 
@@ -31,6 +34,9 @@ export const cuisinesDepuis = (f) => Array.isArray(f?.cuisines) ? [...f.cuisines
 export async function renderRecipeEdit(params, query, ctx) {
   const recipe = params.id ? ctx.recipesById.get(params.id) : null;
   if (params.id && !recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
+  if (recipe && !recetteActive(recipe)) return mentionCycleRecette(recipe);
+  const recipeIdOuvert = recipe?.id || repo.newId('rc');
+  const gardeRecette = await capturerRecette(repo, recipe || { id: recipeIdOuvert }, { ctx, creation: !recipe });
   const versions = recipe ? (ctx.versionsByRecipe.get(recipe.id) || []) : [];
   const kind = query.kind || (recipe && versions.length ? 'correction' : 'extraction');
   // `?v=` n'est suivi que pour une version de CETTE fiche (ronde 1) : jamais la base, ni l'héritage de lecture, d'une autre recette — retour à la courante.
@@ -38,7 +44,7 @@ export async function renderRecipeEdit(params, query, ctx) {
   const base = recipe ? ((demandee?.recipe_id === recipe.id ? demandee : null) || currentVersion(recipe, versions)) : null;
   const translationLocale = ['fr', 'en'].includes(query.locale) ? query.locale : f_defaultTranslation(recipe);
   // La traduction vérifie ses bornes et sa structure AVANT les jointures des champs de l'éditeur culinaire.
-  if (kind === 'translation') return translationEditor({ recipe, base, ctx, f: { translationLocale } });
+  if (kind === 'translation') return translationEditor({ recipe, base, ctx, gardeRecette, f: { translationLocale } });
   // Import ciblé (spec § 4.3.7, N5) : une étape de la version de départ qui porte un saut de ligne a été lue ENTIÈRE par l'assistant ; l'éditeur
   // passe alors en « une étape par paragraphe » (zone jointe par une ligne vide, aide adaptée, aperçu et save() par parseStepsBlock parParagraphe) ;
   // sinon rien ne change (une étape par ligne ou par paragraphe, aide actuelle : une étape ajoutée sur une nouvelle ligne reste une étape).
@@ -230,6 +236,7 @@ export async function renderRecipeEdit(params, query, ctx) {
             for (const p of pages) { const fl = await repo.getFile(p.sha256); images.push(await pagePourEnvoi(fl.blob)); } // F-3 : la copie envoyée est réduite
             const courant = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) }); // relue au clic : un jeton expiré se rafraîchit
             configure = courant.configured;
+            await repo.saveBatch({}, { recettes: [gardeRecette] });
             remplir(await extractRecipeFromImages(courant, images), courant.modele || courant.name);
           } finally { libererVol(jeton); }
         }
@@ -307,7 +314,7 @@ export async function renderRecipeEdit(params, query, ctx) {
     const steps = parseStepsBlock(f.stepsText, { parParagraphe });
     const n = (v) => (v === '' || v === null || v === undefined ? null : Number(v));
     const targetRecipe = recipe || null;
-    const recipeId = targetRecipe?.id || repo.newId('rc');
+    const recipeId = recipeIdOuvert;
     const hasIng = parsedLines.length > 0, hasSteps = steps.length > 0;
     const availability = hasIng && hasSteps ? 'available' : (hasIng || hasSteps) ? 'partial' : 'reference_only';
     const convention = edition?.unit_convention_id ? getConvention(edition.unit_convention_id) : null;
@@ -402,7 +409,7 @@ export async function renderRecipeEdit(params, query, ctx) {
     if (fermer) {
       const cle = lecturePosee.cle;
       const cloture = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', ligneLue.id, c.status); return { status: 'enregistre', reponse_brute: null, finished_at: repo.nowIso() }; };
-      try { await repo.transitionner('imports', ligneLue.id, { attendus: ['a_verifier'], patch: cloture, puts: lot, ...(conditionsSeance ? { conditions: conditionsSeance } : {}) }); }
+      try { await repo.transitionner('imports', ligneLue.id, { attendus: ['a_verifier'], patch: cloture, puts: lot, recettes: [gardeRecette], ...(conditionsSeance ? { conditions: conditionsSeance } : {}) }); }
       catch (e) {
         if (!(e instanceof TransitionRefusee)) throw e;
         // Ronde 1 (§ 4.8.1 point 2, repris par § 4.8.2 point 5) : un refus de la SÉANCE garde la lecture posée — le geste suivant la clôt sans la séance.
@@ -411,7 +418,7 @@ export async function renderRecipeEdit(params, query, ctx) {
         toast(t('La recette n’a pas pu être enregistrée. Réessaie.'));
         return;
       }
-    } else await repo.saveBatch(lot, conditionFiche ? { conditions: conditionFiche } : {});
+    } else await repo.saveBatch(lot, { recettes: [gardeRecette], ...(conditionFiche ? { conditions: conditionFiche } : {}) });
     toast(kind === 'adaptation' ? t('Ma version enregistrée') : t('Recette enregistrée'));
     navigate(`/recipes/${recipeId}?v=${version.id}`);
   }
@@ -420,7 +427,7 @@ export async function renderRecipeEdit(params, query, ctx) {
 function f_defaultTranslation(recipe) { return recipe?.original_language === 'en' ? 'fr' : 'en'; }
 
 // Traduction d'une version précise : signalée comme telle, sans devenir une adaptation culinaire (spec §14, §29.1).
-function translationEditor({ recipe, base, ctx, f }) {
+function translationEditor({ recipe, base, ctx, f, gardeRecette }) {
   if (!base) return el('div', { class: 'card' }, t('Aucune version à traduire.'));
   const existing = ctx.recipe_translations.find((tr) => tr.recipe_version_id === base.id && tr.locale === f.translationLocale);
   const lecture = lireTraduction(existing, base);
@@ -492,7 +499,7 @@ function translationEditor({ recipe, base, ctx, f }) {
     enCours = true; enregistrer.disabled = true;
     try {
       const row = { id: existing?.id || repo.newId('tr'), recipe_version_id: base.id, locale: f.translationLocale, alignment_format: 1, translated_content: content, origin: 'manual', verification_state: 'unverified' };
-      await repo.saveBatch({ recipe_translations: [row] }, { conditions: {
+      await repo.saveBatch({ recipe_translations: [row] }, { recettes: [gardeRecette], conditions: {
         recipes: [{ key: recipe.id, fusion: courante => {
           if (!courante) throw new TransitionRefusee('recipes', recipe.id, null);
           if (courante.original_title !== sourceTitre) throw new TransitionRefusee('recipe_versions', base.id, null);

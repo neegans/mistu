@@ -665,7 +665,7 @@ export async function runLectureWebTests({ eq, ok }) {
         db.mutate = (o) => { appels.push(Object.keys(o.puts || {}).concat(Object.keys(o.conditions || {})).sort()); return mutate(o); };
         try { bouton(root, 'Enregistrer').click(); await attendre(() => navs.length > 0, 'navigation'); } finally { db.mutate = mutate; }
         const e1 = await db.get('recipes', 'rc_e1'); const v1 = await db.get('recipe_versions', e1.current_version_id); const i1 = (await db.byIndex('imports', 'recipe_id', 'rc_e1'))[0];
-        eq(appels, [['imports', 'recipe_versions', 'recipes']], 'Enregistrer : UNE transaction — la condition sur imports (a_verifier → enregistre), les puts recipes et recipe_versions');
+        eq(appels, [['imports', 'recipe_versions', 'recipes', 'sync_state']], 'Enregistrer : UNE transaction — la condition sur imports (a_verifier → enregistre), les puts recipes et recipe_versions');
         eq([e1.availability, e1.verification_state, e1.original_title, e1.source_author, e1.source_site, e1.source_fetched_at, e1.source_kind, e1.source_url], ['available', 'to_verify', 'Pâtes puttanesca', 'Ricardo', 'Ricardo Cuisine', NOW, 'jsonld', 'https://ricardocuisine.com/rc_e1'], 'Enregistrer : fiche available, to_verify, titre lu (D-B24), source_* ; source_url du signet jamais retapée depuis url_finale');
         eq([v1.kind, v1.provenance.url_finale, v1.provenance.titre_signet, i1.status, i1.reponse_brute, i1.finished_at, navs.at(-1), dits.at(-1)], ['extraction', 'https://www.ricardocuisine.com/r', 'ricardocuisine.com', 'enregistre', null, NOW, `/recipes/rc_e1?v=${v1.id}`, 'Recette enregistrée'], 'Enregistrer : version et provenance, import enregistre (reponse_brute null, finished_at), navigation vers la version, toast « Recette enregistrée »');
 
@@ -1285,7 +1285,7 @@ export async function runLectureWebTests({ eq, ok }) {
         const annonce = (root) => root.querySelector('[data-role="photo-web-annonce"]');
         const enFiche = async (id) => { const p = await renderRecipe({ id }, {}, await ctxDe(), { pickFiles: async () => [], toast: () => {}, fetch: ff, enLigne: () => true }); scene.append(p); return p; };
 
-        // 1. Ordre (Review Focus 2, I-F4) : la transaction AVANT le premier POST image-web, puis UN POST, puis files, puis la photo sur la fiche.
+        // 1. Ordre (Review Focus 2, I-F4) : la transaction AVANT le premier POST image-web, puis UN POST, puis fichiers et photo dans la même transaction conditionnée.
         await db.mutate({ puts: { recipes: [signet('rc_o')] }, origin: 'device' });
         let root = await lireAvec('rc_o', { image_url: IMG });
         const ligneAnnonce = annonce(root);
@@ -1294,11 +1294,11 @@ export async function runLectureWebTests({ eq, ok }) {
           'écran a_verifier : small.muted « Après l’enregistrement, l’app essaiera de récupérer… » (un ESSAI et son coût), JUSTE sous la ligne du mode (son élément suivant, ronde 1)');
         evenements.length = 0; espionner();
         try { await enregistrer(root, 'rc_o'); } finally { db.mutate = mutate; }
-        const iTx = evenements.indexOf('mutate:imports+recipe_versions+recipes'); const iImg = evenements.indexOf('fetch:image-web');
-        const iFiles = evenements.findIndex((e, i) => i > iImg && e === 'mutate:files');
-        const iPhoto = evenements.findIndex((e, i) => i > iFiles && e === 'mutate:recipes');
-        eq([iTx >= 0, iTx < iImg, iFiles > iImg, iPhoto > iFiles, evenements.filter((e) => e === 'fetch:image-web').length], [true, true, true, true, 1],
-          'ordre : la transaction (recipes, recipe_versions, imports enregistre) est écrite AVANT le premier POST image-web, puis UN POST, puis files, puis la photo sur la fiche');
+        const iTx = evenements.indexOf('mutate:imports+recipe_versions+recipes+sync_state'); const iImg = evenements.indexOf('fetch:image-web');
+        const iFiles = evenements.findIndex((e, i) => i > iImg && e === 'mutate:files+recipes+sync_state');
+        const iPhoto = evenements.findIndex((e, i) => i >= iFiles && e === 'mutate:files+recipes+sync_state');
+        eq([iTx >= 0, iTx < iImg, iFiles > iImg, iPhoto === iFiles, evenements.filter((e) => e === 'fetch:image-web').length], [true, true, true, true, 1],
+          'ordre : la transaction (recipes, recipe_versions, imports enregistre) est écrite AVANT le premier POST image-web, puis UN POST, puis fichiers et photo dans la même transaction conditionnée');
         const o = await db.get('recipes', 'rc_o');
         eq([o.availability, o.photo_origin, o.photo_source_url, /^[0-9a-f]{64}$/.test(o.photo_sha256 ?? ''), (await db.byIndex('imports', 'recipe_id', 'rc_o'))[0].status, postsImage().at(-1).url],
           ['available', 'web', IMG, true, 'enregistre', IMG], 'Enregistrer : la recette enregistrée, puis la photo web posée avec sa provenance ; l’import reste enregistre ; l’adresse demandée est l’annoncée');
@@ -1358,8 +1358,8 @@ export async function runLectureWebTests({ eq, ok }) {
         choix.suivant.push('ajouter'); evenements.length = 0; espionner();
         try { await enregistrer(root, 'rc_aj'); } finally { db.mutate = mutate; }
         const aj = await db.get('recipes', 'rc_aj');
-        eq([evenements[0], evenements.indexOf('mutate:imports+recipe_versions') < evenements.indexOf('fetch:image-web'), evenements.filter((e) => e === 'fetch:image-web').length], ['mutate:imports+recipe_versions', true, 1],
-          '« Ajouter sans remplacer » : la transaction n’a AUCUN put recipes (imports en condition, recipe_versions : B-24 inchangé), PUIS un POST image-web');
+        eq([evenements[0], evenements.indexOf('mutate:imports+recipe_versions+recipes+sync_state') < evenements.indexOf('fetch:image-web'), evenements.filter((e) => e === 'fetch:image-web').length], ['mutate:imports+recipe_versions+recipes+sync_state', true, 1],
+          '« Ajouter sans remplacer » : la transaction n’a AUCUN put recipes (imports en condition, recipe_versions écrite, recette et propriétaire vérifiés : B-24 inchangé), PUIS un POST image-web');
         eq([aj.current_version_id, aj.original_title, aj.photo_origin, aj.photo_source_url, /^[0-9a-f]{64}$/.test(aj.photo_sha256 ?? '')], [avantAj.current_version_id, 'Pâtes de Mamie', 'web', IMG, true],
           '« Ajouter sans remplacer », réussite : la version courante et le titre intacts, les trois champs de la photo écrits ENSEMBLE');
         root = await lireAvec('rc_aj2', { image_url: IMG });

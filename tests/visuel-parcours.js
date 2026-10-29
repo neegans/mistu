@@ -6,7 +6,7 @@ export const SESSION_REPERES = { access_token: 'session-synthetique-reperes', us
 export const CONFIG_REPERES = { url: 'https://assistant.example', anonKey: 'publique-factice' };
 export const reponseReperesTest = () => ({ description_fr: { texte: 'Des tomates doucement mijotées, à servir chaudes.', references: [{type:'titre',extrait:'Tomates'}] }, difficulte: { niveau: 'facile', raison: 'Une cuisson simple à surveiller.', references: [{type:'etape',index:0,extrait:'mijoter'}] }, temps: { total: { min: 20, max: 25, origine: 'estimation_ia', complet: true }, actif: { min: 5, max: 5, origine: 'estimation_ia' }, cuisson: { min: 20, max: 20, origine: 'estimation_ia' }, attentes: null, attentes_incluses: true, explication: 'La préparation active précède la cuisson.', references: [{type:'etape',index:0,extrait:'20 minutes'}] } });
 export const reponseAssistantReperes = (v, extra = {}) => new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(v) }], stop_reason: 'end_turn', model: 'modele-fixture', ...extra }), { status: 200 });
-export async function seedReperes(repo) { await repo.saveBatch({ recipes: [recetteReperesTest()], recipe_versions: [versionReperesTest()] }); }
+export async function seedReperes(repo) { await repo.saveBatch({ recipes: [recetteReperesTest()], recipe_versions: [versionReperesTest()] }, { conditions: { recipes: [{ key: 'r-reperes', absente: true }] } }); }
 const options = (repo, extra = {}) => ({ repo, enLigne: () => true, config: CONFIG_REPERES, maintenant: () => '2026-10-28T12:00:00.000Z', ...extra });
 const entree = () => ({ recipeId: 'r-reperes', versionId: 'v-reperes' });
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
@@ -130,7 +130,7 @@ export async function runVisuelParcoursTests({ eq, ok }) {
     eq([copie.copie_de, copie.device_id, copie.status], [row.id, 'autre-appareil-reperes', 'a_lancer'], 'Repères : copie distincte appartient au nouvel appareil');
   });
   await run('référence et contexte manuel périmé', async repo => {
-    await repo.save('recipes', { id: 'reference', original_title: 'Tomates confites', availability: 'reference_only' }); const d = options(repo);
+    await repo.save('recipes', { id: 'reference', original_title: 'Tomates confites', availability: 'reference_only' }, { conditions: { recipes: [{ key: 'reference', absente: true }] } }); const d = options(repo);
     const row = await P.ouvrirReperes({ recipeId: 'reference' }, d);
     eq(row.contexte.version_id, null, 'Repères : référence seule sans version fictive');
     await P.enregistrerCorrectionsReperes({ recipeId: 'reference', corrections: { description_fr: { texte: 'Une recette de tomates.' } }, importId: row.id }, d);

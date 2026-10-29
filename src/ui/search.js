@@ -1,3 +1,6 @@
+import { lireCycleRecette, recetteActive } from '../domain/cycle-recette.js';
+import { TEXTE_RECETTE_RETIREE, TEXTE_CYCLE_INVALIDE } from './corbeille.js';
+import { documentsActifs } from './state.js';
 // Recherche universelle et accompagnements (spec §4, §26) : source active visible, pastilles modifiables, groupes distincts.
 import { el, toast as toastDom } from '../core/dom.js';
 import { t, label, getUiLocale } from '../core/i18n.js';
@@ -104,7 +107,8 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   let session = state.mode === 'web' ? await sessionAssistant(ctx) : null;
   let sessionLue = state.mode === 'web';
   const connecter = () => demarrerConnexion(ctx.sync?.auth);
-  const forRecipe = query.for ? ctx.docsByRecipe.get(query.for) : null; // Avec quoi on mange ça ?
+  const cibleRecette = query.for ? ctx.docsByRecipe.get(query.for) : null;
+  const forRecipe = cibleRecette && recetteActive(cibleRecette.recipe) ? cibleRecette : null; // Avec quoi on mange ça ?
   const role = query.role || (forRecipe ? 'salade' : null);
   if (forRecipe && role) state.parsed.filters.type = role;
 
@@ -165,8 +169,8 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     if (state.mode === 'web') { results.append(renderWeb()); return; }
     const opts = { mode: state.mode, ingredientsById: ctx.ingredientsById, favoritesOnly: state.favorites, cookedOnly: state.cooked, requireAll: state.requireAll };
     const groups = forRecipe
-      ? findAccompaniments({ mainDoc: forRecipe, docs: ctx.docs, type: role, parsed, ingredientsById: ctx.ingredientsById, mode: state.mode, feedback: ctx.meal_feedback })
-      : searchDocs(ctx.docs, parsed, opts);
+      ? findAccompaniments({ mainDoc: forRecipe, docs: documentsActifs(ctx), type: role, parsed, ingredientsById: ctx.ingredientsById, mode: state.mode, feedback: ctx.meal_feedback })
+      : searchDocs(documentsActifs(ctx), parsed, opts);
     const card = (hit) => {
       const extra = el('div', { class: 'stack', style: { marginTop: '.4rem' } },
         hit.assessments?.length ? el('div', { class: 'chips' }, ...hit.assessments.map((a) => el('span', { class: `chip ${a.state === 'compatible' ? 'ok' : 'warn'}` }, `${label('diet', a.diet)} — ${label('diet_assessment', a.state)}`))) : null,
@@ -422,8 +426,8 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     if (r?.issue === 'doublon') {
       const carteNoeud = bouton.closest('.card');
       for (const rangee of [...carteNoeud.querySelectorAll(':scope > .row')]) rangee.remove();
-      carteNoeud.append(el('div', { class: 'status', dataset: { role: 'doublon-adresse' } }, el('span', null, t('Tu as déjà gardé cette adresse.')), ' ',
-        el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(r.recette.id)}` }, t('Ouvrir la fiche'))));
+      carteNoeud.append(el('div', { class: 'status', dataset: { role: 'doublon-adresse' } }, el('span', null, lireCycleRecette(r.recette).etat === 'retiree' ? t(TEXTE_RECETTE_RETIREE) : lireCycleRecette(r.recette).etat === 'invalide' ? t(TEXTE_CYCLE_INVALIDE) : t('Tu as déjà gardé cette adresse.')), ' ',
+        el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(r.recette.id)}` }, lireCycleRecette(r.recette).etat === 'retiree' ? t('Consulter et restaurer') : t('Ouvrir la fiche'))));
       return;
     }
     bouton.disabled = false;

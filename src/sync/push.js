@@ -7,6 +7,8 @@ import { appliquerReponse } from './reponses.js';
 import { conditionFichier } from './fichiers.js';
 import { appliquerHeureServeur, reculMs } from './clock.js';
 import { logError } from '../core/log.js';
+import { commandeCycle, idCycle, fusionCycle, CLE_CYCLE_CONFIRME, gardeCompteCycle } from './cycle.js';
+import { lireCycleRecette } from '../domain/cycle-recette.js';
 
 // Recul exponentiel (spec § 5.3) : défini dans clock.js (module feuille, lot G tâche 3 ronde 1), réexporté ici pour ses lecteurs.
 export { reculMs };
@@ -39,7 +41,8 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
   // attend un geste de la personne, une heure de reprise pas encore venue attend son heure.
   async function lireFile() {
     const miennes = await fileDe(db, getUserId());
-    return miennes.filter((e) => !e.quarantined_at && prete(e)).sort((a, b) => a.seq - b.seq);
+    return miennes.filter((e) => commandeCycle(e)||e.lifecycle_blocked||((!e.quarantined_at || e.last_error==='cycle') && prete(e)))
+      .map(e=>commandeCycle(e)&&!prete(e)?{...e,lifecycle_waiting:true}:e).sort((a, b) => a.seq - b.seq);
   }
 
   // R-L3-5 : une ligne retenue (files, tant que L4 n'a pas confirmé l'empreinte) n'est ni envoyée ni retirée —
@@ -50,7 +53,7 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     for (const { seqs, raison } of retenues) {
       for (const seq of seqs) {
         const e = entreesParSeq.get(seq);
-        if (e && e.last_error !== raison) rows.push({ ...e, last_error: raison });
+        if (e && !e.quarantined_at && !e.lifecycle_blocked && !e.lifecycle_waiting && e.last_error !== raison) rows.push({ ...e, last_error: raison });
       }
     }
     if (rows.length) await db.mutate({ puts: { outbox: rows }, origin: 'remote' });
@@ -66,6 +69,8 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
   }
 
   async function appliquer(lot, reponse, entreesParSeq) {
+    if(lot.elements[0]?.op==='lifecycle') return appliquerCommande(lot,reponse,entreesParSeq);
+    const owner=getUserId();
     // Lectures AVANT la transaction : la version locale d'un conflit est celle du moment où la réponse arrive, et
     // c'est elle qui décide si un ajustement a le droit de réécrire la fiche (R-L3-7).
     const fichesLocales = {};
@@ -83,6 +88,13 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
       conditions = { files: puts.files.map((ligne) => conditionFichier(ligne.sha256, fichesLocales[cleDe({ store: 'files', id: ligne.sha256 })] ?? null, ligne, ligne.updated_at)) };
       delete puts.files;
     }
+    if(puts.recipes) {
+      conditions={...(conditions||{}),recipes:puts.recipes.map(row=>({key:row.id,fusion:current=>{
+        const sent=lot.elements.find(e=>e.store==='recipes'&&e.id===row.id)?.data;
+        return idCycle(current)===idCycle(sent)&&current?.updated_at===fichesLocales[`recipes:${row.id}`]?.updated_at?row:null;
+      }}))};
+      delete puts.recipes;
+    }
     if (effets.conflits.length) puts.sync_conflicts = effets.conflits;
     if (effets.quarantaine.length) {
       puts.outbox = effets.quarantaine.map(({ seq, motif }) => ({ ...entreesParSeq.get(seq), quarantined_at: new Date(maintenant()).toISOString(), last_error: motif }));
@@ -91,7 +103,50 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     const deletes = {};
     if (effets.retirer.length) deletes.outbox = effets.retirer;
     if (effets.retirerConflits.length) deletes.sync_conflicts = effets.retirerConflits; // R-L3-29, même transaction
+    conditions={...(conditions||{}),sync_state:[gardeCompteCycle(owner,getUserId)]};
     await db.mutate({ puts, deletes, origin: 'remote', conditions });
+    return effets;
+  }
+
+  async function appliquerCommande(lot,reponse,entreesParSeq) {
+    const owner=getUserId();
+    const c=lot.elements[0];
+    const entree=lot.seqs.map(s=>entreesParSeq.get(s)).find(e=>commandeCycle(e)&&e.payload?.operation_id===c.operation_id);
+    const effets={retirer:[],reecrire:{},conflits:[],quarantaine:[],retirerConflits:[]};
+    if(!entree) return effets;
+    const ack=(reponse.accepted||[]).find(a=>a.store==='recipes'&&a.id===c.id&&a.operation_id===c.operation_id);
+    const rejet=(reponse.rejected||[]).find(a=>a.store==='recipes'&&a.id===c.id&&a.operation_id===c.operation_id);
+    if(!ack&&!rejet) return effets;
+    const locale=await db.get('recipes',c.id);
+    const file=(await fileDe(db,getUserId())).filter(e=>e.op==='lifecycle'&&e.id===c.id);
+    const serveur=(ack||rejet).server;
+    const puts={},deletes={};let conditions=null;
+    if(ack) {
+      if(serveur?.data?.id!==c.id||idCycle(serveur.data)!==c.operation_id||lireCycleRecette(serveur.data).etat!==(c.action==='trash'?'retiree':'active')||!Number.isFinite(Date.parse(serveur.updated_at))) return effets; // accusé tronqué ou d'une autre époque
+      effets.retirer.push(entree.seq);
+      for(const seq of lot.seqs) if(seq!==entree.seq) {
+        const e=entreesParSeq.get(seq);
+        if(ack.seed_used===true) effets.retirer.push(seq);
+        else if(e) {
+          (puts.outbox ||= []).push({...e,lifecycle_blocked:true,last_error:'cycle',payload:c.seed});
+          effets.conflits.push({id:`recipes:${c.id}`,store:'recipes',record_id:c.id,local:c.seed,server:serveur,at:reponse.server_time||new Date().toISOString(),kind:'cycle'});
+          puts.sync_conflicts=effets.conflits;
+        }
+      }
+      deletes.outbox=effets.retirer;
+    } else {
+      puts.outbox=file.map(e=>({...e,lifecycle_blocked:true,last_error:'cycle'}));
+      effets.conflits.push({id:`recipes:${c.id}`,store:'recipes',record_id:c.id,local:locale,server:serveur||null,at:reponse.server_time||new Date().toISOString(),kind:'cycle'});
+      puts.sync_conflicts=effets.conflits;
+    }
+    if(serveur?.data?.id===c.id&&lireCycleRecette(serveur.data).etat!=='invalide') {
+      const data={...serveur.data,updated_at:serveur.updated_at};
+      puts.sync_state=[{key:CLE_CYCLE_CONFIRME(c.id),value:{data,user_id:getUserId()}}];
+      const restants=ack?file.filter(e=>e.seq!==entree.seq):[];
+      conditions={recipes:[{key:c.id,fusion:current=>idCycle(current)!==idCycle(locale)?current:fusionCycle(current,data,restants).row}]};
+    }
+    conditions={...(conditions||{}),sync_state:[gardeCompteCycle(owner,getUserId)]};
+    await db.mutate({puts,deletes,conditions,origin:'remote'});
     return effets;
   }
 
@@ -118,7 +173,9 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
   // Un lot → le serveur. Rend `true` si la passe peut continuer, `false` s'il faut l'arrêter (réseau, « inconnu »,
   // connexion à refaire, pause de quota). SEUL un `refus` dichotomise, et il n'arrête pas la passe.
   async function envoyerLot(lot, entreesParSeq, bilan) {
+    const owner=getUserId();
     const appel = await transport.pousser(lot.elements);
+    if(getUserId()!==owner) {bilan.erreur={type:'auth',status:null};bilan.attenteConnexion=true;return false;}
     const reponse = appel.reponse;
     // Pas d'erreur et pas de réponse : le serveur n'a rien accusé, donc rien n'est retiré (I5). Traité comme un
     // « inconnu » — donc en recul (R-L3-9), jamais en quarantaine : on ne parque pas pour un silence.

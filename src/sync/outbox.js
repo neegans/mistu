@@ -3,6 +3,7 @@
 import { SYNC_STORES } from '../model/schema.js';
 import { keyOf, remoteDeCeCompte } from './tables.js';
 import { syncNow } from './clock.js';
+import { CLE_CYCLE_CONFIRME, idCycle } from './cycle.js';
 
 // L4 (D-G8) : une ligne files n'entre en file QUE quand ses octets sont confirmés — remote valide de ce compte — et jamais une
 // suppression. (R-L3-22, L3 : aucune ligne « files » n'entrait en file, faute d'octets à envoyer — « À envoyer : N » ne redescendait
@@ -16,17 +17,25 @@ function payloadFor(payloads, store, key) {
 }
 
 export function installCapture(db, { getUserId = () => null, isActivitySynced = () => false, configSuitLeCompte = () => false } = {}) {
-  db.onMutate = ({ puts = {}, deletes = {}, origin = 'local', payloads = {} }) => {
+  db.onMutate = ({ puts = {}, deletes = {}, origin = 'local', payloads = {}, recettes = [], lifecycle = null, archive_import = false }) => {
     // Réception, ajustement du serveur et vidage d'appareil ne repartent jamais vers le serveur.
     if (origin !== 'local') return null;
     const rows = [];
     const user_id = getUserId();
+    const contexte = (store,id) => {
+      const cs=recettes.filter(c => (store==='recipes'&&c.recipe_id===id)||c.records?.some(r=>r.store===store&&r.id===id));
+      const projections=cs.map(c=>({recipe_id:c.recipe_id,expected_cycle_id:c.expected_cycle_id??null,...(c.historique?{historique:true}:{})}));
+      return projections.length>1?{recipe_contexts:projections}:projections[0]||{};
+    };
+    if (lifecycle) rows.push({user_id,store:'recipes',id:lifecycle.recipe_id,op:'lifecycle',updated_at:lifecycle.at,payload:structuredClone(lifecycle),recipe_id:lifecycle.recipe_id,tries:0});
     const wanted = (store) => SYNC_STORES.includes(store) && (store !== 'library_activity' || isActivitySynced()) && (store !== 'assistant_config' || configSuitLeCompte());
     for (const [store, list] of Object.entries(puts)) {
       if (!wanted(store)) continue;
       if (store === 'files') { for (const r of list) if (r?.syncable !== false && remoteDeCeCompte(r?.remote, user_id)) rows.push({ user_id, store, id: keyOf(store, r), op: 'put', updated_at: r.updated_at || null, tries: 0 }); continue; }
       for (const r of list) {
-        rows.push({ user_id, store, id: keyOf(store, r), op: 'put', updated_at: r.updated_at || null, tries: 0 });
+        const id=keyOf(store,r);
+        if (lifecycle && store==='recipes' && id===lifecycle.recipe_id) continue;
+        rows.push({ user_id, store, id, op: 'put', updated_at: r.updated_at || null, tries: 0,...contexte(store,id),...(archive_import?{archive_import:true}:{}) });
       }
     }
     for (const [store, keys] of Object.entries(deletes)) {
@@ -42,7 +51,7 @@ export function installCapture(db, { getUserId = () => null, isActivitySynced = 
         // la copie de la fiche au moment de la suppression (spec § 5.1), pas l'heure de l'événement.
         // Conséquence voulue : supprimer une fiche déjà absente (payload nul) ne produit plus une entrée sans heure,
         // que le serveur refusait avec le motif « updated_at » et qui finissait en quarantaine pour rien.
-        rows.push({ user_id, store, id: k, op: 'delete', updated_at: syncNow(), payload, tries: 0 });
+        rows.push({ user_id, store, id: k, op: 'delete', updated_at: syncNow(), payload, tries: 0,...contexte(store,k) });
       }
     }
     return rows.length ? { outbox: rows } : null;
@@ -79,5 +88,22 @@ export async function reprendreEnvoi(db, entree) {
 // « Abandonner cet envoi » retire l'entrée et RIEN d'autre : la fiche reste sur cet appareil, simplement elle n'ira
 // pas au serveur. Une écriture ultérieure de cette fiche la remettra en file, comme n'importe quelle écriture.
 export async function retirerEnvoi(db, seq) {
+  const e=await db.get('outbox',seq);
+  if(e?.op==='lifecycle') {
+    const owner=(await db.get('sync_state','user_id'))?.value??null;
+    if(e.user_id!=null&&e.user_id!==owner) return false;
+    const confirmation=await db.get('sync_state',CLE_CYCLE_CONFIRME(e.id));
+    if(confirmation&&confirmation.value?.user_id!==owner) return false;
+    const confirme=confirmation?.value?.data||e.payload?.seed;
+    if(!confirme) return false;
+    const locale=await db.get('recipes',e.id),suivants=(await db.getAll('outbox')).filter(x=>x.op==='lifecycle'&&x.id===e.id&&x.seq>seq&&estDeCeCompte(x,owner));
+    const garder=attendu=>row=>{if(JSON.stringify(row)!==JSON.stringify(attendu))throw Error('Intention de corbeille changée');return null;};
+    try {await db.mutate({deletes:{outbox:[seq]},puts:suivants.length?{outbox:suivants.map(x=>({...x,lifecycle_blocked:true,last_error:'cycle'}))}:{},conditions:{
+      recipes:[{key:e.id,fusion:row=>{garder(locale)(row);return row?{...row,lifecycle_id:idCycle(confirme),trashed_at:confirme.trashed_at??null}:null;}}],
+      outbox:[{key:seq,fusion:garder(e)},...suivants.map(x=>({key:x.seq,fusion:garder(x)}))],
+      sync_state:[{key:'user_id',fusion:row=>{if((row?.value??null)!==owner)throw Error('Intention de corbeille changée');return null;}},{key:CLE_CYCLE_CONFIRME(e.id),fusion:garder(confirmation)}]
+    },origin:'remote'});}catch(error){if(error.message==='Intention de corbeille changée')return false;throw error;}
+    return true;
+  }
   await db.mutate({ deletes: { outbox: [seq] }, origin: 'device' });
 }

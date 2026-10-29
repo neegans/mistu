@@ -28,10 +28,17 @@ const SANS_CLIENT = () => ({ type: 'auth', status: null, message: 'client absent
 
 export function createTransport(client) {
   return {
+    async capacites() {
+      if (!client) return {capacites:null,erreur:SANS_CLIENT()};
+      try {const {data,error,status}=await client.rpc('sync_capabilities');return error?{capacites:null,erreur:{...classerErreur({status,code:error.code,message:error.message}),type:['PGRST202','42883'].includes(error.code)?'incompatible':classerErreur({status,code:error.code,message:error.message}).type}}:{capacites:data,erreur:null};}
+      catch(error) {return {capacites:null,erreur:classerErreur({status:0,message:error?.message})};}
+    },
     async pousser(rows) {
       if (!client) return { reponse: null, erreur: SANS_CLIENT() };
       try {
-        const { data, error, status } = await client.rpc('sync_push', { rows });
+        const v2=rows.some(r=>r.op==='lifecycle'||Object.hasOwn(r,'expected_cycle_id')||r.recipe_contexts||r.archive_import);
+        const { data, error, status } = await client.rpc(v2?'sync_push_v2':'sync_push', { rows });
+        if(error&&v2&&['PGRST202','42883'].includes(error.code)) return {reponse:null,erreur:{type:'incompatible',status,code:error.code,message:'Contrat de corbeille indisponible'}};
         if (error) return { reponse: null, erreur: classerErreur({ status, code: error.code, message: error.message }) };
         return { reponse: data, erreur: null };
       } catch (error) {

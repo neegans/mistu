@@ -1,3 +1,5 @@
+import { capturerRecette } from './recette-garde.js';
+import { recettesActives, documentsActifs } from './state.js';
 // Bibliothèque (lot UI-1, D-UI-4) : trois segments — Recettes (la grille des cartes-plat, par défaut), Livres (grille de couvertures, « Liens web gardés »,
 // « Recettes créées avec l’IA »), Plats — et la liste « à importer » (?tab=a-importer : segment Recettes actif, retour « ← Recettes »). Les adresses
 // ?tab=books et ?tab=dishes d'avant restent valides (dish.js:35 y revient) ; un ?tab inconnu vaut Recettes. Vue Plats : spec §17, §30, §32.
@@ -45,6 +47,7 @@ export async function renderLibrary(params, query, ctx, deps = {}) {
   // L'action d'en-tête suit le segment : « Ajouter une recette » sur Recettes, « Ajouter un livre » sur Livres (→ #/add/livre, H-15), rien sur Plats.
   const actions = segment === 'books' ? [el('a', { class: 'btn primary', href: '#/add/livre' }, t('Ajouter un livre'))]
     : segment === 'recettes' ? [el('a', { class: 'btn primary', href: '#/add' }, icone('plus'), t('Ajouter une recette'))] : [];
+  actions.push(el('a', { class: 'btn', href: '#/corbeille' }, t('Corbeille')));
   const root = el('div', null,
     pageHeader(t('Bibliothèque'), { subtitle: t('Tes livres, tes trouvailles, tes recettes.'), actions, back: tab === 'a-importer' ? { href: '/library?tab=recettes', label: t('Recettes') } : null }),
     el('div', { style: { marginBottom: '1rem' } }, onglets(segmented([{ value: 'recettes', label: t('Recettes') }, { value: 'books', label: t('Livres') }, { value: 'dishes', label: t('Plats') }], segment, (v) => navigate('/library' + buildQuery({ tab: v }))))));
@@ -67,8 +70,8 @@ export async function renderLibrary(params, query, ctx, deps = {}) {
 async function recettesTab(ctx, { matchMedia }) {
   const photosPersonnelles = photosPersonnellesParRecette(ctx.cook_history);
   const ctxF = await contexteFichiers(ctx);
-  const docs = (ctx.docs || []).filter((d) => dansLaGrille(d.recipe)).sort(derniereModificationDabord);
-  const refs = (ctx.recipes || []).filter(estAImporter);
+  const docs = documentsActifs(ctx).filter((d) => dansLaGrille(d.recipe)).sort(derniereModificationDabord);
+  const refs = recettesActives(ctx).filter(estAImporter);
   const pied = refs.length ? el('p', { style: { marginTop: '1rem' } }, el('a', { href: '#/library?tab=a-importer', dataset: { role: 'a-importer' } }, `${t('Recettes de mes livres à importer')} →`)) : null;
   if (!docs.length) return el('div', null, emptyState('assiette', t('Aucune recette pour l’instant.'), el('a', { class: 'btn primary', href: '#/add' }, t('Ajouter une recette'))), pied);
   const meules = new Map(docs.map((d) => [d.recipe.id, meule(d)]));
@@ -139,7 +142,7 @@ function boutonMobile(matchMedia) {
 // ?tab=a-importer (§ 4.1, B-M-4) : les références sans adresse, groupées par livre (titre du livre en h3, livres par ordre alphabétique), une ligne
 // « {titre} · p. N · À importer » → l'écran d'import ciblé (#/recipes/<id>/importer, le même href que la fiche du livre). Section PLAIN (D-UI-8).
 function aImporterTab(ctx) {
-  const refs = (ctx.recipes || []).filter(estAImporter);
+  const refs = recettesActives(ctx).filter(estAImporter);
   if (!refs.length) return emptyState('assiette', t('Rien à importer pour l’instant.')); // ronde 1 (D-T2-c) : « aucune recette » serait faux ici
   const groupes = [...repo.groupBy(refs, 'edition_id').entries()]
     // Vague finale (constats 5, 9, 10) : un titre de livre reçu qui n'est pas une chaîne (title: 42) est dit en texte et ne fait plus lever le tri ; la page suit la
@@ -161,7 +164,7 @@ const carteOuLien = (ctx, r, ctxF) => {
 // Les signets sans livre (edition_id nul, source_url posé), le dernier GARDÉ d'abord : created_at, updated_at en repli
 // (un favori touché ne réordonne pas la liste — ronde 1) ; sans horodatage, en dernier. Aucun : rien n'est rendu.
 function liensWebGardes(ctx, ctxF) {
-  const signets = (ctx.recipes || []).filter((r) => !r.edition_id && aUneAdresse(r)).sort(plusRecentesDabord);
+  const signets = recettesActives(ctx).filter((r) => !r.edition_id && aUneAdresse(r)).sort(plusRecentesDabord);
   if (!signets.length) return null;
   return sectionPlain(t('Liens web gardés'), ...signets.map((r) => carteOuLien(ctx, r, ctxF)));
 }
@@ -169,7 +172,7 @@ function liensWebGardes(ctx, ctxF) {
 // N-7 / N-10 : les fiches créées avec l'assistant, filtrées sur `origine` (pas sur la version courante : une fiche corrigée y reste),
 // la plus récemment créée d'abord (même ordre que les signets) ; la carte dit l'étiquette C-2. Aucune : rien n'est rendu.
 function recettesCreeesIA(ctx, ctxF) {
-  const creees = (ctx.recipes || []).filter((r) => r.origine === 'ia').sort(plusRecentesDabord);
+  const creees = recettesActives(ctx).filter((r) => r.origine === 'ia').sort(plusRecentesDabord);
   if (!creees.length) return null;
   return sectionPlain(t('Recettes créées avec l’IA'), ...creees.map((r) => carteOuLien(ctx, r, ctxF)));
 }
@@ -177,7 +180,7 @@ function recettesCreeesIA(ctx, ctxF) {
 async function booksTab(ctx) {
   const ctxF = await contexteFichiers(ctx);
   if (!ctx.book_editions.length) return emptyState('livres', t('Aucun livre pour l’instant.'), el('a', { class: 'btn primary', href: '#/add' }, t('Ajouter un livre')));
-  const recipesByEdition = repo.groupBy(ctx.recipes.filter((r) => r.edition_id), 'edition_id');
+  const recipesByEdition = repo.groupBy(recettesActives(ctx).filter((r) => r.edition_id), 'edition_id');
   // Les octets des couvertures sont lus UNE fois, en une transaction : la grille se redessine à chaque touche du
   // filtre et ne peut pas aller en base à chaque fois. Une empreinte sans ligne ici = couverture pas sur l'appareil.
   const fichiers = await repo.getFiles(ctx.book_editions.map((e) => e.cover_sha256).filter(Boolean));
@@ -244,7 +247,7 @@ async function dishesTab(ctx) {
   // Propositions de rapprochement pour les recettes sans plat
   const linkedRecipeIds = new Set(links.filter((l) => l.state !== 'refused').map((l) => l.recipe_id));
   const proposals = [];
-  for (const r of ctx.recipes) {
+  for (const r of recettesActives(ctx)) {
     if (linkedRecipeIds.has(r.id)) continue;
     const p = proposeDishesForRecipe(r, ctx.dishes, links)[0];
     if (p) proposals.push({ recipe: r, ...p });
@@ -254,8 +257,13 @@ async function dishesTab(ctx) {
       ...proposals.slice(0, 10).map((p) => el('div', { class: 'row between card flat' },
         el('div', null, el('strong', null, p.recipe.display_title || p.recipe.original_title), el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `→ ${p.dish.labels.fr.label} · ${p.evidence}`)),
         el('div', { class: 'row' },
-          el('button', { class: 'btn small primary', onClick: async () => { await repo.save('dish_recipe_links', { id: repo.newId('drl'), dish_id: p.dish.id, recipe_id: p.recipe.id, state: 'confirmed', proposed_by: 'title_similarity', evidence: p.evidence, reviewed_at: repo.nowIso() }); refresh(); } }, t('Confirmer')),
-          el('button', { class: 'btn small', onClick: async () => { await repo.save('dish_recipe_links', { id: repo.newId('drl'), dish_id: p.dish.id, recipe_id: p.recipe.id, state: 'refused', proposed_by: 'title_similarity', evidence: p.evidence, reviewed_at: repo.nowIso() }); refresh(); } }, t('Refuser')))))));
+          el('button', { class: 'btn small primary', onClick: async () => { await sauverLien(p.recipe, ctx, { id: repo.newId('drl'), dish_id: p.dish.id, recipe_id: p.recipe.id, state: 'confirmed', proposed_by: 'title_similarity', evidence: p.evidence, reviewed_at: repo.nowIso() }); } }, t('Confirmer')),
+          el('button', { class: 'btn small', onClick: async () => { await sauverLien(p.recipe, ctx, { id: repo.newId('drl'), dish_id: p.dish.id, recipe_id: p.recipe.id, state: 'refused', proposed_by: 'title_similarity', evidence: p.evidence, reviewed_at: repo.nowIso() }); } }, t('Refuser')))))));
   }
   return root;
+}
+
+async function sauverLien(recipe, ctx, ligne) {
+  try {const contexte=await capturerRecette(repo, recipe, {ctx});await repo.save('dish_recipe_links',ligne,{recettes:[contexte]});refresh();}
+  catch {toast(t('La recette a changé. Recharge sa fiche avant de réessayer.'));}
 }

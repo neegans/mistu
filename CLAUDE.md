@@ -3331,16 +3331,36 @@ DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de
 R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
 404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
 
-### Plan directeur — L1 : corbeille individuelle (29 octobre 2026 — spec pour relecture)
+### Plan directeur — L1 : corbeille individuelle (29 octobre 2026 — local 0.23.0)
 
-Sur « continu », préparation de la [spec L1](docs/superpowers/specs/2026-10-29-l1-corbeille-individuelle-design.md),
-branche `l1-corbeille-individuelle`, base `9c823b0` contenant L0. Aucune construction ni publication L1 à ce stade.
-Proposition : recettes autonomes, marqueur et jeton de cycle conservé après restauration, commandes durables distinctes des `put`,
-gardes métier communes et protection serveur contre les anciens écrivains ; historique et sessions existantes conservés.
-Index de corbeille réellement utilisé justifiant DB5, archive 2 refusée par les anciens clients et lecture 1/2 dans le nouveau,
-migration serveur additive nécessaire. Les numéros proposés ne sont pas encore appliqués.
-Audits en lecture seule et deux preuves isolées dans `.superpowers/sdd/2026-10-29-l1-spec/preuves.json` ; aucune suite complète relancée.
-Relecture de Neegan requise avant construction selon la méthode d’`AGENTS.md`. Dernier code local 0.22.0, dernière publication 0.21.1.
+[Spec](docs/superpowers/specs/2026-10-29-l1-corbeille-individuelle-design.md) approuvée par Neegan sur « ok ».
+Branche `l1-corbeille-individuelle`, base `cf539fb`, contenant L0 `9c823b0` encore non publié.
+[Rapport de construction et procédure de publication](docs/superpowers/plans/2026-10-29-l1-corbeille-individuelle.md).
+
+Retrait/restauration des recettes autonomes, Annuler conditionné, corbeille et états À vérifier ; contenu intégral conservé.
+Projections actives séparées des liens historiques ; anciennes sessions/courses/observations utilisables.
+Garde commune de cycle/propriétaire, capture avant attente, enfants seuls et agrégats protégés ; octets et liens photo atomiques.
+Ancien formulaire ou résultat refusé même après restauration. Journal payé conservé et nouvelle relecture explicite ;
+une relecture dans un autre onglet ne valide pas l’ancienne saisie. Copies des conflits accessibles, abandon de recette réconcilié.
+
+Application **0.23.0**, cache **cuisine-os-v0.23.0-1**, **DB5** (index `trashed_at` utilisé), **archive2**, lecture1/2.
+Migration additive **0008_corbeille_recettes.sql** : capacité, `sync_push_v2`, verrous et bases comparées, protection RPC/REST/enfants.
+Le générateur conserve les anciennes migrations à l’identique. Aucun magasin métier, outil assistant ou paquet d’application nouveau.
+
+**Validation de clôture :** navigateur **7656/7656** (épingle **7655**, +259 depuis L0, aucune assertion retirée),
+Node **231/231**, migrations `--check` **0**, syntaxe de **93** fichiers et diff propres.
+Ciblés L1 : domaine **61**, archives **24**, synchronisation **58**, écrans **79**, mutations **30**.
+Application réelle en profil jetable : retrait/rechargement/restauration, notes/photos intactes, second onglet périmé refusé,
+consultation hors ligne, cache des six modules, clavier, cinq largeurs et texte à 200 % sans débordement.
+Vrai code L0 en DB4 fermé lors du passage en DB5 ; réouverture `VersionError`, saisie et données intactes.
+Trois vrais moteurs avec transport simulé, concurrence hors ligne et archive vers un troisième appareil.
+PostgreSQL local : **42 assertions** et deux connexions concurrentes ; serveur de test arrêté, aucune migration distante.
+Preuves dans `.superpowers/sdd/2026-10-29-l1/` ; zéro erreur JavaScript ou requête externe.
+
+**Limites.** Non publié, dernière publication documentée 0.21.1. Aucun compte privé, vrai appel assistant, lecteur d’écran ou appareil iPhone/Safari physique testé.
+L’intégration Auth/PostgREST/Storage distante et la convergence sur deux appareils réels restent à vérifier.
+Les copies d’enfants en conflit restent bloquées et consultables ; reprise volontaire depuis la fiche, sans résolution arbitraire.
+Le retrait de livres/groupes, la purge et les lots suivants (dont traduction automatique complète) restent hors de L1.
 
 ### Plan directeur — L0 : cohérence des données et des parcours (29 octobre 2026 — local 0.22.0)
 

@@ -5,6 +5,7 @@ import { envoiInitial } from './backfill.js';
 import { fileDe } from './outbox.js';
 import { createPush } from './push.js';
 import { createPull } from './pull.js';
+import { verifierCapaciteCycle } from './cycle.js';
 import { purgerAnciens } from './conflits.js';
 import { createFichiers, compterFichiers, lireErreursFichiers, MAGASINS_FICHIERS } from './fichiers.js';
 import { setClockOffset } from './clock.js';
@@ -238,6 +239,7 @@ export function createMoteur({
     let snapshotFichiers = null;
     let tapesAuSnapshot = 0;
     try {
+      if(typeof transport.capacites==='function') await verifierCapaciteCycle({db,transport,userId:getUserId()});
       if (!pause) {
         await envoiInitial({
           db,

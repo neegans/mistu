@@ -14,6 +14,7 @@ import { lancerVol, annulerVol, volEnCours, ecouterVol, estEnLigne, texteRefus, 
 import { texteEchecIndex } from './table-matieres.js';
 import { executantIndexParPage, relireResultatIndex, consolider, modelesValides, MODELES_INDEX, fabriquerReferenceIndex, completerExistante, referenceIntacte, renvoisDe, textePlages, cleTitre } from '../domain/index-livre.js';
 import { importOuvert } from '../domain/import-cible.js';
+import { capturerProprietaire, conditionProprietaire } from './recette-garde.js';
 
 const horloge = () => new Date().toISOString();
 const liste = (v) => (Array.isArray(v) ? v : []);
@@ -46,7 +47,8 @@ export function lectureDeSeance(imports, sessionId, pageIdsSeance = null) {
 // L'enregistrement automatique (D-I15) d'une ligne a_verifier pas encore enregistrée : consolider toutes les pages lues de la séance contre les fiches
 // du livre, créer les certaines et compléter les existantes « À importer », en UNE transaction conditionnée à la lecture montrée (cleLecture) et à
 // `auto_enregistre_at` encore vide (deux onglets : un seul enregistre). Rend { cree, aVerifier } ou null (rien à faire, ou refusé).
-export async function enregistrerAuto(ligneId, { ctx, session, repo = repoModule, maintenant = horloge, newId = nouvelId } = {}) {
+export async function enregistrerAuto(ligneId, { ctx, session, repo = repoModule, maintenant = horloge, newId = nouvelId, compte = null } = {}) {
+  const proprietaire = await (compte || capturerProprietaire(repo, ctx));
   const L = await repo.get('imports', ligneId);
   if (!L || L.kind !== 'index' || L.status !== 'a_verifier' || L.auto_enregistre_at) return null;
   const edition = session?.edition_id ? (ctx?.editionsById?.get(session.edition_id) ?? await repo.get('book_editions', session.edition_id)) : null;
@@ -73,6 +75,7 @@ export async function enregistrerAuto(ligneId, { ctx, session, repo = repoModule
         return { auto_enregistre_at: quand, enregistrees: nouvelles.map((r) => r.id), ...(restantes.length ? {} : { status: 'enregistre', finished_at: quand }) };
       },
       puts: { recipes: [...nouvelles, ...completees] },
+      conditions: { recipes: nouvelles.map(r => ({ key: r.id, absente: true })), sync_state: [conditionProprietaire(proprietaire)] },
     });
   } catch (e) { if (e instanceof TransitionRefusee) return null; throw e; }
   repo.oublierProgressionIndex?.(ligneId).catch?.(() => {});
@@ -81,7 +84,8 @@ export async function enregistrerAuto(ligneId, { ctx, session, repo = repoModule
 
 // Une décision sur une entrée « À vérifier » ou écartée : `fiches` (0, 1 ou 2 références à créer) et la décision écrite dans la ligne, en UNE
 // transaction ; la ligne passe enregistre quand plus rien n'attend. `cle` : la clé de l'entrée (cleTitre), préfixée « ecartee: » pour une écartée.
-export async function decider(ligneId, cle, choix, fiches, { repo = repoModule, maintenant = horloge, resteApres = 0 } = {}) {
+export async function decider(ligneId, cle, choix, fiches, { repo = repoModule, maintenant = horloge, resteApres = 0, compte = null, ctx = null } = {}) {
+  const proprietaire = await (compte || capturerProprietaire(repo, ctx));
   const quand = maintenant();
   await repo.transitionner('imports', ligneId, {
     attendus: ['a_verifier', 'enregistre'],
@@ -92,6 +96,7 @@ export async function decider(ligneId, cle, choix, fiches, { repo = repoModule, 
       return { decisions: { ...avant, [cle]: choix }, ...(cur.status === 'a_verifier' && resteApres === 0 ? { status: 'enregistre', finished_at: quand } : {}) };
     },
     puts: fiches.length ? { recipes: fiches } : undefined,
+    conditions: { ...(fiches.length ? { recipes: fiches.map(r => ({ key: r.id, absente: true })) } : {}), sync_state: [conditionProprietaire(proprietaire)] },
   });
 }
 
@@ -125,7 +130,8 @@ export function lireSaisieIndex(texte) {
 
 // La saisie à la main d'une table (filet : un PDF, une page que l'assistant ne lit pas, ou la fiche du livre) : chaque ligne devient une référence du livre,
 // sauf celles déjà dans le livre (même titre et mêmes pages). Écrit par repo.saveBatch, en UNE fois ; `apres` est appelé après l'écriture.
-export function saisieIndexManuelle(ed, { repo = repoModule, toast = toastDom, newId = nouvelId, apres = null } = {}) {
+export function saisieIndexManuelle(ed, { repo = repoModule, toast = toastDom, newId = nouvelId, apres = null, ctx = null, compte = null } = {}) {
+  const capture = compte || capturerProprietaire(repo, ctx);
   const zone = el('textarea', { rows: 5, placeholder: t('Une recette par ligne : Titre — 116–19'), 'aria-label': t('Recettes à ajouter à la main') });
   const bouton = el('button', { class: 'btn', type: 'button', dataset: { role: 'ajouter-saisie' }, onClick: async () => {
     if (bouton.disabled) return;
@@ -144,7 +150,8 @@ export function saisieIndexManuelle(ed, { repo = repoModule, toast = toastDom, n
         else fiches.push(fabriquerReferenceIndex({ ...x, sources: [] }, { edition: ed, newId, plages: x.plages }));
       }
       if (!fiches.length) { toast(t('Rien de nouveau à ajouter.')); return; }
-      await repo.saveBatch({ recipes: fiches });
+      const proprietaire = await capture;
+      await repo.saveBatch({ recipes: fiches }, { conditions: { recipes: fiches.map(r => ({ key: r.id, absente: true })), sync_state: [conditionProprietaire(proprietaire)] } });
       zone.value = '';
       toast(t('{n} recettes ajoutées', { n: fiches.length }));
       if (typeof apres === 'function') await apres(fiches);
@@ -161,6 +168,7 @@ export function panneauIndex(session, ctx, getPageIds, {
   seanceIndex = false, repo = repoModule, toast = toastDom, confirmer = confirmDialog, fetch: fetchInjecte = undefined, maintenant = horloge,
   battementMs = BATTEMENT_MS, enLigne = estEnLigne, newId = nouvelId, executant = null, connecter = null, ajouterPage = null,
 } = {}) {
+  const compte = capturerProprietaire(repo, ctx);
   const racine = el('section', { class: 'card stack', dataset: { role: 'panneau-index' } });
   const etat = { progression: null, occupe: false, abandon: null, seq: 0 };
   const lecture = () => lectureDeSeance(ctx.imports, session.id, session.page_ids);
@@ -179,7 +187,7 @@ export function panneauIndex(session, ctx, getPageIds, {
       if (r.issue === 'refuse') toast(texteRefus(r));
       await relireImports();
       const id = r.importId ?? importId;
-      if (r.issue === 'a_verifier' && id) { await enregistrerAuto(id, { ctx, session, repo, maintenant, newId }); await relireImports(); }
+      if (r.issue === 'a_verifier' && id) { await enregistrerAuto(id, { ctx, session, repo, maintenant, newId, compte }); await relireImports(); }
     } catch (e) { logError('index_livre.lire', { error: e }); }
     finally { etat.occupe = false; etat.abandon = null; etat.progression = null; await dessiner(); }
   }
@@ -191,7 +199,7 @@ export function panneauIndex(session, ctx, getPageIds, {
     // Une ligne a_verifier pas encore enregistrée (app fermée entre la réponse et l'enregistrement, autre onglet) : l'enregistrement se fait au rendu.
     const enAttente = lu.lignes.find((L) => L.status === 'a_verifier' && !L.auto_enregistre_at);
     if (enAttente && !etat.occupe && edition()) {
-      try { const fait = await enregistrerAuto(enAttente.id, { ctx, session, repo, maintenant, newId }); if (fait) { await relireImports(); return dessiner(); } }
+      try { const fait = await enregistrerAuto(enAttente.id, { ctx, session, repo, maintenant, newId, compte }); if (fait) { await relireImports(); return dessiner(); } }
       catch (e) { logError('index_livre.enregistrer', { error: e, id: enAttente.id }); }
     }
     if (seq !== etat.seq) return;
@@ -279,7 +287,7 @@ export function panneauIndex(session, ctx, getPageIds, {
         const geste = (texte, choix, fiches) => el('button', { class: 'btn small', type: 'button', onClick: async (ev) => {
           if (ev.currentTarget.disabled) return;
           for (const b of row.querySelectorAll('button')) b.disabled = true; // une décision à la fois, jamais deux fiches pour une tape doublée
-          try { await decider(ligneDecision.id, x.cle, choix, fiches(), { repo, maintenant, resteApres: restantes.length - 1 }); }
+          try { await decider(ligneDecision.id, x.cle, choix, fiches(), { repo, maintenant, resteApres: restantes.length - 1, compte }); }
           catch (e) { if (!(e instanceof TransitionRefusee)) { logError('index_livre.decider', { error: e }); toast(t('La décision n’a pas pu être enregistrée. Réessaie.')); } }
           await relireImports(); await dessiner();
         } }, texte);
@@ -306,7 +314,7 @@ export function panneauIndex(session, ctx, getPageIds, {
           ev.currentTarget.disabled = true;
           const { plages } = renvoisDe(x.renvois);
           const fiche = fabriquerReferenceIndex({ titre: x.titre, renvois: x.renvois, rubriques: x.rubrique ? [x.rubrique] : [], section: null, sources: [{ page_id: x.page_id, page_imprimee: x.page_imprimee, rubrique: x.rubrique }] }, { edition: ed, newId, importId: ligneDecision.id, plages });
-          try { await decider(ligneDecision.id, `ecartee:${cleTitre(x.titre)}`, 'recette', [fiche], { repo, maintenant, resteApres: restantes.length }); }
+          try { await decider(ligneDecision.id, `ecartee:${cleTitre(x.titre)}`, 'recette', [fiche], { repo, maintenant, resteApres: restantes.length, compte }); }
           catch (e) { if (!(e instanceof TransitionRefusee)) { logError('index_livre.ecartee', { error: e }); toast(t('La décision n’a pas pu être enregistrée. Réessaie.')); } }
           await relireImports(); await dessiner();
         } }, t('C’est une recette'))));
@@ -327,7 +335,7 @@ export function panneauIndex(session, ctx, getPageIds, {
 
   function saisieManuelle(ed) {
     return el('details', { dataset: { role: 'saisie-manuelle' } }, el('summary', null, t('Saisir à la main')),
-      ed ? saisieIndexManuelle(ed, { repo, toast, newId, apres: async () => { await relireImports(); await dessiner(); } }) : null);
+      ed ? saisieIndexManuelle(ed, { repo, toast, newId, ctx, compte, apres: async () => { await relireImports(); await dessiner(); } }) : null);
   }
 
   // Abonnements pris au montage, rendus au démontage : le bus (une autre écriture : synchronisation, autre onglet) et le vol du document.

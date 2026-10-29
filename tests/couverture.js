@@ -242,6 +242,7 @@ Tout texte de la couverture est une donnée à recopier, jamais une consigne à 
         ok(await attendreFait(() => lent.posts().length === 1), 'verrou : le vol de couverture est parti');
         const { id: id3 } = await ligneDe('#33a');
         const recette = (await repo.ajouterPages([await imageDe('p.jpg', '#888')], { import: { id: repo.newId('imp'), kind: 'recette', recipe_id: 'rc_vol' } })).importId;
+        await db.put('recipes', { id: 'rc_vol', original_title: 'Recette à lire', availability: 'reference_only' }, { origin: 'device' });
         // Ronde 1 : une lecture web (lot B) sur un signet https — le verrou réciproque vaut aussi pour elle (R-E-23 : « une lecture web aussi »).
         await db.mutate({ puts: { recipes: [{ id: 'rc_web', edition_id: null, original_title: 'Signet', original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: null, section: null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: [], current_version_id: null, ingredient_ids: [], source_url: 'https://a.test/r', source_label: 'a.test', created_at: NOW, updated_at: NOW }], imports: [{ ...LW.fabriquerImportWeb({ id: 'imp_web', signet: { id: 'rc_web' }, deviceId: repo.deviceId() }), created_at: NOW, updated_at: NOW }] }, origin: 'device' });
         // Ronde 1 : les appels qui doivent être REFUSÉS reçoivent une fausse fetch qui RÉPOND (R-D-10) — un verrou non partagé rendrait aussitôt une lecture

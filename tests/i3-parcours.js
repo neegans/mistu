@@ -13,7 +13,7 @@ const seed = async (repo) => {
   const version = { id: 'v-i3-p', recipe_id: recipe.id, kind: 'extraction', status: 'proposed', servings: 2,
     ingredients: [{ id: 'ri-i3-1', source_text: '200 g de tomates', name_text: 'tomates', quantity: { value: 200 }, unit_id: 'g' }],
     steps: [{ id: 's-i3-1', text: 'Mélanger les tomates.' }, { id: 's-i3-2', text: 'Servir.' }], provenance: {} };
-  await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] });
+  await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
   return { recipe, version };
 };
 const options = (repo, extra = {}) => ({ repo, config: CONFIG, enLigne: () => true, maintenant: () => NOW, ...extra });

@@ -39,7 +39,40 @@ function creerServeur() {
   function arbitrer(element, maintenantIso) {
     const { store, id } = element;
     const tombale = element.deleted === true;
-    const data = element.data ?? null;
+    let data = element.data ?? null;
+    const current=lignes.recipes?.[id];
+    if(element.op==='lifecycle') {
+      const c=element,recipe=current?.data;
+      const refuse=()=>({store,id,operation_id:c.operation_id,reason:'cycle',server:current||null});
+      if(!c.operation_id||!['trash','restore'].includes(c.action)||!Number.isFinite(Date.parse(c.at))) return refuse();
+      if(current?.deleted_at||recipe?.edition_id) return refuse();
+      if(recipe?.lifecycle_id===c.operation_id) {
+        if((c.action==='trash')!==!!recipe.trashed_at) return refuse();
+        const contenu=row=>{const {lifecycle_id,trashed_at,updated_at,...reste}=row||{};return reste;};
+        return {store,id,operation_id:c.operation_id,server:current,seed_used:!!c.seed&&memeContenu(contenu(recipe),contenu(c.seed))};
+      }
+      if(!recipe && (c.action!=='trash'||c.base_cycle_id!=null||c.seed?.id!==id)) return refuse();
+      if(recipe && ((recipe.lifecycle_id??null)!==(c.base_cycle_id??null)||(c.action==='trash'?!!recipe.trashed_at:!recipe.trashed_at))) return refuse();
+      const row={...(recipe||c.seed),lifecycle_id:c.operation_id,trashed_at:c.action==='trash'?c.at:null,updated_at:maintenantIso};
+      (lignes.recipes||={})[id]={data:row,updated_at:maintenantIso,deleted_at:null,server_seq:++sequence};
+      return {store,id,operation_id:c.operation_id,server:lignes.recipes[id],seed_used:!recipe};
+    }
+    if(store==='recipes') {
+      if(current?.data?.lifecycle_id && (!Object.hasOwn(element,'expected_cycle_id')||element.expected_cycle_id!==current.data.lifecycle_id||current.data.trashed_at||tombale)) return {store,id,reason:'cycle',server:current};
+      if(current && Object.hasOwn(element,'expected_cycle_id') && (element.expected_cycle_id??null)!==(current.data.lifecycle_id??null)) return {store,id,reason:'cycle',server:current};
+      if(data && Object.hasOwn(element,'expected_cycle_id') && !(element.archive_import&&!current)) {
+        data={...data};delete data.lifecycle_id;delete data.trashed_at;
+        if(current?.data?.lifecycle_id) Object.assign(data,{lifecycle_id:current.data.lifecycle_id,trashed_at:current.data.trashed_at??null});
+      }
+      if(!current && data?.lifecycle_id && !element.archive_import) return {store,id,reason:'cycle',server:null};
+    }
+    const contexts=element.recipe_contexts||((element.recipe_id&&Object.hasOwn(element,'expected_cycle_id'))?[{recipe_id:element.recipe_id,expected_cycle_id:element.expected_cycle_id}]:[]);
+    const parents=store==='recipe_versions'||store==='dish_recipe_links'?[data?.recipe_id]:['recipe_translations','substitutions'].includes(store)?[lignes.recipe_versions?.[data?.recipe_version_id]?.data?.recipe_id]:['meals','shopping_lists'].includes(store)?(data?.items||[]).map(x=>x.recipe_id):[];
+    for(const rid of parents.filter(Boolean)) {
+      const parent=lignes.recipes?.[rid];if(!parent?.data?.lifecycle_id) continue;
+      const ctx=contexts.find(c=>c.recipe_id===rid);
+      if(parent.data.trashed_at||!ctx||ctx.expected_cycle_id!==parent.data.lifecycle_id) return {store,id,reason:'cycle',server:parent};
+    }
     // Clé absente : rejetée pour tous les éléments, tombale comprise (la colonne id est not null en base).
     if (!id) return { store, id: id ?? null, reason: 'cle' };
     const u = instant(element.updated_at);
@@ -83,7 +116,7 @@ function creerServeur() {
       for (const element of rows || []) {
         const verdict = arbitrer(element, maintenantIso);
         if (verdict.reason) rejected.push(verdict);
-        else accepted.push({ store: verdict.store, id: verdict.id });
+        else accepted.push({ store: verdict.store, id: verdict.id,...(verdict.operation_id?{operation_id:verdict.operation_id,server:verdict.server,seed_used:verdict.seed_used}:{}) });
       }
       return { server_time: maintenantIso, accepted, adjusted, rejected };
     },
@@ -104,6 +137,7 @@ export function creerTransportFactice({ pousser = [], lire = {}, serveur = false
   let iPousser = 0;
   return {
     journal,
+    async capacites() {return {capacites:{recipe_lifecycle:1},erreur:null};},
     // Mode serveur seulement : ce que le serveur porte pour une clé (null en mode scripté).
     ligne: (store, id) => (arbitre ? arbitre.ligne(store, id) : null),
     async pousser(rows) {

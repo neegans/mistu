@@ -81,7 +81,7 @@ export async function runL0RepasCoursesTests({ eq, ok }) {
       eq(courant.servings, 3, 'L0 C03 : la nouvelle heure ne perd pas les portions saisies simultanément');
     }));
     await run('copie et partage', () => withRepo(async repo => {
-      const { list, ctx, rows } = fixtureCourses(); await repo.save('shopping_lists', list);
+      const { list, ctx, rows } = fixtureCourses(); await repo.saveBatch({ recipes: [...ctx.recipesById.values()], recipe_versions: [...ctx.versionsById.values()], shopping_lists: [list] }, { conditions: { recipes: [...ctx.recipesById.keys()].map(key => ({ key, absente: true })) } });
       const copies = [], partages = [], messages = [];
       const navigateur = { clipboard: { writeText: async text => copies.push(text) }, share: async data => partages.push(data.text) };
       const vue = await renderShoppingList({ id: 'l' }, {}, ctx, { navigator: navigateur, toast: msg => messages.push(msg) }); document.body.append(vue);
@@ -131,7 +131,7 @@ export async function runL0RepasCoursesTests({ eq, ok }) {
       ok(!bouton(failed, 'Partager').disabled, 'L0 C08 : une nouvelle tentative reste disponible');
     }));
     await run('cases concurrentes reflétées', () => withRepo(async repo => {
-      const { list, ctx, rows } = fixtureCourses(); list.checked = {}; await repo.save('shopping_lists', list);
+      const { list, ctx, rows } = fixtureCourses(); list.checked = {}; await repo.saveBatch({ recipes: [...ctx.recipesById.values()], recipe_versions: [...ctx.versionsById.values()], shopping_lists: [list] }, { conditions: { recipes: [...ctx.recipesById.keys()].map(key => ({ key, absente: true })) } });
       const vue = await renderShoppingList({ id: 'l' }, {}, ctx);
       const ligne = nom => [...vue.querySelectorAll('li')].find(li => li.querySelector('strong')?.textContent === nom);
       const beurre = ligne('Beurre'), sel = ligne('Sel');
@@ -145,7 +145,7 @@ export async function runL0RepasCoursesTests({ eq, ok }) {
       ok(vue.textContent.includes('Rien à acheter') && bouton(vue, 'Copier').disabled, 'L0 C08 : état vide et commandes concordent avec les cases visibles');
     }));
     await run('geste de case encore en cours', () => withRepo(async repo => {
-      const { list, ctx, rows } = fixtureCourses(); list.checked = {}; await repo.save('shopping_lists', list);
+      const { list, ctx, rows } = fixtureCourses(); list.checked = {}; await repo.saveBatch({ recipes: [...ctx.recipesById.values()], recipe_versions: [...ctx.versionsById.values()], shopping_lists: [list] }, { conditions: { recipes: [...ctx.recipesById.keys()].map(key => ({ key, absente: true })) } });
       let liberer, numero = 0;
       const attente = new Promise(resolve => { liberer = resolve; });
       const lent = { ...repo, saveBatch: async (...args) => { numero += 1; if (numero === 2) await attente; return repo.saveBatch(...args); } };

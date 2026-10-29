@@ -1,6 +1,6 @@
 # L1 — Corbeille individuelle, durable et synchronisable
 
-**29 octobre 2026 — Proposition pour relecture de Neegan. Aucun code L1 construit ni migration appliquée.**
+**29 octobre 2026 — Spec approuvée par Neegan sur « ok ». Construction locale autorisée ; publication et migration distante restent des gestes séparés.**
 
 ## 1. Base, besoin et périmètre
 
@@ -259,7 +259,7 @@ et preuve que cette commande avait déjà été acceptée sur le compte.
 | Sauvegarde | Format2, lecture1/2, arbitrage de fusion et bilan fidèle |
 
 Version applicative cible **0.23.0**, cache `cuisine-os-v0.23.0-1` au premier commit applicatif du lot.
-Ces valeurs ne sont pas encore modifiées. Ajouter les modules à `SHELL`, les nouveaux textes à `t()`/anglais et les modules d’affichage à `MODULES_NEUFS`.
+Ces valeurs sont appliquées dans la construction locale. Les modules sont ajoutés à `SHELL`, les nouveaux textes à `t()`/anglais et les modules d’affichage à `MODULES_NEUFS`.
 
 Ordre proposé après relecture :
 
@@ -305,7 +305,8 @@ Pas d’accès à un compte privé ni d’application distante de SQL pendant la
 
 ## 11. État et relecture
 
-Cette proposition concrétise L1 et ses dépendances ; elle n’annonce aucun correctif de corbeille déjà livré.
-Les choix proposés à relire sont le périmètre des recettes autonomes, les sessions existantes qui restent utilisables,
-le conflit de cycle explicite et les migrations DB5/archive2/serveur nécessaires à la compatibilité.
-Construction après relecture conformément à la méthode d’`AGENTS.md`. L0 reste disponible localement en 0.22.0 ; dernière publication documentée 0.21.1.
+Neegan a approuvé ce périmètre sur « ok » le 29 octobre 2026. La construction locale suit cette spec ;
+son bilan et ses limites sont consignés dans le [rapport de construction](../plans/2026-10-29-l1-corbeille-individuelle.md).
+Construction locale : navigateur **7656/7656** (épingle **7655**), Node **231/231**, PostgreSQL local **42 assertions**
+et concurrence entre deux sessions. Les essais physiques et l’intégration Supabase distante restent à faire.
+L0 est inclus dans la branche. La dernière publication reste 0.21.1 ; ni application ni migration distante ne sont publiées par cette approbation.
