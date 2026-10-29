@@ -3674,3 +3674,7 @@ Parcours locaux25+16 mesures, deux contrôles du formulaire de livre, deux ongle
 photo et note conservées après rechargement hors ligne. Aucun compte privé, appel assistant réel ou appareil physique.
 Publication en préparation ; L4–L10 etE1 restent à construire.
 [Rapport](docs/superpowers/plans/2026-10-29-l3-gestion-visible.md).
+
+Publication L3 vérifiée : codeea25232, Pages29oct23:05:19UTC ;44fichiers publics identiques, navigateur8547/8547,
+parcours publics25+16mesures et rechargement hors ligne avec photo/note, quatre modules en cache unique0.25.0-1.
+L4 reprend après cette réception ; L4–L10 etE1 ne sont pas annoncés terminés.

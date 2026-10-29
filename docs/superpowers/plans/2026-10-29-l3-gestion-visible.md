@@ -68,6 +68,16 @@ Node **232/232**, générateur de migrations `--check` **0**, syntaxe des 43 fic
 Les anciens scénarios de carnet et d’import sont conservés avec les nouveaux sélecteurs ; le garde de dépendance
 `getClient` distingue désormais le nom exact de l’API DOM `getClientRects`.
 
+## Publication vérifiée
+
+Code **`ea252326011adff107c1a3425c038a3629072736`**, avancé dans `main` et poussé sur autorisation de poursuite.
+GitHub Pages construit le29octobre2026 à **23:05:19UTC (19 h05 HAE)**. **44 fichiers** de production/tests modifiés
+identiques octet pour octet au commit public. Suite publique **8547/8547**, aucune erreur JavaScript ni requête extérieure.
+Deux parcours publics distincts : **25+16 mesures** sans débordement, retours/navigation et contextes conservés,
+actions et sélection concurrente, quatre modules nouveaux dans l’unique cache0.25.0-1, photo/note présentes après
+rechargement complet hors ligne. Captures publiques relues ; fixtures injectées en profils jetables.
+Preuves : `publication-fichiers.json`, `suite-publique.log`, `parcours-public.resultat.json`, `parcours-b-public.resultat.json`.
+
 ## Limites et suite
 
 Aucun compte privé, appel assistant réel ou contenu utilisateur utilisé. Les photos de réception sont des
@@ -76,4 +86,4 @@ Les échanges entre onglets concernent des bases de test locales, sans HTTP Supa
 
 L4 doit ajouter les éditeurs organisés et les brouillons durables. L6 reste responsable de la traduction
 automatique intégrale en français ; L3 n’annonce pas cette fonction comme livrée. Les autres lots du plan
-restent suivis séparément. La publication L3 n’est pas encore réalisée à ce stade.
+restent suivis séparément. La publication L3 est vérifiée ; L4 commence ensuite.
