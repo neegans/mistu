@@ -1160,10 +1160,10 @@ test('README : etape 11 (0005, notify seule, preuve, RESULTATS) entre 10 et « O
   assert.match(etape.slice(etape.indexOf('notify pgrst') - 200, etape.indexOf('notify pgrst')), /seule/, 'collee seule');
   assert.doesNotMatch(etape, /B_UUID|B_EMAIL/, 'un seul compte de preuve');
   assert.doesNotMatch(etape, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
-  // L'arbre du README nomme les deux fichiers neufs, et l'intro compte quatre migrations generees.
+  // L'arbre du README conserve les deux fichiers du lot A ; L1 porte le total à cinq migrations générées.
   const arbre = r.slice(0, r.indexOf('## Un seul projet'));
   for (const f of ['migrations/0005_imports.sql', 'proofs/0005_imports.sql']) assert.ok(arbre.includes(f), 'arbre : ' + f);
-  assert.ok(arbre.includes('quatre migrations générées'), 'intro : quatre generees');
+  assert.ok(arbre.includes('cinq migrations générées'), 'intro : cinq generees avec la corbeille L1');
 });
 test('RESULTATS-mitsu : section « Preuve 0005_imports.sql — à jouer » preparee, sans cle ni adresse', () => {
   const res = lire('supabase/proofs/RESULTATS-mitsu.md');

@@ -314,7 +314,7 @@ for (const suite of [runL1CorbeilleDomaineTests, runL1CorbeilleArchiveTests, run
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 7655,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 7663,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

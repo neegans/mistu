@@ -309,4 +309,6 @@ Neegan a approuvé ce périmètre sur « ok » le 29 octobre 2026. La constructi
 son bilan et ses limites sont consignés dans le [rapport de construction](../plans/2026-10-29-l1-corbeille-individuelle.md).
 Construction locale : navigateur **7656/7656** (épingle **7655**), Node **231/231**, PostgreSQL local **42 assertions**
 et concurrence entre deux sessions. Les essais physiques et l’intégration Supabase distante restent à faire.
-L0 est inclus dans la branche. La dernière publication reste 0.21.1 ; ni application ni migration distante ne sont publiées par cette approbation.
+L0 est inclus dans la branche. L’approbation initiale portait sur la construction locale.
+Neegan a ensuite demandé « deploy avant » : migration 0008 puis application 0.23.0 publiées le 29 octobre.
+Le rapport distingue les preuves publiques, le correctif visuel 0.23.1 et les essais physiques encore à faire.

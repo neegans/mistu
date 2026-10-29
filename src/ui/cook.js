@@ -47,7 +47,7 @@ export async function renderCook(params, query, ctx, deps = {}) {
   progress.done_step_ids = progress.done_step_ids || [];
   progress.by_version = progress.by_version || {};
   const root = el('div', { class: 'mode-cuisine' });
-  root.append(...items.map(it=>mentionCycleRecette(it.recipe)));
+  root.append(...items.map(it=>mentionCycleRecette(it.recipe)).filter(Boolean));
   const contextesHistoriques = await Promise.all([...new Map(items.map(it => [it.recipe.id,it.recipe])).values()].map(r => capturerRecette(depot, r, {ctx, historique:true})));
   const ctxF = await contexteFichiers(ctx);
   const photos = photosPersonnellesParRecette(ctx.cook_history);

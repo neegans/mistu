@@ -514,3 +514,34 @@ Session : jeton copié depuis la console du site connecté par le script d'atten
 
 Attendu dans `public.assistant_journal` (à lire par Neegan dans l'éditeur SQL) : une ligne `apercu-web` par sonde payante (S-A3, S-A5, S-A6, S-A7), statut 200,
 jetons `null` ; `assistant_usage_jour` du jour : 4 appels de plus.
+
+## Migration `0008_corbeille_recettes.sql` — appliquée le 29 octobre 2026
+
+Autorisation de Neegan : « deploy avant », suivie de « et enchaine sur le restant des lots ».
+Code `52338ec`, application 0.23.0 ; projet `mitsu`. Sauvegarde physique du 29 octobre à 06:29 UTC
+observée `COMPLETED` avant le geste. Aucune sauvegarde n’a été restaurée.
+
+Préflight en transaction `READ ONLY` : PostgreSQL 17.11, rôle `postgres`, neuf tables cibles présentes,
+anciennes fonctions requises présentes ; aucune fonction ni aucun trigger L1 déjà installé.
+Migration appliquée une seule fois par la Management API du CLI, dans une transaction avec délais bornés
+et notification de rechargement du schéma PostgREST. Aucun contenu métier n’est modifié par la migration.
+SHA-256 du fichier appliqué : `d7bbb381d8b7f56c28e74ae32be9c6f3d596ffdf908bbbf244e5235d853a63a3`.
+
+| Contrôle après migration | Résultat |
+|---|---|
+| Corps des fonctions | 7/7 exacts, dont les 6 de L1 et l’ancienne `sync_push` inchangée ; `security invoker` |
+| Triggers | 9/9 activés sur INSERT/UPDATE/DELETE, fonction attendue, RLS active |
+| Droits cap/v2 | Exécution autorisée à `authenticated`, refusée à `anon` |
+| Fonction de trigger | Pas d’exécution directe autorisée à `authenticated` |
+| Capacité sous rôle `authenticated` autorisé, transaction en lecture seule | `recipe_lifecycle = 1` |
+| HTTP PostgREST anonyme, `sync_capabilities` et `sync_push_v2` | HTTP 401, code `42501`, refus attendu |
+
+Les claims du contrôle de capacité ont été construits côté SQL depuis un compte déjà autorisé,
+sans emprunter de JWT utilisateur. Aucun identifiant ou courriel n’est sorti, aucune recette n’a été consultée,
+aucune écriture métier n’a été exécutée. Ce contrôle SQL ne constitue pas un échange HTTP authentifié.
+
+La preuve mutante `0008` n’a pas été jouée sur la production. Les **42 assertions** et les **deux connexions
+concurrentes** ont été exécutées sur PostgreSQL local jetable pendant la construction, puis le serveur arrêté.
+La convergence sur les deux appareils réels reste à vérifier.
+Traces locales : `.superpowers/sdd/2026-10-29-l1-publication/` (`migration-0008.log`,
+`postflight-0008-resultat.json`, `postgrest-anonyme.json`). Aucun redéploiement de l’assistant.

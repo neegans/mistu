@@ -55,6 +55,22 @@ export async function runL1CorbeilleUiTests({eq,ok}) {
         try {ok(root.textContent.includes('retiree')||root.textContent.includes('Remuer doucement.'),`L1 ${nom} : ancienne recette toujours présente`);ok(root.textContent.includes('corbeille'),`L1 ${nom} : mention du retrait`);}finally{dispose();}
       }
     }));
+    await run('mentions de corbeille sans texte parasite',()=>withRepo(async(repo,db)=>{
+      const recettes=[recette('mention-active'),recette('mention-retiree',retiree)];
+      const listes=recettes.map(r=>({id:`liste-${r.id}`,title:'Courses',items:[{recipe_id:r.id,recipe_version_id:r.current_version_id,servings:2}],checked:{}}));
+      const sessions=recettes.map(r=>({id:`session-${r.id}`,status:'active',selected_version_ids:[r.current_version_id],servings:2,progress:{done_step_ids:[],by_version:{}}}));
+      await db.mutate({origin:'remote',puts:{recipes:recettes,recipe_versions:recettes.map(r=>version(r.id)),shopping_lists:listes,cook_sessions:sessions}});
+      const ctx=await getData(true);
+      for(const [i,r] of recettes.entries())for(const [nom,render,id] of [['courses',renderShoppingList,listes[i].id],['cuisine',renderCook,sessions[i].id]]){
+        const root=await render({id},{},ctx),dispose=monter(root);
+        try {
+          const textes=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),parasites=[];let texte;
+          while((texte=textes.nextNode()))if(/^(?:null|undefined)$/.test(texte.textContent.trim()))parasites.push(texte.textContent);
+          eq(parasites,[],`L1 ${nom} : aucun texte parasite pour une recette ${i?'retirée':'active'}`);
+          eq([...root.querySelectorAll('[data-role=mention-corbeille] a')].map(a=>a.getAttribute('href')),i?[`#/recipes/${r.id}`]:[],`L1 ${nom} : mention et accès à la fiche uniquement pour la recette retirée`);
+        }finally{dispose();}
+      }
+    }));
     await run('retrait et annulation durables',()=>withRepo(async(repo,db)=>{
       const r=recette('commande',{personal_notes:'Note privée conservée'}),v=version('commande');
       await db.mutate({origin:'remote',puts:{recipes:[r],recipe_versions:[v]}});

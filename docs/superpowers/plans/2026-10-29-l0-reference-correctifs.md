@@ -1,10 +1,11 @@
 # Rapport du lot L0 — cohérence des données et des parcours
 
-**29 octobre 2026 — construit et vérifié localement ; publication non effectuée.**
+**29 octobre 2026 — construit et vérifié localement, puis publié avec L1 en 0.23.0 sur « deploy avant ».**
 
 [Spec L0](../specs/2026-10-29-l0-reference-correctifs-design.md) approuvée par Neegan sur « go ».
 Branche `l0-reference-correctifs`, base `cd8c7f2`. Application locale **0.22.0**, schéma **4**, cache `cuisine-os-v0.22.0-1`.
-La dernière version publiée reste **0.21.1**. Aucun nouveau magasin, index, SQL ou déploiement de fonction assistant.
+La dernière version publiée était **0.21.1** à la clôture initiale. Aucun nouveau magasin, index, SQL ou déploiement de fonction assistant propre à L0.
+La [publication commune avec L1](2026-10-29-l1-corbeille-individuelle.md) vérifie aussi traduction, heure du repas, courses et hors ligne sur le site public.
 
 ## Comportements corrigés
 

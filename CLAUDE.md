@@ -3331,10 +3331,10 @@ DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de
 R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
 404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
 
-### Plan directeur — L1 : corbeille individuelle (29 octobre 2026 — local 0.23.0)
+### Plan directeur — L1 : corbeille individuelle (29 octobre 2026 — publié 0.23.0, correctif 0.23.1 prêt)
 
 [Spec](docs/superpowers/specs/2026-10-29-l1-corbeille-individuelle-design.md) approuvée par Neegan sur « ok ».
-Branche `l1-corbeille-individuelle`, base `cf539fb`, contenant L0 `9c823b0` encore non publié.
+Branche `l1-corbeille-individuelle`, base `cf539fb`, contenant L0 `9c823b0` ; publication commune sur « deploy avant ».
 [Rapport de construction et procédure de publication](docs/superpowers/plans/2026-10-29-l1-corbeille-individuelle.md).
 
 Retrait/restauration des recettes autonomes, Annuler conditionné, corbeille et états À vérifier ; contenu intégral conservé.
@@ -3357,8 +3357,16 @@ Trois vrais moteurs avec transport simulé, concurrence hors ligne et archive ve
 PostgreSQL local : **42 assertions** et deux connexions concurrentes ; serveur de test arrêté, aucune migration distante.
 Preuves dans `.superpowers/sdd/2026-10-29-l1/` ; zéro erreur JavaScript ou requête externe.
 
-**Limites.** Non publié, dernière publication documentée 0.21.1. Aucun compte privé, vrai appel assistant, lecteur d’écran ou appareil iPhone/Safari physique testé.
-L’intégration Auth/PostgREST/Storage distante et la convergence sur deux appareils réels restent à vérifier.
+**Publication.** Migration 0008 appliquée en transaction ; 7 corps exacts, 9 triggers avec RLS,
+capacité 1 sous rôle authenticated autorisé et refus HTTP anonymes 401/42501. Aucun contenu métier modifié.
+`52338ec` poussé dans `main`, GitHub Pages construit à 20:09 UTC. Public 0.23.0 : **7656/7656**,
+59 fichiers identiques, parcours L0+L1, 26 mesures, cache huit modules et hors ligne vérifiés.
+Correctif local 0.23.1 : filtrer les mentions absentes avant `append` dans courses/cuisine supprime le texte `null`.
+**7664/7664**, épingle 7663, +8 assertions ; Node 231/231, répétition avec 31 mesures verte.
+Preuves : `.superpowers/sdd/2026-10-29-l1-publication/`.
+
+**Limites.** Aucun JWT utilisateur, contenu de compte privé, vrai appel assistant, lecteur d’écran ou appareil iPhone/Safari physique testé.
+L’échange HTTP authentifié, Storage et la convergence sur deux appareils réels restent à vérifier.
 Les copies d’enfants en conflit restent bloquées et consultables ; reprise volontaire depuis la fiche, sans résolution arbitraire.
 Le retrait de livres/groupes, la purge et les lots suivants (dont traduction automatique complète) restent hors de L1.
 
@@ -3384,7 +3392,7 @@ synchronisation entre deux bases avec transport simulé et archive sur une trois
 heure répétée, copie simulée et hors ligne ; largeurs 320/390/768/900/1280 et texte à 200 %.
 Zéro erreur JavaScript/requête externe dans les preuves. Dossier local ignoré : `.superpowers/sdd/2026-10-29-l0/`.
 
-**Limites et suite.** L0 non publié ; version publique précédemment validée 0.21.1. Aucun SQL, déploiement assistant, compte privé ou appel IA.
+**Limites et suite.** L0 était local à sa clôture ; il est inclus dans la publication 0.23.0 de L1 ci-dessus. Aucun SQL propre à L0, déploiement assistant, contenu de compte privé ou appel IA.
 Pas d’essai physique Safari/iPhone, Siri ni partage natif. La traduction automatique intégrale et son affichage commun fiche/cuisine/voix
 relèvent de L6/L7 ; minuteurs persistants, corbeille, navigation et révisions source restent des lots séparés.
 Deux traductions créées simultanément avec des identifiants distincts pour la même version/langue restent un cas à traiter par L6.

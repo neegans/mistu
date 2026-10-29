@@ -1,4 +1,26 @@
-# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — L1 CONSTRUIT LOCALEMENT EN 0.23.0 ; PUBLICATION PRÉCÉDENTE 0.21.1
+# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — L0 ET L1 PUBLIÉS EN 0.23.0 ; CORRECTIF 0.23.1 PRÊT
+
+**29 octobre 2026 — PUBLICATION L0 + L1 SUR « deploy avant », PUIS POURSUITE DU PLAN AUTORISÉE.**
+Neegan demande ensuite « et enchaine sur le restant des lots ». La suite se prépare lot par lot,
+avec contrat écrit et revue technique avant construction ; L2 est en préparation.
+Migration **0008** appliquée à `mitsu` en transaction après contrôle du catalogue et d’une sauvegarde physique.
+Postflight distant en lecture seule : **7 corps exacts**, **9 triggers avec RLS**, droits attendus,
+capacité **recipe_lifecycle = 1** sous rôle `authenticated` autorisé ; RPC anonymes refusées (401/42501).
+Aucun contenu métier consulté ou modifié, aucun JWT utilisateur emprunté, aucun appel assistant.
+
+Code `52338ec` intégré en avance rapide dans `main`, poussé et construit par GitHub Pages le 29 octobre à
+**16 h 09 HAE (20:09 UTC)**. Public **0.23.0**, cache `cuisine-os-v0.23.0-1`, DB5 ; **59 fichiers** identiques au commit.
+Suite publique **7656/7656**, zéro erreur JavaScript/requête externe. Parcours public en profil jetable :
+traduction partielle, heure répétée Toronto, courses, note/photo ajoutées, corbeille/restauration, ancien éditeur refusé,
+cache des huit modules L0+L1 et hors ligne ; **26 mesures** sans débordement. Essais physiques toujours à faire.
+
+La relecture des captures a trouvé un texte littéral `null` dans les courses et la cuisine actives : les mentions
+absentes sont désormais filtrées avant insertion DOM. **Correctif 0.23.1 prêt**, cache `cuisine-os-v0.23.1-1`, DB inchangée.
+Huit assertions nouvelles, **7664/7664** navigateur (épingle 7663), Node **231/231**, générateur `--check` 0.
+Répétition de parcours 0.23.1 : **31 mesures**, aucun débordement ni texte parasite, zéro erreur JS/requête externe.
+Le premier essai de suite publique à 390 px cherchait une table remplacée normalement par des cartes ;
+le harnais de suite reprend les 1280 px de référence. Aucun défaut de comparaison applicatif constaté.
+Preuves : `.superpowers/sdd/2026-10-29-l1-publication/`. [Bilan serveur](supabase/proofs/RESULTATS-mitsu.md).
 
 **29 octobre 2026 — L1 APPROUVÉ ET CONSTRUIT LOCALEMENT : CORBEILLE INDIVIDUELLE.**
 Neegan approuve la [spec de corbeille individuelle](docs/superpowers/specs/2026-10-29-l1-corbeille-individuelle-design.md) sur « ok ».
@@ -26,10 +48,10 @@ archive sur un troisième appareil puis connexion, photos intactes. PostgreSQL l
 deux sessions concurrentes ; une commande acceptée, l’autre refusée sur sa base périmée. Serveur de test arrêté.
 Preuves locales : `.superpowers/sdd/2026-10-29-l1/`.
 
-**Non publié : dernière publication documentée 0.21.1.** Aucun push, déploiement ou SQL distant effectué pour L1.
-La publication devra inclure L0 et appliquer d’abord la migration serveur, après autorisation distincte.
+À la clôture initiale, L1 était local et la dernière publication était 0.21.1 ; la publication autorisée est décrite en tête.
 Aucun compte privé, vrai appel assistant, appareil iPhone/Safari physique ou lecteur d’écran testé.
-L’intégration Auth/PostgREST/Storage Supabase distante et la convergence sur les deux appareils réels restent à vérifier.
+L’échange HTTP authentifié, Storage et la convergence sur les deux appareils réels restent à vérifier ; les contrôles
+SQL de capacité et les refus anonymes PostgREST ont été ajoutés lors de la publication.
 Les conflits d’enfants restent consultables et bloqués jusqu’à reprise volontaire depuis la fiche.
 Livres/groupes, purge, refonte générale et traduction automatique complète restent hors de L1 ; le plan directeur n’est pas terminé.
 
@@ -54,7 +76,7 @@ cases et copie des courses, fiche rechargée hors ligne. Cache actif avec les de
 sans débordement horizontal. Zéro erreur JavaScript ou requête externe. Synchronisation entre deux bases avec moteurs réels/transport simulé,
 puis archive et restauration sur une troisième base. Preuves : `.superpowers/sdd/2026-10-29-l0/`.
 
-**Non publié : la dernière version publiée reste 0.21.1.** Aucun push ni déploiement de L0. Aucun vrai appel assistant, compte privé,
+À sa clôture initiale, L0 était local ; il est inclus dans la publication 0.23.0 décrite en tête. Aucun vrai appel assistant, compte privé,
 Safari/iPhone physique, déclenchement Siri ou partage natif vérifié. La traduction automatique complète et sa lecture fiche/cuisine/voix
 restent L6/L7 ; la refonte visuelle, la corbeille et les révisions de source ne sont pas livrées par L0. Le plan directeur entier reste à réaliser.
 

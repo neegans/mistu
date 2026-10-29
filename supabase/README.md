@@ -1,6 +1,6 @@
 # Supabase — comment appliquer et prouver le serveur de synchronisation
 
-Ce dossier contient **tout le serveur** de Cuisine OS : quatre migrations générées (`0001`, `0002`, `0003`, `0005`) et trois
+Ce dossier contient **tout le serveur** de Cuisine OS : cinq migrations générées (`0001`, `0002`, `0003`, `0005`, `0008`) et trois
 écrites à la main (`0004`, `0006`, `0007`), dans `migrations/` ; les preuves à jouer après les avoir appliquées (`proofs/`) et la fonction de la passerelle de l'assistant
 (`functions/`). Rien n'est appliqué automatiquement : chaque étape est un geste de
 Neegan dans l'éditeur SQL du tableau de bord Supabase. Spec de référence :
@@ -22,6 +22,9 @@ supabase/
   proofs/0006_lecture_web.sql            à coller après 0006 ; rien à remplacer ; n'écrit rien (rollback final)
   migrations/0007_apercu_web.sql         écrite à la main, hors du générateur (lot UI-2 « aperçus des résultats web », étape 13)
   proofs/0007_apercu_web.sql             à coller après 0007 ; rien à remplacer ; n'écrit rien (rollback final)
+  migrations/0008_corbeille_recettes.sql générée par tools/corbeille-sql.mjs (via generer-migrations.mjs), lot L1, étape 14
+  proofs/0008_corbeille_recettes.sql     preuve mutante réservée à une base de test ; rollback final
+  proofs/0008_corbeille_concurrence.cjs  deux sessions sur le PostgreSQL local de preuve uniquement
   functions/assistant/                   la fonction de la passerelle (index.ts, logique.js, lecture-web.js, deno.json) ; déployée par le CLI, étape 10
   proofs/0001_hook.md                    gabarit : capture du crochet « Before User Created »
   proofs/0001_providers.md               gabarit : capture des fournisseurs de connexion
@@ -420,6 +423,30 @@ fonction, ni privilège ; le `drop` et l'`add` tiennent dans une transaction (DD
    version 4 encore déployée refuse l'outil `apercu-web` en 400 `requete` avant toute réservation (aucun appel compté) et l'onglet Web dit « Photos
    indisponibles pour cette recherche. » jusqu'au redéploiement ; l'ordre `0007` → redéploiement → sondes reste ; une ronde imposée par les sondes
    (borne 2 Mio, parallélisme) part en commit de suite.
+
+### 14. Corbeille individuelle — migration `0008`
+
+Appliquée le 29 octobre 2026 sur « deploy avant » de Neegan, avant publication de l’application 0.23.0.
+Elle ajoute `sync_capabilities`, `sync_push_v2` et neuf triggers de protection du cycle ; elle adapte
+`sync_purge_all` pour conserver l’effacement volontaire du compte. Elle ne modifie ni ne supprime les données existantes.
+Aucun redéploiement de la fonction `assistant` n’est nécessaire.
+
+Pour un autre projet déjà initialisé, appliquer le fichier **une seule fois**, sous `postgres`, dans une transaction.
+Le CLI authentifié permet `supabase db query --linked --project-ref <ref> --file <transaction.sql>` ;
+utiliser une référence de projet explicite et vérifier les catalogues avant le geste. Ne pas rejouer les anciennes migrations.
+La transaction de publication borne les attentes de verrous et notifie PostgREST de recharger son schéma.
+
+Après application : contrôler les corps de fonctions, les neuf triggers activés, RLS et les droits
+`authenticated`/`anon` ; vérifier `sync_capabilities` sous un compte autorisé. Le résultat attendu est
+`{"recipe_lifecycle":1}`. L’absence de session ne doit pas ouvrir les RPC.
+
+La preuve SQL `0008` crée des fixtures et exerce notamment `sync_purge_all` avant son rollback :
+**elle reste réservée à une base de test**, conformément à son en-tête. La publication utilise des contrôles
+de catalogue et de capacité en lecture seule ; les 42 assertions et la concurrence à deux sessions ont été
+exécutées séparément sur PostgreSQL local. Résultats et limites dans `proofs/RESULTATS-mitsu.md`.
+
+Conserver les protections serveur si une version de l’interface doit être retirée. Une bibliothèque DB5
+ne s’ouvre pas avec l’ancien logiciel DB4 ; un retour arrière ne doit pas effacer les marqueurs de corbeille.
 
 ## Où coller les sorties
 

@@ -3,7 +3,8 @@
 29 octobre 2026. [Spec approuvée](../specs/2026-10-29-l1-corbeille-individuelle-design.md) sur « ok ».
 Branche `l1-corbeille-individuelle`, base de spec `cf539fb`, contenant L0 `9c823b0`.
 Version construite localement : application 0.23.0, IndexedDB 5, archive 2 (lecture 1 et 2), cache `cuisine-os-v0.23.0-1`.
-Dernière publication connue : 0.21.1. Ce travail ne publie ni application ni migration distante.
+La construction était initialement locale. Neegan a ensuite autorisé la publication sur « deploy avant » ;
+application 0.23.0 et migration 0008 publiées le 29 octobre, détails ci-dessous.
 
 ## Construction
 
@@ -57,11 +58,34 @@ Les triggers, verrous, transactions et politiques de la migration L1 sont réell
 Le cluster a été arrêté et le volume de binaires démonté après les essais. L’intégration PostgREST, Auth et Storage
 Supabase distante n’a pas été exécutée par cette preuve locale.
 
-## Publication à préparer séparément
+## Publication du 29 octobre 2026
+
+Autorisation : « deploy avant », puis « et enchaine sur le restant des lots ».
+Sauvegarde physique de 06:29 UTC observée `COMPLETED`, préflight en lecture seule puis migration 0008 exacte
+appliquée une fois en transaction avec délais bornés et notification PostgREST. Postflight : 7 corps de fonctions
+exacts, 9 triggers avec RLS, droits attendus, capacité 1 sous rôle `authenticated` autorisé. Les deux RPC refusent
+les requêtes HTTP anonymes en 401/42501. Aucun contenu métier lu ou modifié.
+[Résultats serveur](../../../supabase/proofs/RESULTATS-mitsu.md).
+
+Code `52338ec` intégré en avance rapide dans `main` ; GitHub Pages construit à 20:09 UTC (16 h 09 HAE).
+Public **0.23.0**, **59 fichiers** identiques, **7656/7656** tests navigateur. Le parcours public vérifie traduction
+partielle, heure répétée Toronto, courses, note/photo ajoutées par l’interface, retrait/restauration, ancien éditeur
+refusé, huit modules en cache et hors ligne. **26 mesures** sans débordement ; zéro erreur JS/requête externe.
+
+La relecture visuelle a révélé un texte littéral `null` dans courses/cuisine pour les recettes actives.
+Le correctif **0.23.1** filtre les mentions absentes sans retirer celles des recettes dans la corbeille.
+Huit assertions supplémentaires : **7664/7664**, épingle 7663, Node **231/231**. Répétition locale : **31 mesures**,
+zéro texte parasite, débordement, erreur JS ou requête externe. Le harnais de suite utilise 1280 px comme le runner
+historique : le test de comparaison attend sa variante tableau, la variante en cartes à 390 px n’est pas un défaut.
+
+Traces : `.superpowers/sdd/2026-10-29-l1-publication/`, dont `migration-0008.log`, `postflight-0008-resultat.json`,
+`postgrest-anonyme.json`, `pages-build-code.json`, `fichiers-publics.resultat.json`, `public/suite.json`, `public/parcours.json`.
+
+## Contrôles de publication et essais physiques
 
 1. Conserver une sauvegarde du compte et relever la version réellement installée sur les deux appareils.
-2. Sur autorisation de publication, appliquer la migration additive au projet existant et vérifier `sync_capabilities` sous le compte autorisé.
-3. Publier l’application 0.23.0, qui inclut aussi L0 encore local. Vérifier les fichiers publics, le cache, la version affichée et le bilan navigateur public.
+2. Migration et capacité vérifiées sur autorisation de publication, comme décrit ci-dessus.
+3. Application L0+L1 publiée ; fichiers publics, cache, version et bilan navigateur vérifiés.
 4. Vérifier le parcours sur un iPhone/Safari physique et deux appareils du même compte : retrait hors ligne, reconnexion, convergence, restauration, note et photo conservées.
 
 Ne pas rétrograder une bibliothèque DB5 avec une ancienne application. Conserver la protection serveur du cycle même lors d’un retour arrière du logiciel.
@@ -71,6 +95,7 @@ Les tests sur le compte privé, le matériel physique et le service de productio
 
 L1 porte sur les recettes autonomes. Les livres, groupes, suppressions multiples et purges restent hors de ce lot.
 La traduction automatique complète et les refontes des lots suivants ne sont pas livrées par cette corbeille.
-Aucun vrai appel assistant, accès à un compte privé, déploiement ou migration distante n’a été effectué.
+Aucun vrai appel assistant, JWT utilisateur emprunté ou contenu de compte privé consulté.
+La migration et le site sont publiés ; l’échange HTTP authentifié et Storage restent à vérifier sur les appareils réels.
 Les captures mobiles sont des dimensions de navigateur de bureau, pas une validation de Safari/iPhone physique.
 Le lecteur d’écran n’a pas été testé. La réception multiappareil exige encore les essais physiques décrits dans la spec.
