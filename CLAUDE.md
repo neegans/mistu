@@ -3331,6 +3331,40 @@ DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de
 R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
 404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
 
+### Photos, descriptions et temps (28 octobre 2026 — construit localement en 0.21.0)
+
+Spec `docs/superpowers/specs/2026-10-28-interface-visuelle-recettes-design.md` approuvée sur « ok go ».
+Branche `interface-visuelle-recettes`, base `d832528`. Publication autorisée sur « go deploy » ; intégration et contrôles publics en cours.
+Sources de Neegan conservées dans `docs/lots/2026-10-28-interface-visuelle/`. Plan :
+`docs/superpowers/plans/2026-10-28-interface-visuelle-recettes.md`, revue visuelle : `design-qa.md`.
+
+Réception des images visibles par moteur existant (2 vols, passes de 20), dédoublonnage par moteur/compte/empreinte,
+pauses et erreurs respectées, aucune descente automatique PDF/EPUB. Photo personnelle prioritaire même distante ;
+état de réception ou décodage explicite. Gestion de la photo réellement affichée : remplacer/retirer préserve notes,
+autres photos et image du livre ; référence sans version autorisée, aucune cuisson fictive. Deux vues partageant une
+réception survivent au retrait du premier lecteur. Les libellés globaux nomment photos et fichiers.
+
+`recipes.reperes` conserve proposition et corrections par champ, chacune liée à sa version et sa signature source.
+Lecteur commun, textes bornés, quatre niveaux, durées/fourchettes entières 0–43200 minutes et origine explicite.
+Inconnu distinct de zéro, aucune somme préparation+cuisson, aucune préparation rebaptisée actif. Rapide exige total
+complet courant ≤30 minutes et contenu disponible. Null manuel et corrections périmées n’autorisent aucun repli IA.
+Recherche/repas/exports cohérents ; annotations estimées/manuelles jamais devenues durées JSON-LD certaines.
+Versions et signatures Thermomix inchangées, contrôles I3 conservés.
+
+Écran `/recipes/:id/reperes` manuel hors ligne, journal `imports.kind=reperes`, appel explicite outil `creation` existant,
+relecture puis conservation conditionnée à source/compte/tentative. Aucun appel à l’ouverture ou à l’import. Route
+`/recipes/:id/photo` et saisie protégées des rafraîchissements. Livre/fiche/cartes reprennent hiérarchie et images des
+maquettes ; cuisine étape d’abord, ingrédients repliés et photo accessible ; Pages source visible même à zéro.
+
+Validation : navigateur **7080/7080**, épingle **7079**, +260 depuis I3 (242 assertions ciblées, 18 i18n), aucune assertion
+supprimée. Node **230/230**, migrations `--check` 0, syntaxe de 119 fichiers JS, `diff --check` propre. Zéro JS/externe. Ciblés
+87/48/45/39/23 ; anciennes suites photos 195, synchro 403, Carnet 282. Preuves deux bases/moteurs avec transport simulé,
+parcours de saisie et vrai sélecteur image, rechargement, anglais, cache 0.21.0-1 et six modules, cuisine hors ligne,
+captures à 320/358/390/768/1280 pixels. Registre `.superpowers/sdd/2026-10-28-interface-visuelle/`.
+
+Aucun serveur/SQL/magasin neuf, DB 4. Vrai assistant, Safari/HEIC et compte réel mobile→ordinateur non testés.
+La cause du constat personnel de Neegan n’est donc pas affirmée comme prouvée sur ses appareils.
+
 ### Chef Thermomix (28 octobre 2026, lot I3 — publié en 0.20.0)
 
 **Autorisation et état.** [Spec révision 1](docs/superpowers/specs/2026-10-28-chef-thermomix-design.md) approuvée par Neegan sur « go » ;

@@ -5,7 +5,7 @@ import { refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { proposeRecipesForDish, compareBundles } from '../domain/dishes.js';
 import { currentVersion } from '../domain/search.js';
-import { pageHeader, section, recipeCard, field, emptyState, libelleDisponibilite, etoiles } from './components.js';
+import { pageHeader, section, recipeCard, contexteFichiers, remplacerEnRevoquant, field, emptyState, libelleDisponibilite, etoiles } from './components.js';
 import { etiquetteCreationIA } from '../domain/creation-ia.js';
 import { comparerCuissons } from '../domain/cuisine-personnelle.js';
 
@@ -23,6 +23,7 @@ export function lieuRattachement(recipe, editionTexte) {
 }
 
 export async function renderDish(params, query, ctx) {
+  const ctxF = await contexteFichiers(ctx);
   const dish = ctx.dishesById.get(params.id);
   if (!dish) return el('div', { class: 'card' }, t('Plat introuvable.'));
   const links = ctx.dish_recipe_links.filter((l) => l.dish_id === dish.id);
@@ -42,7 +43,7 @@ export async function renderDish(params, query, ctx) {
   const compareBox = el('div', null);
   const listBox = el('div', null);
   const drawList = () => {
-    listBox.replaceChildren();
+    remplacerEnRevoquant(listBox);
     if (!confirmed.length) { listBox.append(emptyState('assiette', t('Aucune recette rattachée. Rattache les recettes de tes livres pour les comparer.'))); return; }
     for (const d of confirmed) {
       const check = el('input', { type: 'checkbox', checked: selected.has(d.recipe.id), onChange: (e) => { if (e.target.checked) { if (selected.size >= 3) { e.target.checked = false; toast(t('Trois recettes au maximum')); return; } selected.add(d.recipe.id); } else selected.delete(d.recipe.id); drawCompare(); } });
@@ -51,7 +52,7 @@ export async function renderDish(params, query, ctx) {
         el('label', { class: 'check', onClick: (e) => e.stopPropagation() }, check, t('Comparer')),
         el('span', { class: 'muted', style: { fontSize: '.85rem' } }, hist.length ? t('Cuisinée {n}× · dernière le {d}', { n: hist.length, d: formatDate(hist.sort(comparerCuissons)[0].cooked_at) }) : t('Jamais cuisinée')),
         el('button', { class: 'btn small', onClick: async (e) => { e.preventDefault(); e.stopPropagation(); const l = links.find((x) => x.recipe_id === d.recipe.id); await repo.save('dish_recipe_links', { ...l, state: 'refused', reviewed_at: repo.nowIso() }); refresh(); } }, t('Détacher')));
-      listBox.append(recipeCard(d, { extra }));
+      listBox.append(recipeCard(d, { extra, ctxF }));
     }
   };
   const drawCompare = () => {

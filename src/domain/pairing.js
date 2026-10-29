@@ -1,6 +1,8 @@
 // Accompagnements et accords (spec §26–27) : vraies recettes de la bibliothèque, contraintes strictes appliquées avant
 // le classement, explication tirée des données disponibles. Règles éditoriales versionnées et présentées comme propositions.
 import { searchDocs } from './search.js';
+import { lireTemps, formaterDureeReperes } from './reperes.js';
+import { t } from '../core/i18n.js';
 
 export const PAIRING_RULES_VERSION = 1;
 
@@ -32,8 +34,8 @@ export function findAccompaniments({ mainDoc, docs, type, parsed, ingredientsByI
       if (has(mainDoc, RICH) && has(d, CITRUS) && !has(mainDoc, CITRUS)) { s += 2; why.push({ text: 'Une note acidulée qui allège un plat riche.', origin: 'principe culinaire proposé' }); }
       if (has(mainDoc, CITRUS) && count(d, CITRUS) >= 1 && has(d, FRESH_CRUNCH)) why.push({ text: 'Le plat est déjà citronné : privilégie une vinaigrette douce.', origin: 'principe culinaire proposé' });
     }
-    const active = d.version?.active_minutes ?? d.version?.prep_minutes ?? null;
-    if (active != null && active <= 15) { s += 1; why.push({ text: `Se prépare en ${active} min actives, pendant la cuisson du plat.`, origin: 'durée indiquée dans la recette' }); }
+    const active = lireTemps(d.recipe, d.version).actif;
+    if (active && active.max <= 15) { s += 1; why.push({ text: t('Temps actif : {d}.', { d: formaterDureeReperes(active) }), origin: active.origine === 'estimation_ia' ? t('Estimation IA') : active.origine === 'manuel' ? t('Corrigé par toi') : t('Indiqué dans la source') }); }
     if (d.cooked) { s += 0.5; why.push({ text: `Déjà cuisinée ${d.cooked} fois.`, origin: 'ton historique' }); }
     const liked = likedPairs.get(d.recipe.id);
     if (liked) { s += 4; why.push({ text: `Tu as aimé ce duo le ${new Date(liked.created_at).toLocaleDateString('fr-CA')}.`, origin: 'essai personnel' }); }
@@ -68,15 +70,17 @@ export function ovenTemps(version) {
 // Résumé d'un repas : temps actif cumulé, durée totale bornée, conflits d'appareils. Aucune addition ou parallélisation aveugle.
 export function summarizeMeal(items) {
   const known = items.filter((it) => it.version);
-  const actives = known.map((it) => it.version.active_minutes ?? it.version.prep_minutes ?? null);
-  const totals = known.map((it) => it.version.total_minutes ?? ((it.version.prep_minutes ?? 0) + (it.version.cook_minutes ?? 0) || null));
+  const times = items.map(it => lireTemps(it.recipe, it.version));
+  const actives = times.map((t, i) => items[i].version ? t.actif : null);
+  const totals = times.map(t => t.disponible && t.total?.complet && t.attentes_incluses === true ? t.total : null);
   const unknown = items.filter((it, i) => !it.version || totals[i] == null).map((it) => it.title);
-  const activeSum = actives.every((a) => a != null) && actives.length ? actives.reduce((a, b) => a + b, 0) : null;
-  const totalMax = totals.filter((t) => t != null).length ? Math.max(...totals.filter((t) => t != null)) : null;
+  const activeRange = actives.length && actives.every(Boolean) ? { low: actives.reduce((s, a) => s + a.min, 0), high: actives.reduce((s, a) => s + a.max, 0) } : null;
+  const activeSum = activeRange?.high ?? null;
+  const totalMax = totals.some(Boolean) ? Math.max(...totals.filter(Boolean).map(t => t.max)) : null;
   let estimate = null;
-  if (activeSum != null && totalMax != null) {
-    const low = Math.max(totalMax, activeSum);
-    const high = totals.reduce((a, b) => a + (b || 0), 0);
+  if (activeRange && totals.length && !unknown.length) {
+    const low = Math.max(...totals.map(t => t.min), activeRange.low);
+    const high = totals.reduce((s, t) => s + t.max, 0);
     estimate = { low, high: Math.max(high, low) };
   }
   const conflicts = [];
@@ -86,7 +90,8 @@ export function summarizeMeal(items) {
     if (a.unit === b.unit && a.value !== b.value) conflicts.push(`Four : ${temps[i].title} à ${a.value} °${a.unit} et ${temps[j].title} à ${b.value} °${b.unit}. Prévoir un ordre ou un autre accompagnement.`);
   }
   const notes = [];
-  if (estimate) notes.push(`Entre ${estimate.low} et ${estimate.high} min selon le chevauchement des tâches actives (${activeSum} min actives au total).`);
-  if (unknown.length) notes.push(`Durée inconnue pour : ${unknown.join(', ')}.`);
-  return { estimate, activeSum, totalMax, unknown, conflicts, notes };
+  if (estimate) notes.push(t('Durée estimée : entre {min} et {max} min selon l’organisation. Chevauchement des tâches à vérifier ({actif} min actives au total).', { min: estimate.low, max: estimate.high, actif: activeRange.low === activeRange.high ? activeSum : `${activeRange.low}–${activeRange.high}` }));
+  if (unknown.length) notes.push(t('Durée inconnue pour : {plats}.', { plats: unknown.join(', ') }));
+  if (items.length && !activeRange) notes.push(t('Temps actif total inconnu.'));
+  return { estimate, activeSum, activeRange, totalMax, unknown, conflicts, notes, estimated: !!estimate };
 }

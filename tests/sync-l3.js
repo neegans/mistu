@@ -1867,7 +1867,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.20\.0-\d+'/.test(source), 'sw.js : VERSION incrémentée (format cuisine-os-vMAJOR.MINOR.PATCH-N), l’ancien cache est purgé à l’activation');
+    ok(/VERSION = 'cuisine-os-v0\.21\.0-\d+'/.test(source), 'sw.js : VERSION incrémentée (format cuisine-os-vMAJOR.MINOR.PATCH-N), l’ancien cache est purgé à l’activation');
     // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
     // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
     // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever). Le contrôle porte
@@ -1884,7 +1884,7 @@ export async function runSyncL3Tests({ eq, ok }) {
   // rendu demandé par le moteur au milieu le remplacerait sans que personne l'ait demandé.
   {
     const { ROUTES_DE_SAISIE, estRouteDeSaisie, passeAEcrit } = etatUi;
-    eq(ROUTES_DE_SAISIE, ['/recipes/new', '/recipes/creer', '/recipes/*/edit', '/recipes/*/importer', '/recipes/*/thermomix', '/import', '/cook/*', '/add', '/add/livre'], 'R-L3-19 : les routes de saisie sont nommées une fois, en un seul endroit (F2 du lot création IA : /recipes/creer, sa saisie et son vol ; I16 du lot import ciblé : /recipes/*/importer, ses photos et son vol ; D-E19 du lot E : /add/livre, sa photo et son vol)');
+    eq(ROUTES_DE_SAISIE, ['/recipes/new', '/recipes/creer', '/recipes/*/edit', '/recipes/*/importer', '/recipes/*/thermomix', '/recipes/*/photo', '/recipes/*/reperes', '/import', '/cook/*', '/add', '/add/livre'], 'R-L3-19 : les routes de saisie sont nommées une fois, en un seul endroit (F2 du lot création IA : /recipes/creer, sa saisie et son vol ; I16 du lot import ciblé : /recipes/*/importer, ses photos et son vol ; D-E19 du lot E : /add/livre, sa photo et son vol)');
     eq(['/recipes/new', '/recipes/creer', '/recipes/rc1/edit', '/recipes/rc1/importer', '/import', '/cook/cs1', '/add', '/add/livre'].filter((p) => !estRouteDeSaisie(p)), [], 'R-L3-19 : les huit écrans de saisie sont reconnus');
     eq(['/', '/library', '/recipes/rc1', '/settings', '/meals', '/kitchen', '/cook', '/add/signet', '/add/livre/x', '/recipes'].filter((p) => estRouteDeSaisie(p)), [],
       'R-L3-19 : … et rien d’autre — le motif « * » vaut UN segment, jamais une arborescence');

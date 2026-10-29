@@ -448,14 +448,14 @@ export async function runSyncL4Tests({ eq, ok }) {
       const { bookCover } = await import('../src/ui/components.js');
       const toile = new OffscreenCanvas(2, 2); toile.getContext('2d').fillRect(0, 0, 2, 2);
       const jpeg = new Blob([await toile.convertToBlob({ type: 'image/png' })], { type: 'image/jpeg' });
-      const couv = bookCover({ id: 'e1' }, { title: 'T' }, { fichier: { sha256: H('a'), mime: 'image/heic', blob: jpeg } });
-      eq([!!couv.querySelector('img.cover-img'), vus.map((b) => b.type)], [true, ['image/jpeg']], 'bookCover : une copie JPEG reçue sous une ligne HEIC s’affiche, et le Blob affiché est image/jpeg (le retypage ; la garde est épinglée par la ligne application/pdf ci-dessous)');
+      const couv = bookCover({ id: 'e1', cover_sha256: H('a') }, { title: 'T' }, { fichier: { sha256: H('a'), mime: 'image/heic', blob: jpeg } });
+      eq([!!couv.querySelector('.cover-photo img'), vus.map((b) => b.type)], [true, ['image/jpeg']], 'bookCover : une copie JPEG reçue sous une ligne HEIC s’affiche, et le Blob affiché est image/jpeg (le retypage ; la garde est épinglée par la ligne application/pdf ci-dessous)');
       // Vague finale (chef d'orchestre) : la garde `type` ne décide plus que l'AFFICHAGE depuis que displayUrl retype, et la fixture HEIC la passe dans les
       // deux cas (P1, comme photoDuPlat) : une ligne hors liste (application/pdf) dont les octets sont un vrai JPEG ne s'affiche que si la garde lit le
       // type affiché (celui du blob, dans la liste), pas le mime de la ligne.
       vus.length = 0;
-      const couvPdf = bookCover({ id: 'e1p' }, { title: 'T' }, { fichier: { sha256: H('5'), mime: 'application/pdf', blob: jpeg } });
-      eq([!!couvPdf.querySelector('img.cover-img'), vus.map((b) => b.type)], [true, ['image/jpeg']], 'bookCover (P1, vague finale) : une ligne application/pdf aux octets JPEG s’affiche image/jpeg — la garde lit le type affiché (mutant : garde sur safeDisplayType(fichier.mime) → aucune image)');
+      const couvPdf = bookCover({ id: 'e1p', cover_sha256: H('5') }, { title: 'T' }, { fichier: { sha256: H('5'), mime: 'application/pdf', blob: jpeg } });
+      eq([!!couvPdf.querySelector('.cover-photo img'), vus.map((b) => b.type)], [true, ['image/jpeg']], 'bookCover (P1, vague finale) : une ligne application/pdf aux octets JPEG s’affiche image/jpeg — la garde lit le type affiché (mutant : garde sur safeDisplayType(fichier.mime) → aucune image)');
       // import-cible.js (poserImage) : la troisième lecture de la règle — vignette de page et aperçu de la photo du plat de l'import ciblé.
       vus.length = 0;
       const { renderImportCible } = await import('../src/ui/import-cible.js');
@@ -511,9 +511,9 @@ export async function runSyncL4Tests({ eq, ok }) {
   await run('statique tâche 1', async () => {
     const sw = await lire('../sw.js');
     ok(sw.includes("'./src/sync/fichiers.js'"), 'SHELL : ./src/sync/fichiers.js (atteignable par pull.js dès la tâche 1, F-5)');
-    ok(/VERSION = 'cuisine-os-v0\.20\.0-\d+'/.test(sw), 'sw.js : VERSION 0.20.0');
+    ok(/VERSION = 'cuisine-os-v0\.21\.0-\d+'/.test(sw), 'sw.js : VERSION 0.21.0');
     const { APP_VERSION, DB_VERSION } = await import('../src/model/schema.js');
-    eq([APP_VERSION, DB_VERSION], ['0.20.0', 4], 'T1 (lot UI-1, carnet) : APP_VERSION 0.20.0, DB_VERSION inchangée (D-G11 : 0.11.0 au lot G ; 0.12.0 au lot C ; 0.13.0 au lot D ; 0.14.0 au lot E ; 0.15.0 au lot F ; 0.16.0 à UI-2)');
+    eq([APP_VERSION, DB_VERSION], ['0.21.0', 4], 'T1 (lot UI-1, carnet) : APP_VERSION 0.21.0, DB_VERSION inchangée (D-G11 : 0.11.0 au lot G ; 0.12.0 au lot C ; 0.13.0 au lot D ; 0.14.0 au lot E ; 0.15.0 au lot F ; 0.16.0 à UI-2)');
     const { MODULES_NEUFS } = await import('./ajouter.js');
     ok(MODULES_NEUFS.includes('../src/sync/fichiers.js'), 'filet i18n : MODULES_NEUFS contient src/sync/fichiers.js');
   });
@@ -892,9 +892,9 @@ export async function runSyncL4Tests({ eq, ok }) {
     eq([0, 1, 3].map((n) => S.messageOriginauxConserves(n)), [null, '1 original de cet appareil conservé (l’archive portait une copie).', '3 originaux de cet appareil conservés (l’archive portait des copies).'], 'messageOriginauxConserves (e7) : rien à 0, singulier à 1, pluriel (le câblage dans appliquerArchive reste à la revue : confirmDialog y est importé, pas injecté)');
     eq([S.messagesArchive({ missingFiles: 1, copies: { serveur: 0, inconnues: 0 } }), S.messagesArchive({ missingFiles: 0, copies: { serveur: 0, inconnues: 0 } })],
       [['1 page n’est pas encore téléchargée sur cet appareil et n’est pas dans l’archive.'], []], 'messagesArchive : le singulier à 1 page ; rien à dire, rien de dit');
-    eq(S.phrasesInspection({ files_distants: 3, files_copies: 2 }), { puces: ['pages manquantes : 3', 'copies du serveur : 2'], phrases: ['Cette archive renvoie à 3 pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les pages).'] }, 'phrasesInspection (§ 4.6, B-8) : puces et phrase d’inspection ; rien n’est promis comme « se téléchargera »');
+    eq(S.phrasesInspection({ files_distants: 3, files_copies: 2 }), { puces: ['pages manquantes : 3', 'copies du serveur : 2'], phrases: ['Cette archive renvoie à 3 pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les photos et fichiers).'] }, 'phrasesInspection (§ 4.6, B-8) : puces et phrase d’inspection ; rien n’est promis comme « se téléchargera »');
     eq(S.phrasesInspection({ files_distants: 0, files_copies: 0 }), { puces: [], phrases: [] }, 'phrasesInspection : une archive complète ne dit rien de plus');
-    eq(S.phrasesInspection({ files_distants: 1, files_copies: 0 }).phrases, ['Cette archive renvoie à 1 page qui n’est pas dedans : si elle est sur le serveur, elle pourra être téléchargée (sur la fiche, ou Réglages → Télécharger toutes les pages).'], 'phrasesInspection (ronde 1, #35) : le singulier à 1 page — jamais « 1 pages »');
+    eq(S.phrasesInspection({ files_distants: 1, files_copies: 0 }).phrases, ['Cette archive renvoie à 1 page qui n’est pas dedans : si elle est sur le serveur, elle pourra être téléchargée (sur la fiche, ou Réglages → Télécharger toutes les photos et fichiers).'], 'phrasesInspection (ronde 1, #35) : le singulier à 1 page — jamais « 1 pages »');
     eq(B.compterFichesSynchronisees({ payload: { stores: { books: [{ id: 'a' }] }, files: [{ sha256: H('1') }], missing: [{ sha256: H('2') }, { sha256: H('3') }] } }), 4, 'compterFichesSynchronisees (B-25, g) : files + missing (mutant : missing oublié)');
     let archive = null;
     await withDatabase(async (db) => { archive = await B.createArchive(db); });
@@ -2013,7 +2013,7 @@ export async function runSyncL4Tests({ eq, ok }) {
         await db.mutate({ puts: { files: [{ ...l, updated_at: '2030-01-01T00:00:00.000Z' }] }, origin: 'remote' });
       } });
       const b = await passe(db, sf).telechargerTout({ snapshot: await snapshot(db) });
-      eq([b.recus, b.restants, !!(await db.get('sync_state', 'telecharger_tout')), (await db.get('files', H('9'))).blob], [0, 1, true, undefined], 'telechargerTout (ronde 1, sonde P4) : la seule page manquante change pendant la descente (garde N-2) → elle manque ENCORE : restants 1, la clé « Télécharger toutes les pages » reste (mutant : candidate refusée comptée comme traitée → clé retirée, page absente)');
+      eq([b.recus, b.restants, !!(await db.get('sync_state', 'telecharger_tout')), (await db.get('files', H('9'))).blob], [0, 1, true, undefined], 'telechargerTout (ronde 1, sonde P4) : la seule page manquante change pendant la descente (garde N-2) → elle manque ENCORE : restants 1, la clé « Télécharger toutes les photos et fichiers » reste (mutant : candidate refusée comptée comme traitée → clé retirée, page absente)');
     });
     await withRepo(async (repo, db) => {
       const { objets } = await poserDistantes(db, [H('8')]);
@@ -2934,7 +2934,7 @@ export async function runSyncL4Tests({ eq, ok }) {
     eq(b2.querySelector('.card.warn')?.textContent, 'Espace photos plein sur le serveur : les photos attendent sur cet appareil, les fiches continuent de partir.', 'L4 : seau plein → la phrase en card warn, sans aucun chiffre de plan (R-G-5)');
     const quatre = 4 * 419430; // 1 677 720 octets → « 1,6 Mo »
     const b3 = rendre(modele(moteurL4({ fichiers: fichiersL4({ aTelecharger: 4, octetsATelecharger: quatre }) })), { telechargerTout: () => {} });
-    eq([b3.textContent.includes('Pages à télécharger : 4 (~1,6 Mo)'), boutons(b3).includes('Télécharger toutes les pages (4 fichiers, ~1,6 Mo)')], [true, true], 'L4 : 4 pages, ~1,6 Mo → la ligne et le bouton');
+    eq([b3.textContent.includes('Photos et fichiers à télécharger : 4 (~1,6 Mo)'), boutons(b3).includes('Télécharger toutes les photos et fichiers (4 fichiers, ~1,6 Mo)')], [true, true], 'L4 : 4 pages, ~1,6 Mo → la ligne et le bouton');
     const b4 = rendre(modele(moteurL4({ fichiers: fichiersL4({ aTelecharger: 4, octetsATelecharger: quatre }), telechargementGlobal: true, progressionFichiers: { sens: 'reception', n: 1, total: 4 } })), { telechargerTout: () => {}, arreterTelechargement: () => {} });
     eq([boutons(b4).includes('Arrêter le téléchargement'), boutons(b4).some((b) => b.startsWith('Télécharger toutes')), b4.textContent.includes('Téléchargement des pages : 1/4')], [true, false, true], 'L4 : pendant le téléchargement global → « Arrêter le téléchargement » et la progression');
     const espace = { octets: 850 * 1048576, objets: 312, at: DATE, tronque: false };
@@ -2968,7 +2968,7 @@ export async function runSyncL4Tests({ eq, ok }) {
     const toutes = rendre(modele(moteurL4({ fichiers: fichiersL4({ aEnvoyer: 2, aTelecharger: 4, octetsATelecharger: quatre, aRenvoyer: 2, enErreur: 3, typeInconnu: 1, copiesSansServeur: 1, copiesPerimees: 1 }), progressionFichiers: { sens: 'reception', n: 1, total: 4 }, telechargementGlobal: true, pauseFichiers: { raison: 'stockage', at: DATE }, espaceServeur: { ...espace, tronque: true } }), { qualite: 'originale', fichiersErreurs: errs, snapshot: snapNoms }),
       { telechargerTout: () => {}, arreterTelechargement: () => {}, actualiserEspace: () => {}, renvoyerOriginale: () => {}, reessayerFichier: () => {} });
     const texteToutes = toutes.textContent;
-    eq([texteToutes.includes('Espace photos plein'), texteToutes.includes('Pages à télécharger : 4'), boutons(toutes).includes('Arrêter le téléchargement'), boutons(toutes).some((b) => b.startsWith('Renvoyer en originale')), toutes.querySelectorAll('[data-fichier]').length, /Go|palier|\$/.test(texteToutes), /supabase/i.test(texteToutes), toutes.querySelectorAll('progress').length],
+    eq([texteToutes.includes('Espace photos plein'), texteToutes.includes('Photos et fichiers à télécharger : 4'), boutons(toutes).includes('Arrêter le téléchargement'), boutons(toutes).some((b) => b.startsWith('Renvoyer en originale')), toutes.querySelectorAll('[data-fichier]').length, /Go|palier|\$/.test(texteToutes), /supabase/i.test(texteToutes), toutes.querySelectorAll('progress').length],
       [true, true, true, true, 3, false, false, 0], 'L4 (R-G-5, I-G8) : sur un rendu où toutes les branches sont actives — pause, pages à télécharger, téléchargement global, renvoi, refusés, phrases —, ni « Go », ni « palier », ni « $ », ni le nom du fournisseur, aucun <progress> (mutants : phrase de palier dans la carte pause ou le renvoi ; fournisseur nommé)');
   });
 
@@ -3138,7 +3138,7 @@ export async function runSyncL4Tests({ eq, ok }) {
 
   // Ronde 1 de la tâche 5 (revue adverse) : la table de § 4.10 entière, les motifs d'envoi posés depuis le plan (forme : T3-R1 ; illisible : T4-R1),
   // un libellé borné, « Fichiers refusés » compté sur les lignes référencées, l'ordre des items, l'aide de la qualité (exceptions de R-G-4 nommées),
-  // le seau plein sans « Télécharger toutes les pages », la pause L3 hors de L4, aucun bouton sans geste, l'interface anglaise.
+  // le seau plein sans « Télécharger toutes les photos et fichiers », la pause L3 hors de L4, aucun bouton sans geste, l'interface anglaise.
   const HINT_QUALITE = 'L’original reste toujours sur l’appareil qui a pris la photo. Réduite : JPEG de 2 000 px au plus, environ 400 Ko par page, métadonnées retirées, quand la réduction est possible et utile ; sinon le fichier part tel quel, métadonnées comprises : une image déjà petite (2 000 px et 600 Ko au plus), une photo de plus de 16 Mpx ou que ce navigateur ne sait pas lire, un PDF ou un EPUB. Originale : le fichier tel quel, avec ses métadonnées (dont la position GPS si la photo en porte).';
   const horsSegments = (boite) => [...boite.querySelectorAll('button')].filter((b) => !b.closest('.segmented')).map((b) => b.textContent);
 
@@ -3164,7 +3164,7 @@ export async function runSyncL4Tests({ eq, ok }) {
     const errs = [{ sha256: H('1'), motif: 'introuvable', sens: 'reception' }, { sha256: H('3'), motif: 'trop_gros', sens: 'envoi' }, { sha256: H('4'), motif: 'nouveau-motif', sens: 'envoi' }, { sha256: H('9'), motif: 'type', sens: 'envoi' }];
     const toutesModele = () => modele(moteurL4({ fichiers: fichiersL4({ aEnvoyer: 2, aTelecharger: 4, octetsATelecharger: quatre, aRenvoyer: 2, enErreur: 3, typeInconnu: 1, copiesSansServeur: 1, copiesPerimees: 1 }), progressionFichiers: { sens: 'reception', n: 1, total: 4 }, telechargementGlobal: true, pauseFichiers: { raison: 'stockage', at: DATE }, espaceServeur: { octets: 850 * 1048576, objets: 312, at: DATE, tronque: true } }), { qualite: 'originale', fichiersErreurs: errs, snapshot: snapNoms });
     const texte = rendre(toutesModele(), { telechargerTout: () => {}, arreterTelechargement: () => {}, actualiserEspace: () => {}, renvoyerOriginale: () => {}, reessayerFichier: () => {} }).textContent;
-    const reperes = ['Photos à envoyer : 2', 'Espace photos plein', 'Pages à télécharger : 4', 'Téléchargement des pages : 1/4', 'Arrêter le téléchargement', 'au moins 850 Mo', 'Actualiser', 'Qualité d’envoi des photos', 'Réduite (≈ 400 Ko', 'L’original reste toujours',
+    const reperes = ['Photos à envoyer : 2', 'Espace photos plein', 'Photos et fichiers à télécharger : 4', 'Téléchargement des pages : 1/4', 'Arrêter le téléchargement', 'au moins 850 Mo', 'Actualiser', 'Qualité d’envoi des photos', 'Réduite (≈ 400 Ko', 'L’original reste toujours',
       'Renvoyer en originale', 'Fichiers refusés : 3', 'Page 12 · Mon livre', '1 fichier(s) de type inconnu', '1 copie(s) de photos ici', '1 photo(s) ici sont une copie'];
     const positions = reperes.map((r) => texte.indexOf(r));
     eq(reperes.filter((r, i) => !(positions[i] >= 0 && (i === 0 || positions[i] > positions[i - 1]))), [],
@@ -3174,8 +3174,8 @@ export async function runSyncL4Tests({ eq, ok }) {
     const pleine = (sur = {}) => modele(moteurL4({ fichiers: fichiersL4({ aTelecharger: 4, octetsATelecharger: quatre }), pauseFichiers: { raison: 'stockage', at: DATE }, ...sur }));
     const gestesTelechargement = { telechargerTout: () => {}, arreterTelechargement: () => {} };
     const bp = rendre(pleine(), gestesTelechargement);
-    eq([bp.textContent.includes('Pages à télécharger : 4 (~1,6 Mo)'), horsSegments(bp), horsSegments(rendre(pleine({ telechargementGlobal: true }), gestesTelechargement))], [true, [], ['Arrêter le téléchargement']],
-      'L4 (ronde 1, § 3.2) : seau plein → la passe fichiers entière est suspendue, téléchargement global compris : « Télécharger toutes les pages » n’est pas offert (il ne ferait rien descendre) ; « Arrêter le téléchargement » reste si le global était demandé');
+    eq([bp.textContent.includes('Photos et fichiers à télécharger : 4 (~1,6 Mo)'), horsSegments(bp), horsSegments(rendre(pleine({ telechargementGlobal: true }), gestesTelechargement))], [true, [], ['Arrêter le téléchargement']],
+      'L4 (ronde 1, § 3.2) : seau plein → la passe fichiers entière est suspendue, téléchargement global compris : « Télécharger toutes les photos et fichiers » n’est pas offert (il ne ferait rien descendre) ; « Arrêter le téléchargement » reste si le global était demandé');
     const sousQuotaL3 = rendre(modele(moteurL4({ pause: { raison: 'quota', at: DATE } })));
     eq([sousQuotaL3.querySelectorAll('.card.warn').length, sousQuotaL3.textContent.includes('Espace photos plein')], [0, false],
       'L4 (ronde 1, B-5) : la pause de quota des FICHES (L3) n’est pas celle du seau : aucune carte L4 ne dit « les fiches continuent de partir » sous une pause qui les arrête (mutant : pause || pauseFichiers)');
@@ -3187,7 +3187,7 @@ export async function runSyncL4Tests({ eq, ok }) {
       setUiLocale('en');
       en = rendre(modele(moteurL4({ fichiers: fichiersL4({ aTelecharger: 4, octetsATelecharger: quatre }), espaceServeur: { octets: 850 * 1048576 + 3 * 104858, objets: 312, at: DATE, tronque: false } })), { telechargerTout: () => {} });
     } finally { setUiLocale(langue); }
-    eq([en.textContent.includes('Pages to download: 4 (~1.6 MB)'), horsSegments(en), en.textContent.includes('Your photos on the server: 850.3 MB (312 files)')], [true, ['Download all pages (4 files, ~1.6 MB)'], true],
+    eq([en.textContent.includes('Photos and files to download: 4 (~1.6 MB)'), horsSegments(en), en.textContent.includes('Your photos on the server: 850.3 MB (312 files)')], [true, ['Download all photos and files (4 files, ~1.6 MB)'], true],
       'L4 (ronde 1, R8) : en interface anglaise, les mégaoctets portent le point décimal — enMo suit la langue de l’interface (mutant : enMo figé en fr-CA)');
   });
 
@@ -3445,7 +3445,7 @@ export async function runSyncL4Tests({ eq, ok }) {
         const root = await renderImport({}, { session: 'ss1' }, ctx);
         scene.append(root);
         const phrase = () => root.querySelector('[data-role="phrase-seance"]')?.textContent;
-        const etats = [...root.querySelectorAll('.thumbs .fichier-absent')].map((f) => f.dataset.etat);
+        const etats = [...root.querySelectorAll('.thumbs .fichier-absent, .thumbs .photo-visible:not(:has(img))')].map((f) => f.dataset.etat || 'distant');
         const avant = phrase();
         await db.mutate({ puts: { files: [{ sha256: H('3'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R({ sha256: H('3'), size: 5 }) }] }, origin: 'remote' });
         for (const fn of abonnes) fn({ enCours: false });
@@ -3475,7 +3475,7 @@ export async function runSyncL4Tests({ eq, ok }) {
       const page = await renderRecipe({ id: 'rO' }, {}, ctx);
       const original = [...page.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Original');
       const groupe = [...(original?.querySelectorAll('button') || [])].find((b) => b.textContent === 'Télécharger les 2 pages');
-      eq([!!groupe, original?.querySelectorAll('.fichier-absent').length, [...(page.querySelector('[data-role="photo-plat"]')?.querySelectorAll('button') || [])].map((b) => b.textContent)], [true, 2, ['Télécharger']],
+      eq([!!groupe, original?.querySelectorAll('.photo-visible').length, [...(page.querySelector('[data-role="photo-plat"]')?.querySelectorAll('button') || [])].map((b) => b.textContent)], [true, 2, ['Télécharger']],
         'fiche recette : deux pages distantes → deux vignettes et « Télécharger les 2 pages » sous le titre ; la photo du plat distante suit la règle de la couverture (« Télécharger »)');
       groupe.click();
       for (let i = 0; i < 100 && !appels.length; i += 1) await new Promise((r) => setTimeout(r, 10));
@@ -3503,8 +3503,8 @@ export async function runSyncL4Tests({ eq, ok }) {
 
   await run('statique tâche 6', async () => {
     const sw = await lire('../sw.js');
-    const v = /VERSION = 'cuisine-os-v0\.20\.0-(\d+)'/.exec(sw); // ronde 1 : le libellé dit ce que le test vérifie (le -\d+ seul acceptait -1)
-    ok(!!v && Number(v[1]) >= 1, 'sw.js : VERSION 0.20.0-N avec N ≥ 1 (lot UI-1 ; le seuil N ≥ 6 de la clôture des écrans du lot G valait sous 0.11.0)');
+    const v = /VERSION = 'cuisine-os-v0\.21\.0-(\d+)'/.exec(sw); // ronde 1 : le libellé dit ce que le test vérifie (le -\d+ seul acceptait -1)
+    ok(!!v && Number(v[1]) >= 1, 'sw.js : VERSION 0.21.0-N avec N ≥ 1 (lot UI-1 ; le seuil N ≥ 6 de la clôture des écrans du lot G valait sous 0.11.0)');
     const { EN } = await import('../src/i18n/en.js');
     const neuves = ['Page', 'Télécharger', 'Télécharger les {n} pages', 'Téléchargement…', 'Le téléchargement n’a pas abouti.', 'Pas encore sur cet appareil', 'Connecte-toi pour la télécharger', 'Pas encore envoyée par l’appareil qui l’a prise', 'Pas encore reçue', 'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', 'Photos : {n}/{m} sauvegardées sur le serveur'];
     eq(neuves.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'en.js : chaque chaîne neuve des écrans a sa traduction (dont « Page », l’alt de vignettePage)');
@@ -3520,7 +3520,7 @@ export async function runSyncL4Tests({ eq, ok }) {
       [null, null, null, 'Télécharger les 2 pages'], 'boutonTelechargerPages (§ 4.3) : rien pour UNE page, sans compte ou sans geste ; « Télécharger les 2 pages » à partir de deux (mutant : seuil à une page)');
     const appels = []; const redessins = []; const dits = [];
     // Ronde 1 : le succès est le FAIT relu (les octets de chaque clé demandée sont ici), plus le compte `recus` du moteur — un fichier déjà arrivé
-    // (« Télécharger toutes les pages » en fond) rend recus: 0 et n'est pas un échec. Le moteur factice écrit donc les octets dans une base jetable.
+    // (« Télécharger toutes les photos et fichiers » en fond) rend recus: 0 et n'est pas un échec. Le moteur factice écrit donc les octets dans une base jetable.
     await withRepo(async (repo, db) => {
       const ecrire = (shas) => db.mutate({ puts: { files: shas.map((s) => ({ sha256: s, mime: 'image/jpeg', size: 1, blob: octets('x'), updated_at: DATE })) }, origin: 'remote' });
       const moteur = { telecharger: async (l) => { appels.push(['telecharger', l]); await ecrire(l); return { recus: l.length, erreurs: 0, erreur: null }; }, reessayerFichier: async (s) => { appels.push(['reessayerFichier', s]); return { recus: 0, erreurs: 1, erreur: null }; } };
@@ -3579,7 +3579,7 @@ export async function runSyncL4Tests({ eq, ok }) {
         const fiche = await renderBook({ id: 'eP' }, {}, ctxLivre);
         const sources = [...fiche.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Pages et fichiers sources');
         const groupe = [...(sources?.querySelectorAll('button') || [])].find((b) => b.textContent === 'Télécharger les 2 pages');
-        eq([[...(sources?.querySelectorAll('.thumbs .fichier-absent') || [])].map((f) => f.dataset.etat), !!groupe], [['distant', 'distant'], true], 'fiche du livre (§ 4.3) : « Pages et fichiers sources » rend chaque page par vignettePage (distante) et offre « Télécharger les 2 pages » (mutant : miniatures sans vignettePage)');
+        eq([[...(sources?.querySelectorAll('.thumbs .fichier-absent, .thumbs .photo-visible:not(:has(img))') || [])].map((f) => f.dataset.etat || 'distant'), !!groupe], [['distant', 'distant'], true], 'fiche du livre (§ 4.3) : « Pages et fichiers sources » rend chaque page par vignettePage (distante) et offre « Télécharger les 2 pages » (mutant : miniatures sans vignettePage)');
         groupe.click();
         for (let i = 0; i < 100 && appels.length < 1; i += 1) await new Promise((r) => setTimeout(r, 10));
         const couv = [...fiche.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Couverture');
@@ -3604,7 +3604,7 @@ export async function runSyncL4Tests({ eq, ok }) {
       const ctxRef = { recipes: [ref], recipesById: new Map([['rR', ref]]), recipe_versions: [], versionsByRecipe: new Map(), versionsById: new Map(), editionsById: new Map(), booksById: new Map(), books: [], book_editions: [], pagesById: new Map(pages.map((p) => [p.id, p])), imports: [], dishesById: new Map(), dishes: [], cook_history: [], dish_recipe_links: [], recipe_translations: [], ingredients: INGREDIENTS, ingredientsById: new Map(INGREDIENTS.map((i) => [i.id, i])), source_documents: [], source_pages: pages, scan_sessions: [], settings: { units: 'original', reading_locale: 'original', ui_locale: 'fr', llm: { provider: 'none' } }, conventionFor: () => null, sync: { user: { id: 'u1' }, moteur } };
       const pageRef = await renderRecipe({ id: 'rR' }, {}, ctxRef);
       const index = [...pageRef.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Pages d’index');
-      eq([index?.querySelectorAll('.thumbs .fichier-absent').length, [...(index?.querySelectorAll('button') || [])].map((b) => b.textContent).includes('Télécharger les 2 pages')], [2, true], 'référence d’index (§ 4.4) : « Pages d’index » rend chaque page par vignettePage et offre « Télécharger les 2 pages » (mutant : pages d’index sans vignettes)');
+      eq([index?.querySelectorAll('.thumbs .photo-visible').length, [...(index?.querySelectorAll('button') || [])].map((b) => b.textContent).includes('Télécharger les 2 pages')], [2, true], 'référence d’index (§ 4.4) : « Pages d’index » rend chaque page par vignettePage et offre « Télécharger les 2 pages » (mutant : pages d’index sans vignettes)');
       // vignettesDePages : après un téléchargement qui pose un file_error, la place se redessine EN ERREUR (« Réessayer ») — les erreurs sont relues.
       const ctxF = { connecte: true, uid: 'u1', erreurs: new Set(), moteur: { telecharger: async () => {
         await db.mutate({ puts: { sync_state: [{ key: 'file_error:' + H('1'), value: { motif: 'empreinte', sens: 'reception', at: DATE } }] }, origin: 'device' });
@@ -3612,8 +3612,8 @@ export async function runSyncL4Tests({ eq, ok }) {
       } } };
       const v = await K.vignettesDePages([pages[0]], ctxF);
       v.places.get('pP1').querySelector('button').click();
-      for (let i = 0; i < 100 && v.places.get('pP1').querySelector('figure')?.dataset.etat !== 'erreur'; i += 1) await new Promise((r) => setTimeout(r, 10));
-      eq([v.places.get('pP1').querySelector('figure')?.dataset.etat, [...v.places.get('pP1').querySelectorAll('button')].map((b) => b.textContent)], ['erreur', ['Réessayer']], 'vignettesDePages : un téléchargement qui pose un file_error redessine la page en erreur, avec « Réessayer » (mutant : erreurs non relues)');
+      for (let i = 0; i < 100 && !v.places.get('pP1').textContent.includes('Le téléchargement de la photo a échoué.'); i += 1) await new Promise((r) => setTimeout(r, 10));
+      eq([v.places.get('pP1').textContent.includes('Le téléchargement de la photo a échoué.'), [...v.places.get('pP1').querySelectorAll('button')].map((b) => b.textContent)], [true, ['Réessayer']], 'vignettesDePages : un téléchargement qui pose un file_error redessine la page en erreur, avec « Réessayer » (mutant : erreurs non relues)');
       (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob();
     });
   });
@@ -3810,9 +3810,9 @@ export async function runSyncL4Tests({ eq, ok }) {
       const fichiers = [...vue.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Fichiers');
       await jusqua(() => fichiers?.querySelector('p'));
       const ecrans = [vue, fiche, fr];
-      const c = 'Connecte-toi pour la télécharger';
-      eq([ecrans.map((n) => [...n.querySelectorAll('.fichier-absent small')].map((s) => s.textContent)), ecrans.map((n) => [...n.querySelectorAll('button')].map((b) => b.textContent).filter((x) => /^(Télécharger|Télécharger les \d+ pages|Réessayer)$/.test(x))), [...(fichiers?.querySelectorAll('small') || [])].map((s) => s.textContent)],
-        [[[c, c], [c, c], [c, c, c]], [[], [], []], [c]],
+      const c = 'Connecte-toi pour télécharger cette photo.';
+      eq([ecrans.map((n) => [...n.querySelectorAll('.photo-visible small')].map((s) => s.textContent)), ecrans.map((n) => [...n.querySelectorAll('button')].map((b) => b.textContent).filter((x) => /^(Télécharger|Télécharger les \d+ pages|Réessayer)$/.test(x))), [...(fichiers?.querySelectorAll('small') || [])].map((s) => s.textContent)],
+        [[[c, c], [c, c], [c, c, c]], [[], [], []], ['Connecte-toi pour la télécharger']],
         'sans compte (ronde 1) : chaque vignette distante dit « Connecte-toi … » — séance, fiche du livre, photo du plat et « Original » —, aucun « Télécharger » ni « Télécharger les {n} pages », et le cadre PDF de la séance n’a aucun bouton (mutants : connecte forcé dans vignettesDePages, dans le pdfFrame de la séance, dans la photo du plat, dans le bouton groupé du livre et dans celui d’« Original »)');
     });
   });
@@ -3835,7 +3835,7 @@ export async function runSyncL4Tests({ eq, ok }) {
       eq([appels, !!figure?.querySelector('img'), figure?.querySelector('.fichier-absent') ?? null, toastR1() === ECHEC_R1], [[[H('3')]], true, null, false],
         'photo du plat (ronde 1, § 4.4) : « Télécharger » → moteur.telecharger([sha]), puis l’image remplace la vignette, sans dire d’échec — la règle de la couverture (mutants : geste sans moteur ; redessin qui ne redessine plus)');
       const pdf = await renderRecipe({ id: 'rK' }, {}, ctxRecetteR1([b.recette], [b.version], [], sync));
-      eq(pdf.querySelector('[data-role="photo-plat"]'), null, 'photo du plat (ronde 1) : une ligne distante qui ne sera pas une image (application/pdf) n’offre pas « Télécharger » — chaque tape réussissait sans que rien ne change à l’écran (boucle muette)');
+      eq([pdf.querySelector('[data-role="photo-plat"]')?.textContent.includes('Ce fichier ne peut pas être affiché comme photo.'), pdf.querySelector('[data-role="photo-plat"] button')], [true, null], 'photo du plat (ronde 1) : une ligne distante qui ne sera pas une image (application/pdf) n’offre pas « Télécharger » — chaque tape réussissait sans que rien ne change à l’écran (boucle muette)');
       await finDesImages(page);
       (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob();
     });

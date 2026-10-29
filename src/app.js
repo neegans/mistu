@@ -21,6 +21,8 @@ import { renderLibrary } from './ui/library.js';
 import { renderBook } from './ui/book.js';
 import { renderDish } from './ui/dish.js';
 import { renderThermomixRoute } from './ui/thermomix.js';
+import { renderPhotoGestion } from './ui/photo-gestion.js';
+import { renderReperesRoute } from './ui/reperes.js';
 import { renderRecipe } from './ui/recipe.js';
 import { renderRecipeEdit } from './ui/recipe-edit.js';
 import { renderCook } from './ui/cook.js';
@@ -54,12 +56,14 @@ async function onRoute({ handler, params, query, path }) {
   // Les URL blob: de la vue qu'on quitte n'ont plus de lecteur (spec § 6, F4/S15) : elles sont révoquées ICI, au
   // seul endroit qui voit tous les changements de vue. Sans cela, chaque couverture affichée retiendrait ses octets
   // en mémoire jusqu'au rechargement de la page.
+  for (const node of current.main.querySelectorAll('[data-role="photo-visible"]')) node.dispose?.();
+  current.main.firstElementChild?.dispose?.();
   revoquerUrlsDeBlob();
   replace(current.main, el('p', { class: 'muted' }, t('Chargement…')));
   try {
     const ctx = await getData();
     const node = await handler(params, query, ctx);
-    if (seq !== renderSeq) return; // une navigation plus récente a eu lieu
+    if (seq !== renderSeq) { node.dispose?.(); for (const photo of node.querySelectorAll('[data-role="photo-visible"]')) photo.dispose?.(); return; }
     replace(current.main, node);
     window.scrollTo(0, 0);
   } catch (e) {
@@ -80,6 +84,8 @@ function registerRoutes() {
   route('/recipes/:id', renderRecipe);
   route('/recipes/:id/edit', renderRecipeEdit);
   route('/recipes/:id/thermomix', renderThermomixRoute);
+  route('/recipes/:id/photo', renderPhotoGestion);
+  route('/recipes/:id/reperes', renderReperesRoute);
   route('/recipes/:id/importer', renderImportCible); // import ciblé (lot A, spec § 4.1) : regex ancrée, l'ordre n'importe pas
   route('/cook/:id', renderCook);
   route('/import', renderImport);

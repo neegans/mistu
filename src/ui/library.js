@@ -12,7 +12,7 @@ import { pointeurValide } from '../domain/photo-web.js';
 import { logError } from '../core/log.js';
 import { icone } from './icones.js';
 import { photosPersonnellesParRecette } from '../domain/cuisine-personnelle.js';
-import { empreintesPhotos, fichierPhoto } from './components.js';
+import { empreintesPhotos, fichierPhoto, contexteFichiers } from './components.js';
 
 const TABS = ['recettes', 'books', 'dishes', 'a-importer'];
 export const CARTES_PAR_PAGE = 60; // F-9 : la grille est bornée ; « Voir plus » rend la page suivante
@@ -38,6 +38,7 @@ const meule = (d) => [d.recipe.original_title, d.recipe.display_title, d.book?.t
 const parPageEtTitre = (a, b) => (a.printed_page ?? 99999) - (b.printed_page ?? 99999) || String(a.original_title || '').localeCompare(String(b.original_title || ''));
 
 export async function renderLibrary(params, query, ctx, deps = {}) {
+  const ctxF = await contexteFichiers(ctx);
   const { matchMedia = (q) => window.matchMedia(q) } = deps;
   const tab = TABS.includes(query.tab) ? query.tab : 'recettes';
   const segment = tab === 'a-importer' ? 'recettes' : tab;
@@ -52,9 +53,9 @@ export async function renderLibrary(params, query, ctx, deps = {}) {
     root.append(await booksTab(ctx));
     // APRÈS booksTab, y compris quand il rend l'état vide : sous Livres, un signet sans livre n'a pas d'autre place (confort après preuve, 17 octobre).
     // Depuis D-UI-4, il est aussi une carte de la grille Recettes, où ramène désormais le « ← Bibliothèque » de sa fiche (#/library). D-UI-8 : sections PLAIN.
-    const liens = liensWebGardes(ctx);
+    const liens = liensWebGardes(ctx, ctxF);
     if (liens) root.append(liens);
-    const creees = recettesCreeesIA(ctx); // N-7 : après « Liens web gardés »
+    const creees = recettesCreeesIA(ctx, ctxF); // N-7 : après « Liens web gardés »
     if (creees) root.append(creees);
   } else if (tab === 'a-importer') root.append(aImporterTab(ctx));
   else root.append(await recettesTab(ctx, { matchMedia }));
@@ -65,6 +66,7 @@ export async function renderLibrary(params, query, ctx, deps = {}) {
 // « Ajouter une recette » répété sous 760 px, le pied « à importer ». Rien n'est écrit ; rien ne part.
 async function recettesTab(ctx, { matchMedia }) {
   const photosPersonnelles = photosPersonnellesParRecette(ctx.cook_history);
+  const ctxF = await contexteFichiers(ctx);
   const docs = (ctx.docs || []).filter((d) => dansLaGrille(d.recipe)).sort(derniereModificationDabord);
   const refs = (ctx.recipes || []).filter(estAImporter);
   const pied = refs.length ? el('p', { style: { marginTop: '1rem' } }, el('a', { href: '#/library?tab=a-importer', dataset: { role: 'a-importer' } }, `${t('Recettes de mes livres à importer')} →`)) : null;
@@ -97,7 +99,7 @@ async function recettesTab(ctx, { matchMedia }) {
     if (g !== generation) return;
     // D-T9 : les URL blob: des vignettes de la génération précédente sont révoquées APRÈS le remplacement des nœuds (remplacerEnRevoquant relève img.plat-vignette).
     // Vague finale (constat 4) : un filtre ou une puce qui ne retient rien le DIT, sur toute la largeur de la grille (comme « Aucun livre ne correspond. » sous Livres).
-    remplacerEnRevoquant(grille, ...(liste.length ? page.map((d) => recipeCard(d, { photoEnTete: true, fichier: fichierPhoto(d.recipe, photosPersonnelles, fichiers) }))
+    remplacerEnRevoquant(grille, ...(liste.length ? page.map((d) => recipeCard(d, { photoEnTete: true, fichier: fichierPhoto(d.recipe, photosPersonnelles, fichiers), ctxF }))
       : [el('p', { class: 'muted', dataset: { role: 'aucune-correspondance' }, style: { gridColumn: '1 / -1' } }, t('Aucune recette ne correspond.'))]));
     suite.replaceChildren(...(liste.length > page.length ? [el('button', { type: 'button', class: 'btn', onClick: () => { etat.limite += CARTES_PAR_PAGE; relancer(); } }, t('Voir plus'))] : []));
   };
@@ -151,28 +153,29 @@ function aImporterTab(ctx) {
 
 // Ordre commun aux deux sections : le plus récemment créé d'abord (created_at, updated_at en repli), sans horodatage en dernier.
 const plusRecentesDabord = plusRecentDabord('created_at', 'updated_at');
-const carteOuLien = (ctx, r) => {
+const carteOuLien = (ctx, r, ctxF) => {
   const doc = ctx.docsByRecipe?.get(r.id);
-  return doc ? recipeCard(doc) : el('a', { class: 'btn', href: `#/recipes/${encodeURIComponent(r.id)}` }, r.display_title || r.original_title || t('Sans titre'));
+  return doc ? recipeCard(doc, { ctxF }) : el('a', { class: 'btn', href: `#/recipes/${encodeURIComponent(r.id)}` }, r.display_title || r.original_title || t('Sans titre'));
 };
 
 // Les signets sans livre (edition_id nul, source_url posé), le dernier GARDÉ d'abord : created_at, updated_at en repli
 // (un favori touché ne réordonne pas la liste — ronde 1) ; sans horodatage, en dernier. Aucun : rien n'est rendu.
-function liensWebGardes(ctx) {
+function liensWebGardes(ctx, ctxF) {
   const signets = (ctx.recipes || []).filter((r) => !r.edition_id && aUneAdresse(r)).sort(plusRecentesDabord);
   if (!signets.length) return null;
-  return sectionPlain(t('Liens web gardés'), ...signets.map((r) => carteOuLien(ctx, r)));
+  return sectionPlain(t('Liens web gardés'), ...signets.map((r) => carteOuLien(ctx, r, ctxF)));
 }
 
 // N-7 / N-10 : les fiches créées avec l'assistant, filtrées sur `origine` (pas sur la version courante : une fiche corrigée y reste),
 // la plus récemment créée d'abord (même ordre que les signets) ; la carte dit l'étiquette C-2. Aucune : rien n'est rendu.
-function recettesCreeesIA(ctx) {
+function recettesCreeesIA(ctx, ctxF) {
   const creees = (ctx.recipes || []).filter((r) => r.origine === 'ia').sort(plusRecentesDabord);
   if (!creees.length) return null;
-  return sectionPlain(t('Recettes créées avec l’IA'), ...creees.map((r) => carteOuLien(ctx, r)));
+  return sectionPlain(t('Recettes créées avec l’IA'), ...creees.map((r) => carteOuLien(ctx, r, ctxF)));
 }
 
 async function booksTab(ctx) {
+  const ctxF = await contexteFichiers(ctx);
   if (!ctx.book_editions.length) return emptyState('livres', t('Aucun livre pour l’instant.'), el('a', { class: 'btn primary', href: '#/add' }, t('Ajouter un livre')));
   const recipesByEdition = repo.groupBy(ctx.recipes.filter((r) => r.edition_id), 'edition_id');
   // Les octets des couvertures sont lus UNE fois, en une transaction : la grille se redessine à chaque touche du
@@ -193,7 +196,7 @@ async function booksTab(ctx) {
       // « À importer ») ; un signet rangé dans le livre est un lien web, compté ni « disponible » ni « à importer » (EI-T5-1). Rien à compter : « Aucune recette indexée ».
       const available = list.filter((r) => r.availability !== 'reference_only').length;
       const refs = list.filter(estAImporter).length;
-      noeuds.push(el('div', null, bookCover(ed, book, { fichier: ed.cover_sha256 ? fichiers.get(ed.cover_sha256) : null }),
+      noeuds.push(el('div', null, bookCover(ed, book, { fichier: ed.cover_sha256 ? fichiers.get(ed.cover_sha256) : null, ctxF }),
         el('div', { class: 'muted', style: { fontSize: '.78rem', marginTop: '.3rem' } },
           available || refs ? `${available ? t('{n} disponible(s)', { n: available }) : ''}${available && refs ? ' · ' : ''}${refs ? t('{n} à importer', { n: refs }) : ''}` : t('Aucune recette indexée'))));
     }
@@ -203,7 +206,7 @@ async function booksTab(ctx) {
     // révoquées : « tout révoquer » ici emporterait les vignettes qu'on vient de créer (le filtre redessine à
     // chaque touche).
     const anciennes = [...grid.querySelectorAll('img.cover-img')].map((i) => i.src);
-    grid.replaceChildren(...noeuds);
+    remplacerEnRevoquant(grid, ...noeuds);
     for (const u of anciennes) revoquerUrlDeBlob(u);
   };
   filter.addEventListener('input', draw);

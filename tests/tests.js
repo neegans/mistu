@@ -1,3 +1,8 @@
+import { runVisuelReperesTests } from './visuel-reperes.js';
+import { runVisuelPhotosTests } from './visuel-photos.js';
+import { runVisuelParcoursTests } from './visuel-parcours.js';
+import { runVisuelReperesEcranTests } from './visuel-reperes-ecran.js';
+import { runVisuelIntegrationTests } from './visuel-integration.js';
 // Tests du domaine, exécutables dans le navigateur (tests/index.html). Aucun outil externe requis.
 import { parseQuantity, scaleQuantity, formatQuantity, extractLeadingQuantity } from '../src/domain/quantity.js';
 import { matchUnit, convertValue, displayQuantity, normalizeText } from '../src/domain/units.js';
@@ -278,11 +283,17 @@ for (const [nom, suite] of [['domaine', runI3ThermomixTests], ['journal', runI3P
   catch (error) { ok(false, `Suite I3 ${nom} interrompue : ${error?.message || String(error)}`); }
 }
 
+// Photos et repères : domaine, transfert, journal, édition et intégration.
+for (const suite of [runVisuelReperesTests, runVisuelPhotosTests, runVisuelParcoursTests, runVisuelReperesEcranTests, runVisuelIntegrationTests]) {
+  try { await suite({ eq, ok, close }); }
+  catch (error) { ok(false, `Suite photos et repères interrompue : ${error?.message || String(error)}`); }
+}
+
 // --- Compte total épinglé (F2). Une assertion qui DISPARAÎT — un bloc supprimé, une boucle qui ne tourne plus, une
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 6819,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 7079,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

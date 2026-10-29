@@ -346,7 +346,7 @@ export async function renderRecipeEdit(params, query, ctx) {
     // lot UX, hors lot). D-12 : le vocabulaire fermé est vérifié sur la fiche qui s'écrit, avant l'écriture (dans la transaction pour une fiche relue).
     const avecPhotoDe = (relue) => {
       const r = { ...rec };
-      for (const champ of ['photo_sha256', 'photo_origin', 'photo_source_url', 'photo_provenance', 'personal_notes']) {
+      for (const champ of ['photo_sha256', 'photo_origin', 'photo_source_url', 'photo_provenance', 'personal_notes', 'reperes']) {
         if (Object.hasOwn(relue, champ)) r[champ] = champ === 'photo_origin' ? originePhotoAdmise(relue[champ]) : relue[champ];
         else delete r[champ];
       }

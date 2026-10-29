@@ -24,9 +24,12 @@ import { pointeurValide } from '../domain/photo-web.js';
 import { ACCEPT_PHOTOS, ACCEPT_FICHIERS } from './add.js';
 import { STATUTS_IMPORT } from '../model/schema.js';
 import { TransitionRefusee } from '../core/db.js';
-import { photosPersonnellesParRecette } from '../domain/cuisine-personnelle.js';
+import { photosPersonnellesParRecette, photoPrincipale } from '../domain/cuisine-personnelle.js';
 import { empreintesPhotos, fichierPhoto } from './components.js';
 import { renderSourcesLivre } from './livre-sans-saisie.js';
+import { currentVersion } from '../domain/search.js';
+import { photoVisible } from './photos-visibles.js';
+import { resumeReperes, lienGestionPhoto } from './reperes-affichage.js';
 import { shaLivre } from '../domain/livre-bibliographie.js';
 
 // C8 : la plus RÉCENTE d'abord. La fiche ne rappelle qu'UNE séance et « Reprendre » doit mener à celle qu'on vient
@@ -106,26 +109,26 @@ export const LARGEUR_DEUX_COLONNES = '(min-width: 900px)';
 // référence seulement ; le badge est celui d'availabilityBadge (UNE définition des textes, D-UI-10), COURT : sans la page, déjà dite à côté du titre (§ 4.3,
 // vague finale — le motif de l'en-tête de l'import ciblé) ; « Importer » et « Saisir à la main » sur une référence ou une partielle SANS adresse (aUneAdresse de library.js, la définition de l'onglet
 // « À importer » ; mêmes href qu'au lot A, T4-R1 : un signet devenu partiel n'a pas d'entrée), hors du <a> du titre (jamais un lien dans un lien, m4).
-export function ligneCompacte(r, { fichier = null } = {}) {
-  const type = typeAffichage(fichier);
-  const u = type && type.startsWith('image/') ? displayUrl(fichier, urlDeBlob) : null;
-  const vignette = u ? el('img', { class: 'plat-vignette petite', alt: '', loading: 'lazy', src: u }) : null;
-  vignette?.addEventListener('error', () => { vignette.remove(); revoquerUrlDeBlob(u); }, { once: true });
+export function ligneCompacte(r, { fichier = null, version = null, photo = null, ctxF = {} } = {}) {
+  const sha = photo?.sha256 ?? r.photo_sha256;
+  const vignette = photoVisible(sha, { fichier, ctxF, classe: 'recette-miniature', personnelle: !!photo?.personnelle });
   const importable = (r.availability === 'reference_only' || r.availability === 'partial') && !aUneAdresse(r);
-  const sectionLue = r.availability === 'reference_only' && !aUneAdresse(r) ? sectionLisible(r.section) : null; // la règle d'avant : jamais sur un signet rangé
+  const sectionLue = r.availability === 'reference_only' && !aUneAdresse(r) ? sectionLisible(r.section) : null;
   const id = encodeURIComponent(r.id);
-  return el('li', { class: 'row between', dataset: { recette: r.id } },
-    el('div', { class: 'row top', style: { flex: '1', minWidth: '0' } },
-      vignette,
-      el('div', { style: { flex: '1', minWidth: '0' } },
-        el('a', { class: 'titre', href: `#/recipes/${id}` }, r.display_title || r.original_title || t('Sans titre')),
-        el('div', { class: 'row', style: { gap: '.4rem' } },
+  return el('li', { class: 'recette-ligne', dataset: { recette: r.id } },
+    el('div', { class: 'recette-ligne-entete' }, vignette,
+      el('div', { class: 'recette-ligne-texte' },
+        el('a', { class: 'titre', href: `#/recipes/${id}` }, r.original_title || r.display_title || t('Sans titre')),
+        r.display_title && r.display_title !== r.original_title ? el('small', { class: 'muted' }, r.display_title) : null,
+        el('div', { class: 'row' },
           plagesLisibles(r).length ? el('span', { class: 'muted', dataset: { role: 'pages' } }, `${t('p.')} ${textePlages(plagesLisibles(r))}`) : null,
           sectionLue ? el('span', { class: 'chip neutral', dataset: { role: 'section' } }, sectionLue) : null))),
-    el('div', { class: 'row', dataset: { role: 'etat-recette' } },
+    resumeReperes(r, version),
+    el('div', { class: 'row recette-ligne-actions', dataset: { role: 'etat-recette' } },
       availabilityBadge({ ...r, printed_page: null }),
-      importable ? el('a', { class: 'btn small', href: `#/recipes/${id}/importer` }, t('Importer')) : null,
+      importable ? el('a', { class: 'btn small', href: `#/recipes/${id}/importer` }, r.availability === 'partial' ? t('Compléter') : t('Importer')) : null,
       importable ? el('a', { class: 'btn small', href: `#/recipes/${id}/edit?kind=extraction` }, t('Saisir à la main')) : null,
+      lienGestionPhoto(r, { connue: !!sha }),
       r.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null));
 }
 
@@ -183,7 +186,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
   // D-UI-7 : la largeur décide de la liste repliée (LIGNES_REPLIEES sous 900 px) ; injectable, jamais window.matchMedia nu (appel sans this : « Illegal invocation »).
   const matchMedia = deps.matchMedia || ((q) => window.matchMedia(q));
   const large = matchMedia(LARGEUR_DEUX_COLONNES);
-  const root = el('div', null);
+  const root = el('div', { class: 'fiche-livre' });
   // I-F : un scan parti d'ici porte le livre ET l'intention (index ou recette) ; le menu ne décide que de la SOURCE.
   const lancer = (intention) => async (accept, capture) => {
     const f = await pickFiles({ accept, multiple: true, capture });
@@ -197,14 +200,14 @@ export async function renderBook(params, query, ctx, deps = {}) {
     subtitle: [book.author, edition.publisher, edition.year].filter(Boolean).join(' · '),
     back: { href: '/library?tab=books', label: t('Bibliothèque') },
     classeTitre: 'titre-fiche',
-    actions: [
+    actions: [menuSource(t('Ajouter'),
       menuSource(t('Ajouter des pages de sommaire'),
         el('button', { type: 'button', class: 'btn', onClick: () => lancer('index')(ACCEPT_PHOTOS, 'environment') }, t('Photographier')),
         el('button', { type: 'button', class: 'btn', onClick: () => lancer('index')(ACCEPT_FICHIERS, null) }, t('Choisir des photos ou un PDF'))),
       menuSource(t('Ajouter des recettes'),
         el('button', { type: 'button', class: 'btn', onClick: () => lancer('recette')(ACCEPT_PHOTOS, 'environment') }, t('Photographier')),
         el('button', { type: 'button', class: 'btn', onClick: () => lancer('recette')(ACCEPT_FICHIERS, null) }, t('Choisir des photos ou un PDF')),
-        el('a', { class: 'btn', href: `#/recipes/new?edition=${encodeURIComponent(edition.id)}` }, t('Saisir à la main'))),
+        el('a', { class: 'btn', href: `#/recipes/new?edition=${encodeURIComponent(edition.id)}` }, t('Saisir à la main')))),
     ],
   }));
   root.append(renderAccueilLivre(accueil, {
@@ -219,7 +222,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
   const droite = el('div', { dataset: { role: 'colonne-recettes' } });
   root.append(el('div', { class: 'two-col livre' }, gauche, droite));
   // La couverture ouvre la colonne de gauche (≈ 200 px, la largeur de la colonne) : c'est le livre qu'on reconnaît, avant de lire son nom (F15).
-  gauche.append(bookCover(edition, book, { fichier: fichierCouverture }));
+  gauche.append(bookCover(edition, book, { fichier: fichierCouverture, ctxF }));
   gauche.append(el('a', { class: 'btn', href: `#/add/livre?edition=${encodeURIComponent(edition.id)}` }, t('Compléter les informations')));
   if (typeof book.subtitle === 'string' && book.subtitle) gauche.append(el('p', null, book.subtitle));
   if (typeof book.description === 'string' && book.description) gauche.append(el('p', null, book.description));
@@ -227,7 +230,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
   const shaSource = shaLivre(edition.source_photo_sha256);
   if (shaSource) {
     const source = await repo.getFile(shaSource);
-    const photo = bookCover({ ...edition, cover_sha256: shaSource }, { ...book, title: t('Photo source') }, { fichier: source });
+    const photo = bookCover({ ...edition, cover_sha256: shaSource }, { ...book, title: t('Photo source') }, { fichier: source, ctxF });
     const bloc = el('details', null, el('summary', null, t('Photo source')), photo);
     if (!typeAffichage(source)?.startsWith('image/') && ctxF.connecte) bloc.append(el('button', { type: 'button', class: 'btn', onClick: async () => {
       await ctxF.moteur?.telecharger([shaSource]); invalidate(); refresh();
@@ -282,17 +285,17 @@ export async function renderBook(params, query, ctx, deps = {}) {
     // Sous 900 px : LIGNES_REPLIEES lignes, puis « Voir les {n} recettes » déplie l'instance pour de bon (un filtre changé ensuite reste déplié) ; ≥ 900 px : tout.
     const repliee = !large.matches && !filterState.tout && rows.length > LIGNES_REPLIEES;
     const visibles = repliee ? rows.slice(0, LIGNES_REPLIEES) : rows;
-    const noeuds = [el('ul', { class: 'liste-compacte' }, ...visibles.map((r) => ligneCompacte(r, { fichier: fichierPhoto(r, photosPersonnelles, photos) })))];
+    const noeuds = [el('ul', { class: 'liste-compacte' }, ...visibles.map((r) => ligneCompacte(r, { fichier: fichierPhoto(r, photosPersonnelles, photos), version: currentVersion(r, (ctx.versionsByRecipe?.get(r.id) || [])), photo: photoPrincipale(r, photosPersonnelles), ctxF })))];
     // T4-R1 (I-UI-4) : le bouton se retire en dépliant — le focus passe au titre de la première ligne montrée par le dépli, jamais à body.
     if (repliee) noeuds.push(el('button', { type: 'button', class: 'btn', dataset: { role: 'voir-tout' }, onClick: () => { filterState.tout = true; drawList(); list.querySelectorAll('ul.liste-compacte > li')[LIGNES_REPLIEES]?.querySelector('a.titre')?.focus(); } }, t('Voir les {n} recettes', { n: rows.length })));
     remplacerEnRevoquant(list, ...noeuds);
   };
   const q = el('input', { type: 'search', placeholder: t('Filtrer les recettes de ce livre'), onInput: (e) => { filterState.q = e.target.value; drawList(); } });
-  droite.append(sectionPlain(t('Les recettes de ce livre'),
+  droite.append(sectionPlain(null,
     el('p', { class: 'muted', dataset: { role: 'compte-recettes' } }, t('{n} disponible(s) · {m} à importer', { n: disponibles.length, m: aImporter.length })),
-    el('div', { class: 'row', style: { marginBottom: '.6rem' } },
-      ...[['all', t('Toutes')], ['available', t('Disponibles')], ['refs', t('À importer')], ['fav', t('Favoris')]].map(([v, l]) => el('button', { type: 'button', class: `btn small${v === 'all' ? ' active' : ''}`, onClick: (e) => { filterState.mode = v; for (const b of e.target.parentNode.children) b.classList.remove('active'); e.target.classList.add('active'); drawList(); } }, l)),
-      q),
+    q,
+    el('div', { class: 'row filtres-livre', style: { margin: '.8rem 0' } },
+      ...[['all', t('Toutes')], ['available', t('Disponibles')], ['refs', t('À importer')], ['fav', t('Favoris')]].map(([v, l]) => el('button', { type: 'button', class: `btn small${v === 'all' ? ' active' : ''}`, onClick: (e) => { filterState.mode = v; for (const b of e.target.parentNode.children) b.classList.remove('active'); e.target.classList.add('active'); drawList(); } }, l))),
     list));
   drawList();
 
@@ -447,7 +450,18 @@ export async function renderBook(params, query, ctx, deps = {}) {
   // lecture d'index ouverte (ligneOuverteDeSeance, la règle du panneau d'index) ; une séance de recettes reste rappelée à droite seulement (« Reprendre »).
   const idsIndex = new Set(pagesIndex.map((p) => p.id));
   const seanceSommaire = ouvertes.find((s) => (Array.isArray(s.page_ids) ? s.page_ids : []).some((id) => idsIndex.has(id)) || ligneOuverteDeSeance(ctx.imports, s.id));
-  if (pagesIndex.length || seanceSommaire) gauche.append(sectionPlain(t('Sommaire'),
+  const sources = el('section', { class: 'pages-source stack', hidden: true, dataset: { role: 'pages-source' } },
+    el('h2', null, t('Pages source')),
+    el('p', { class: 'muted' }, t('{n} page(s) photographiée(s)', { n: pages.length })),
+    menuSource(t('Ajouter des pages'),
+      el('button', { class: 'btn', onClick: () => lancer('recette')(ACCEPT_PHOTOS, 'environment') }, t('Photographier')),
+      el('button', { class: 'btn', onClick: () => lancer('recette')(ACCEPT_FICHIERS, null) }, t('Choisir des photos ou un PDF'))),
+    menuSource(t('Mettre à jour l’index avec l’assistant'),
+      el('p', { class: 'muted' }, t('Choisis les pages d’index ou de sommaire. Le nombre d’appels sera affiché avant la lecture.')),
+      seanceSommaire ? el('a', { class: 'btn', href: `#/import?session=${encodeURIComponent(seanceSommaire.id)}` }, t('Reprendre la séance')) : null,
+      el('button', { class: 'btn', onClick: () => lancer('index')(ACCEPT_PHOTOS, 'environment') }, t('Photographier')),
+      el('button', { class: 'btn', onClick: () => lancer('index')(ACCEPT_FICHIERS, null) }, t('Choisir des photos ou un PDF'))));
+  if (pagesIndex.length || seanceSommaire) sources.append(sectionPlain(t('Sommaire'),
     seanceSommaire ? el('div', { class: 'row' }, el('a', { class: 'btn small', href: `#/import?session=${encodeURIComponent(seanceSommaire.id)}` }, t('Reprendre la séance'))) : null,
     boutonTelechargerPages(distantesDe(pagesIndex), { connecte: ctxF.connecte, telecharger: vignettes.telecharger }),
     pagesIndex.length ? vignettesDe(pagesIndex, true) : null));
@@ -460,7 +474,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
   // l'un ou l'autre — un livre dont on n'a photographié que la table des matières (ses pages sont dans le Sommaire) n'a pas, en bas, une section vide.
   const docsNonPhoto = docs.filter((d) => d.source_type !== 'photo');
   if (pagesAutres.length || docsNonPhoto.length) {
-    root.append(sectionPlain(t('Pages et fichiers sources'),
+    sources.append(sectionPlain(t('Pages et fichiers sources'),
       docs.length ? el('p', { class: 'muted' }, t('{n} document(s). Les originaux restent consultables depuis chaque recette.', { n: docs.length })) : null,
       boutonTelechargerPages(distantesDe(pagesAutres), { connecte: ctxF.connecte, telecharger: vignettes.telecharger }),
       pagesAutres.length ? vignettesDe(pagesAutres, false) : null,
@@ -470,6 +484,17 @@ export async function renderBook(params, query, ctx, deps = {}) {
   // MONTAGE, APRÈS le dernier await du rendu (suivreLargeurAuMontage, l'aide partagée avec la bibliothèque et la fiche recette) : la largeur y est relue (un
   // change reçu entre le rendu et le montage n'est pas perdu), un rendu jamais inséré ne prend pas l'abonnement de la fiche affichée, et une fiche quittée se
   // retire au premier change sans rien redessiner — au plus UNE fiche livre retenue par la MediaQueryList de la fenêtre.
+  const contenu = root.querySelector('.two-col.livre');
+  const onglets = el('div', { class: 'onglets-livre', role: 'tablist', 'aria-label': t('Contenu du livre') });
+  const afficher = source => {
+    if (contenu) contenu.hidden = source;
+    sources.hidden = !source;
+    [...onglets.children].forEach((bouton, i) => { bouton.setAttribute('aria-selected', String(source === (i === 1))); bouton.classList.toggle('active', source === (i === 1)); });
+  };
+  onglets.append(el('button', { class: 'active', role: 'tab', 'aria-selected': 'true', onClick: () => afficher(false) }, t('Recettes')),
+    el('button', { role: 'tab', 'aria-selected': 'false', onClick: () => afficher(true), dataset: { role: 'ouvrir-pages-source' } }, t('Pages source ({n})', { n: pages.length })));
+  if (contenu) contenu.before(onglets); else root.append(onglets);
+  root.append(sources);
   suivreLargeurAuMontage('fiche-livre', root, large, () => { if (!!large.matches !== largeDessinee) drawList(); });
   return root;
 }

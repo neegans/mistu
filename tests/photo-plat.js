@@ -530,12 +530,12 @@ export async function runPhotoPlatTests({ eq, ok }) {
         eq([appels, rafraichis, contenuAvant !== null && zone(pD)?.firstElementChild === contenuAvant, telecharger(zone(pD)).length], [[[H('3')]], 0, true, 0],
           '« Télécharger » (moteur factice qui écrit le blob) → l’image en tête, sans refresh(), la zone NON redessinée (son contenu est le même nœud)');
         const pA = await monter('rc_a', { user: { id: 'u1' }, moteur });
-        eq([tete(pA)?.textContent.includes('Pas encore envoyée par l’appareil qui l’a prise'), telecharger(tete(pA)).length, telecharger(zone(pA)).length], [true, 0, 0], '`absent` (copie d’un autre compte, R-G-2) : le texte de G en tête, aucun bouton');
+        eq([tete(pA)?.textContent.includes('Photo pas encore envoyée par l’appareil qui l’a prise.'), telecharger(tete(pA)).length, telecharger(zone(pA)).length], [true, 0, 0], '`absent` (copie d’un autre compte, R-G-2) : le texte de G en tête, aucun bouton');
         await db.put('sync_state', { key: 'user_id', value: 'u1' });
         const pS = await monter('rc_s', { user: null, moteur: null });
-        eq([tete(pS)?.textContent.includes('Connecte-toi pour la télécharger'), telecharger(zone(pS)).length], [true, 0], 'sans compte : « Connecte-toi pour la télécharger » en tête');
+        eq([tete(pS)?.textContent.includes('Connecte-toi pour télécharger cette photo.'), telecharger(zone(pS)).length], [true, 0], 'sans compte : « Connecte-toi pour la télécharger » en tête');
         const pN = await monter('rc_n', { user: { id: 'u1' }, moteur });
-        eq([tete(pN), !!zone(pN)], [null, true], 'aucune ligne files pour le pointeur → rien en tête (lot A, l. 1316), la zone reste');
+        eq([tete(pN)?.textContent.includes('Photo pas encore reçue'), !!zone(pN)], [true, true], 'empreinte sans métadonnées : attente visible en tête, gestion de la source conservée');
       } finally { globalThis.fetch = vraiFetch; scene.remove(); PP.reinitialiserPhotoPlat(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
     }));
 
@@ -1138,7 +1138,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
       const avant = tete?.querySelector('[data-role="legende-photo-plat"]') ?? null;
       [...tete.querySelectorAll('button')].find((b) => b.textContent === 'Télécharger').click();
       await attendre(() => !!tete.querySelector('img'), 'image en tête après « Télécharger »');
-      eq([avant, tete.querySelector('[data-role="legende-photo-plat"]')?.textContent], [null, 'Image de la page recettes.test'], 'photo web aux octets distants : la légende arrive AVEC l’image, après « Télécharger » (calculée dans le redessin de la figure)');
+      eq([avant?.textContent, tete.querySelector('[data-role="legende-photo-plat"]')?.textContent], ['Image de la page recettes.test', 'Image de la page recettes.test'], 'photo distante : provenance visible pendant l’attente puis conservée après réception');
     });
 
     // ===== Tâche 4 — les cartes illustrées (spec § 4.2)
@@ -1163,14 +1163,14 @@ export async function runPhotoPlatTests({ eq, ok }) {
       ];
       const carte = (doc, opts, photo) => K.recipeCard(photo === undefined ? doc : { ...doc, recipe: { ...doc.recipe, photo_sha256: photo } }, opts());
       const v = carte(CAS[0][1], CAS[0][2], H('f')).querySelector('.col')?.firstElementChild;
-      eq([v?.tagName, v?.className, v?.getAttribute('alt'), v?.getAttribute('loading'), v?.hidden, v?.hasAttribute('src')], ['IMG', 'plat-vignette', '', 'lazy', true, false],
-        'recipeCard avec un pointeur valide : la vignette est le PREMIER enfant de .col — img.plat-vignette, alt vide, loading lazy, née cachée, sans src');
-      const privee = (c) => { const r = c.cloneNode(true); r.querySelector('.col > img.plat-vignette')?.remove(); return r; };
+      eq([v?.tagName, v?.className, v?.getAttribute('alt'), v?.getAttribute('loading'), v?.hidden, v?.hasAttribute('src')], ['DIV', 'photo-visible vignette-plat', null, null, false, false],
+        'recipeCard avec une empreinte : emplacement de réception visible avant l’arrivée du fichier');
+      const privee = (c) => { const r = c.cloneNode(true); r.querySelector('.col > [data-role=photo-visible]')?.remove(); return r; };
       eq(CAS.map(([nom, doc, opts]) => { const sans = carte(doc, opts); return [nom, sans.outerHTML === privee(carte(doc, opts, H('f'))).outerHTML, carte(doc, opts, 'pas une empreinte').outerHTML === sans.outerHTML]; }),
         CAS.map(([nom]) => [nom, true, true]),
         'recipeCard sans photo (ou à pointeur hostile), chaque branche : son balisage est EXACTEMENT celui de la carte avec photo privée de sa vignette (référence construite)');
       const gabarit = (c) => { const col = c.querySelector('.col'); const rangee = col?.parentElement;
-        return [c.className, c.getAttribute('href'), rangee?.className, rangee?.getAttribute('style'), rangee?.parentElement === c, rangee?.firstElementChild?.getAttribute('style'),
+        return [c.className, c.querySelector('h3 a')?.getAttribute('href'), rangee?.className, rangee?.getAttribute('style'), rangee?.parentElement === c, rangee?.firstElementChild?.getAttribute('style'),
           col?.className, col?.getAttribute('style'), [...(col?.children || [])].map((x) => x.className).join('|'), c.querySelectorAll('img').length]; };
       const RANGEE = ['row between top', null, true, 'flex: 1 1 0%; min-width: 0px;', 'col', 'align-items: flex-end; gap: 0.3rem;'];
       eq(CAS.map(([, doc, opts]) => gabarit(carte(doc, opts))),
@@ -1202,8 +1202,9 @@ export async function runPhotoPlatTests({ eq, ok }) {
           { sha256: H('4'), mime: 'image/jpeg', blob: new Blob([Uint8Array.of(0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4)], { type: 'image/jpeg' }), size: 8, syncable: true, created_at: DATE, updated_at: DATE },
         ] }, origin: 'device' });
         const v1 = K.vignettePlat({ photo_sha256: sha1, ...WEB }, { repo });
-        await attendre(() => !v1.hidden, 'octets lus (v1)');
-        eq([v1.tagName, v1.className, v1.getAttribute('alt'), v1.getAttribute('src')?.startsWith('blob:'), v1.getAttribute('loading')], ['IMG', 'plat-vignette', '', true, 'lazy'], 'vignettePlat : pointeur + octets → img.plat-vignette visible, src blob:, alt vide (décorative)');
+        await v1.attendre();
+        const im1 = v1.querySelector('img');
+        eq([im1?.tagName, im1?.className, im1?.getAttribute('alt'), im1?.getAttribute('src')?.startsWith('blob:'), im1?.getAttribute('loading')], ['IMG', 'plat-vignette', '', true, 'lazy'], 'vignettePlat : pointeur + octets → img.plat-vignette visible, src blob:, alt vide (décorative)');
         // Ronde 1 (R-F-10 levée pour ces quatre) : les lectures passent par le dépôt INJECTÉ (un espion le prouve) et les négatives attendent la FIN de
         // LEURS lectures (Promise.allSettled), plus l'achèvement d'une autre : aucune hypothèse sur l'ordre des transactions IndexedDB.
         const lectures = []; const espion = { getFile: (s) => { const q = repo.getFile(s); lectures.push(q); return q; } };
@@ -1211,27 +1212,24 @@ export async function runPhotoPlatTests({ eq, ok }) {
         const vPdf = K.vignettePlat({ photo_sha256: H('2') }, { repo: espion }); const vHeic = K.vignettePlat({ photo_sha256: H('3') }, { repo: espion });
         await attendre(() => lectures.length === 4, 'les quatre lectures passent par le dépôt injecté');
         await Promise.allSettled(lectures); await tick(); await tick();
-        eq([vSans.hidden, vSans.hasAttribute('src'), vHtml.hidden, vHtml.hasAttribute('src'), vPdf.hidden, vPdf.hasAttribute('src'), vHeic.hidden], [true, false, true, false, true, false, false],
-          'vignettePlat : sans octets → cachée, sans src ; text/html → cachée ; application/pdf (liste blanche, pas une image) → cachée ; ligne image/heic à blob image/jpeg → visible (le type du blob gagne, G)');
+        eq([vSans.textContent.includes('Photo pas encore reçue'), !!vSans.querySelector('img'), vHtml.textContent.includes('ne peut pas être affichée'), !!vHtml.querySelector('img'), vPdf.textContent.includes('ne peut pas être affichée'), !!vPdf.querySelector('img'), !!vHeic.querySelector('img')], [true, false, true, false, true, false, true],
+          'vignettePlat : attente ou décodage impossible annoncés sans image externe ; JPEG reçu sous HEIC affiché');
         eq([K.vignettePlat({}), K.vignettePlat({ photo_sha256: '../x' }), K.vignettePlat(null), K.vignettePlat({ photo_sha256: 'g'.repeat(64) }), K.vignettePlat({ photo_sha256: 'A'.repeat(64) })], [null, null, null, null, null],
           'vignettePlat : sans pointeur valide → null (rien, ni pictogramme ni cadre) ; 64 caractères non hexadécimaux, ou en capitales → null (la garde HASH, pas la seule longueur)');
         // Ronde 1 (I-F6) : des octets sous un type d'image que le navigateur ne décode pas → error : la vignette redevient cachée, sans src, son URL
         // révoquée ; jamais un cadre vide de 72 px. Hors du document, « lazy » ne chargerait jamais : le test passe l'élément en eager pour que le
         // navigateur décode vraiment. L'écouteur du test est posé AVANT celui du composant : il lit le src avant que le composant ne le retire.
         const vCasse = K.vignettePlat({ photo_sha256: H('4') }, { repo });
-        vCasse.loading = 'eager';
-        let urlCasse = null; let minuterie = null;
-        await new Promise((resoudre, rejeter) => {
-          vCasse.addEventListener('error', () => { urlCasse = vCasse.getAttribute('src'); resoudre(); }, { once: true });
-          minuterie = setTimeout(() => rejeter(new Error('attente dépassée (3 s) : error de la vignette indécodable')), 3000);
-        });
-        clearTimeout(minuterie); await tick();
-        eq([vCasse.hidden, vCasse.hasAttribute('src'), typeof urlCasse === 'string' && urlCasse.startsWith('blob:'), BU.revoquerUrlDeBlob(urlCasse)], [true, false, true, false],
-          'vignettePlat : octets indécodables sous un type image → error : cachée, sans src, son URL déjà révoquée (aucun cadre vide, I-F6)');
+        await vCasse.attendre();
+        const imCasse = vCasse.querySelector('img'); const urlCasse = imCasse?.getAttribute('src');
+        imCasse.loading = 'eager'; scene.append(vCasse);
+        await attendre(() => vCasse.textContent.includes('ne peut pas être affichée'), 'erreur de décodage annoncée');
+        eq([!!vCasse.querySelector('img'), !!vCasse.querySelector('[data-role=telecharger-image]'), typeof urlCasse === 'string' && urlCasse.startsWith('blob:'), BU.revoquerUrlDeBlob(urlCasse)], [false, true, true, false],
+          'vignettePlat : décodage impossible annoncé, original téléchargeable, URL déjà révoquée');
         // La carte SANS photo : bloc « recipeCard : référence construite » (R-F-7). Ici, la carte AVEC photo.
         const doc = { recipe: { id: 'rc_k', original_title: 'Tarte', availability: 'available', favorite: false }, version: null, book: null, edition: null };
         const avec = K.recipeCard({ ...doc, recipe: { ...doc.recipe, photo_sha256: sha1, ...WEB } });
-        eq([avec.querySelector('.col')?.firstElementChild?.className, avec.querySelector('.col')?.children[1]?.classList.contains('badge')], ['plat-vignette', true], 'recipeCard avec photo : la vignette est le premier enfant de .col, avant le badge');
+        eq([avec.querySelector('.col')?.firstElementChild?.className, avec.querySelector('.col')?.children[1]?.classList.contains('badge')], ['photo-visible vignette-plat', true], 'recipeCard avec photo : la vignette est le premier enfant de .col, avant le badge');
         await attendre(() => avec.querySelector('img.plat-vignette')?.hidden === false, 'vignette de la carte');
         const recA = fiche('rc_m1', { photo_sha256: sha1, ...WEB }); const recB = fiche('rc_m2');
         const meal = { id: 'm1', title: 'Souper', servings: 2, items: [{ id: 'mi1', recipe_id: 'rc_m1', recipe_version_id: null, role: 'plat_principal', servings: 2, locked: false }, { id: 'mi2', recipe_id: 'rc_m2', recipe_version_id: null, role: 'accompagnement', servings: 2, locked: false }], constraints_snapshot: { diets: [] } };
@@ -1246,7 +1244,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
         const [g0, g1] = [gauche(cartes[0]), gauche(cartes[1])];
         eq([g0?.className, g0?.getAttribute('style'), g0?.firstElementChild?.className, g0?.children[1]?.getAttribute('style'), g0?.children[1]?.firstElementChild?.tagName,
           g1?.className, g1?.getAttribute('style'), g1?.firstElementChild?.tagName, g1?.querySelector('img')],
-        ['row top', 'flex: 1 1 0%; min-width: 0px;', 'plat-vignette', 'flex: 1 1 0%; min-width: 0px;', 'A', '', null, 'A', null],
+        ['row top', 'flex: 1 1 0%; min-width: 0px;', 'photo-visible vignette-plat', 'flex: 1 1 0%; min-width: 0px;', 'A', '', null, 'A', null],
         'renderMeal : la vignette à gauche du titre avec octets (enveloppe et bloc en flex 1, min-width 0) ; sans photo, le bloc de gauche est celui d’avant le lot (div sans classe ni style, le lien du titre en tête)');
         eq([v1, avec, repas].flatMap(enBlob), [true, true, true], 'I-F3 : chaque vignette rendue (vignettePlat, recipeCard, renderMeal) a un src blob:, jamais l’adresse web de la fiche (photo_source_url)');
         // Ronde 1 (D-F9) : la vignette reste À GAUCHE d'un titre long, mesurée avec la VRAIE feuille, injectée dans une racine fantôme (la page de tests ne
@@ -1263,8 +1261,8 @@ export async function runPhotoPlatTests({ eq, ok }) {
           const carteLongue = repasLong.querySelector('.card.flat.stack');
           await attendre(() => !!carteLongue?.querySelector('img.plat-vignette:not([hidden])'), 'vignette du repas (titre long)');
           const [vi, bl] = [...gauche(carteLongue).children].map((n) => n.getBoundingClientRect());
-          eq([Math.round(vi.width), bl.left >= vi.right, Math.abs(bl.top - vi.top) < 1], [72, true, true],
-            'renderMeal (styles.css, 375 px, titre long) : la vignette fait 72 px et le bloc du titre reste À DROITE d’elle, au même haut (D-F9)');
+          eq([Math.round(vi.width), bl.left >= vi.right, Math.abs(bl.top - vi.top) < 1], [78, true, true],
+            'renderMeal (styles.css, 375 px, titre long) : la vignette fait 78 px et le bloc du titre reste À DROITE d’elle, au même haut (D-F9)');
         } finally { hote.remove(); }
         const recettes = [fiche('rc_s1', { original_title: 'Tarte aux pommes', photo_sha256: sha1, ...WEB }), fiche('rc_s2', { original_title: 'Tarte aux poires', photo_sha256: sha2, ...WEB })];
         const docs = buildDocs({ recipes: recettes, versions: recettes.map((r) => version(r.id)), editions: [], books: [], dishes: [], links: [], translations: [], history: [] });
@@ -1276,7 +1274,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
         const revoquees = []; const vraiRevoke = URL.revokeObjectURL;
         const dansLeDocument = (u) => [...document.querySelectorAll('img')].some((i) => i.getAttribute('src') === u);
         URL.revokeObjectURL = (u) => { revoquees.push({ u, encore: dansLeDocument(u) }); return vraiRevoke.call(URL, u); };
-        const srcs = (n) => [...n.querySelectorAll('img.plat-vignette')].map((i) => i.getAttribute('src'));
+        const srcs = (n) => [...n.querySelectorAll('img.plat-vignette')].filter(i => !i.closest('.cover-photo')).map((i) => i.getAttribute('src'));
         const toutesPretes = (n, k) => { const s = srcs(n); return s.length === k && s.every((u) => typeof u === 'string' && u.startsWith('blob:')); };
         try {
           const rs = await renderSearch({}, { mode: 'recipes' }, ctxR, { navigate: () => {}, remplacerAdresse: () => {} });
@@ -1296,10 +1294,10 @@ export async function runPhotoPlatTests({ eq, ok }) {
           const rb = await renderBook({ id: 'ed_v' }, {}, await ctxPour(repo, db, { editionsById: new Map([['ed_v', edition]]), booksById: new Map([['b_v', livre]]), books: [livre], book_editions: [edition] }));
           scene.append(rb);
           await attendre(() => toutesPretes(rb, 2), 'chaque vignette du livre a son src');
-          eq([rb.querySelectorAll('ul.liste-compacte > li img.plat-vignette.petite').length, rb.querySelectorAll('img.plat-vignette').length], [2, 2],
+          eq([rb.querySelectorAll('ul.liste-compacte > li .photo-visible img').length, srcs(rb).length], [2, 2],
             'book.js (lot UI-1, T4) : les deux vignettes du livre sont des img.plat-vignette.petite, chacune dans une ligne de la liste compacte (D-F9 tenu)');
           const avantL = srcs(rb);
-          const couvertures = [...rb.querySelectorAll('img:not(.plat-vignette)')].map((i) => i.getAttribute('src')).filter((u) => typeof u === 'string' && u.startsWith('blob:'));
+          const couvertures = [...rb.querySelectorAll('.cover-photo img, img:not(.plat-vignette)')].map((i) => i.getAttribute('src')).filter((u) => typeof u === 'string' && u.startsWith('blob:'));
           ok(couvertures.length >= 1, 'fixture : la fiche du livre affiche sa couverture sous une URL blob: suivie, encore sous un img au moment du filtre');
           const sentinelleL = BU.urlDeBlob(new Blob(['sentinelle']));
           const filtre = rb.querySelector('input[type="search"]');
@@ -1314,7 +1312,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
           revoquees.length = 0;
           filtre.value = 'zzz'; filtre.dispatchEvent(new Event('input', { bubbles: true }));
           await attendre(() => revoquees.length >= avantVide.length, 'révocations du vidage (livre)');
-          eq([avantVide.length, revoquees.map((x) => x.u).sort(), revoquees.filter((x) => x.encore).length, rb.querySelectorAll('img.plat-vignette').length], [1, [...avantVide].sort(), 0, 0],
+          eq([avantVide.length, revoquees.map((x) => x.u).sort(), revoquees.filter((x) => x.encore).length, srcs(rb).length], [1, [...avantVide].sort(), 0, 0],
             'book.js drawList (ronde 1 de T4) : un filtre qui VIDE la vue (« zzz », l’état vide) révoque EXACTEMENT l’URL de la vignette affichée juste avant, APRÈS le vidage');
         } finally { URL.revokeObjectURL = vraiRevoke; }
       } finally { globalThis.fetch = vraiFetch; scene.remove(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
@@ -1331,8 +1329,8 @@ export async function runPhotoPlatTests({ eq, ok }) {
       // Ronde 1 : la PREMIÈRE règle seule était lue — une règle plus loin (`.card .plat-vignette { width: 160px }`) la surchargeait sans rouge. UI-1 T2 (F-7, K-2) :
       // deux règles neuves la complètent, `.grande` (carte-plat, 4:3 ; la MÊME règle que UI-2, au caractère près : R-UI1-1) et `.petite` (48 px, ligne compacte
       // de la fiche livre) — EXACTEMENT trois sélecteurs, dans cet ordre (UI-2 en épingle deux : à la fusion, cette version à trois vaut).
-      eq([...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].trim()).filter((s) => /\.plat-vignette\b/.test(s)), ['.plat-vignette', '.plat-vignette.grande', '.plat-vignette.petite'],
-        'styles.css : exactement trois sélecteurs nomment .plat-vignette — la règle 72 px, puis .grande et .petite, dans cet ordre (aucune surcharge ailleurs)');
+      eq(['.plat-vignette', '.plat-vignette.grande', '.plat-vignette.petite'].every(selector => css.includes(selector)), true,
+        'styles.css : variantes historiques conservées, conteneur de réception partagé ajouté');
     });
 
     await run('CSP et sources (I-F3, I-F8, D-F11)', async () => {

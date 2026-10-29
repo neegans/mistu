@@ -4,6 +4,7 @@ import { normalizeText } from './units.js';
 import { assessVersion } from './diet.js';
 import { sectionLisible } from './llm.js';
 import { photosPersonnellesParRecette, photoPrincipale } from './cuisine-personnelle.js';
+import { lireReperes, lireTemps } from './reperes.js';
 
 const STOP = new Set(['de', 'la', 'le', 'les', 'du', 'des', 'un', 'une', 'et', 'a', 'au', 'aux', 'the', 'an', 'of', 'with', 'and', 'avec', 'pour', 'en', 'dans', 'sur', 'mes', 'mon', 'ma', 'my', 'some', 'quelque', 'quelques', 'd', 'l', 'que', 'qui', 'quelque', 'chose', 'something', 'recette', 'recettes', 'recipe', 'recipes', 'trouve', 'find', 'moi', 'me', 'livres', 'books', 'in', 'to', 'pret', 'prete', 'ready', 'minutes', 'minute', 'min']);
 
@@ -129,7 +130,8 @@ export function buildDocs({ recipes, versions, editions, books, dishes, links, t
     const section = sectionLisible(recipe.section); // lot C (D-C6) : la section lue, nettoyée et bornée (sectionLisible), sinon null
     // Lot I1 (D-I9) : les rubriques d'index sous lesquelles la recette est citée (« broccoli », « hazelnuts »), relues comme la section, 12 au plus.
     const rubriques = Array.isArray(recipe.index_rubriques) ? recipe.index_rubriques.slice(0, 12).map(sectionLisible).filter(Boolean) : [];
-    const textParts = [recipe.original_title, recipe.display_title, tr?.translated_content?.title, book?.title, book?.author, dish?.labels?.fr?.label, dish?.labels?.en?.label, ...(recipe.tags || []), ...(recipe.cuisines || []), ...tagsDe(book?.tags), section, ...rubriques];
+    const reperes = lireReperes(recipe, version);
+    const textParts = [recipe.original_title, recipe.display_title, reperes.description_fr, tr?.translated_content?.title, book?.title, book?.author, dish?.labels?.fr?.label, dish?.labels?.en?.label, ...(recipe.tags || []), ...(recipe.cuisines || []), ...tagsDe(book?.tags), section, ...rubriques];
     const ingredientIds = new Set((version?.ingredients || []).map((i) => i.ingredient_id).filter(Boolean));
     for (const ri of version?.ingredients || []) textParts.push(ri.name_text || ri.source_text);
     const tokens = new Set(textParts.filter(Boolean).flatMap((s) => tokenize(String(s))));
@@ -137,7 +139,7 @@ export function buildDocs({ recipes, versions, editions, books, dishes, links, t
     // tout ce qu'un signet web possède pour se faire retrouver (spec § 11, F7). D12 : une référence d'index d'un livre
     // tagué remonte désormais par les mots-clés du livre — intention du brief § 12.5 ; le test F7 reste vert (`books: []`).
     const titleTokens = new Set(tokenize(`${recipe.original_title || ''} ${recipe.display_title || ''} ${tr?.translated_content?.title || ''} ${recipe.availability === 'reference_only' ? [...(recipe.cuisines || []), ...tagsDe(book?.tags), section || '', ...rubriques].join(' ') : ''}`));
-    return { recipe, version, edition, book, dish, tokens, titleTokens, ingredientIds, cooked: cooked.get(recipe.id) || 0, translation: tr, photo_principale: photoPrincipale(recipe, photosPersonnelles) };
+    return { recipe, version, edition, book, dish, tokens, titleTokens, ingredientIds, cooked: cooked.get(recipe.id) || 0, translation: tr, photo_principale: photoPrincipale(recipe, photosPersonnelles), reperes };
   });
 }
 
@@ -199,8 +201,9 @@ export function searchDocs(docs, parsed, { mode = 'all', ingredientsById, favori
     // Temps : les inconnues restent visibles, à part.
     let timeState = 'ok';
     if (filters.max_total_minutes || filters.max_active_minutes) {
-      const total = version.total_minutes ?? ((version.prep_minutes ?? 0) + (version.cook_minutes ?? 0) || null);
-      const active = version.active_minutes ?? version.prep_minutes ?? null;
+      const temps = lireTemps(recipe, version);
+      const total = temps.disponible && temps.total?.complet && temps.attentes_incluses === true ? temps.total.max : null;
+      const active = temps.actif?.max ?? null;
       if (filters.max_total_minutes) { if (total == null) timeState = 'unknown'; else if (total > filters.max_total_minutes) { groups.excluded_by_time++; continue; } }
       if (filters.max_active_minutes) { if (active == null) timeState = timeState === 'ok' ? 'unknown' : timeState; else if (active > filters.max_active_minutes) { groups.excluded_by_time++; continue; } }
     }

@@ -9,15 +9,16 @@ import { t } from '../core/i18n.js';
 import { logError } from '../core/log.js';
 import { sha256Hex } from '../core/hash.js';
 import { lienSignet } from '../core/lien.js';
-import { urlDeBlob, revoquerUrlDeBlob } from '../core/blob-urls.js';
+import { revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { preparerPhotoLocale, preparerPhotoDistante, ErreurImage, messageErreurImage } from '../core/image.js';
 import * as repoModule from '../model/repo.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
 import { adresseImageAdmise, memeAdresseImage, lireImageWeb, pointeurValide, RAISONS_DEFINITIVES } from '../domain/photo-web.js';
-import { displayUrl, typeAffichage, safeDisplayType } from '../sync/mime.js';
-import { section, sessionAssistant, texteRefusAssistant, texteEchecAssistant, messageGardeRefusee, vignettePage, gesteTelechargement, relireErreurs, renderZoneCouverture } from './components.js';
+import { typeAffichage } from '../sync/mime.js';
+import { section, sessionAssistant, texteRefusAssistant, texteEchecAssistant, messageGardeRefusee, renderZoneCouverture } from './components.js';
 import { photoPrincipale } from '../domain/cuisine-personnelle.js';
 import { provenancePhotoPageValide } from '../domain/photo-page.js';
+import { photoVisible } from './photos-visibles.js';
 
 // Ronde 1 : UNE définition du pointeur valide (pointeurValide, photo-web.js) — la zone, le rapatriement et le domaine (candidatPhotoWeb) jugent le même.
 const pointeur = (f) => (pointeurValide(f) ? f.photo_sha256 : null);
@@ -62,44 +63,25 @@ export const attendreRecuperation = (recipeId) => enVol.get(recipeId)?.promesse 
 export function reinitialiserPhotoPlat() { for (const e of enVol.values()) e.controller.abort(); enVol.clear(); vues.clear(); derniersEchecs.clear(); enLigneFlag = lireEnLigne(); } // tests seulement
 export const vuesPhotoPlat = () => vues.size; // tests seulement (ronde 1 : l'ensemble des vues reste borné)
 
-// --- La figure de tête (lot A D-4 ; lot G § 4.4) : le photoDuPlat de G DÉPLACÉ, avec deux différences — le pointeur doit passer HASH, et une image
-// web porte sa légende (D-F11 : l'hôte RECALCULÉ depuis l'adresse de la recette, jamais celle de l'image). Aucune ligne files : null (rien, pas
-// même un cadre) ; octets d'un type que typeAffichage ne rend pas image/ : null ; sans octets : la vignette d'état de G et son « Télécharger »,
-// redessinée sur place. La légende est calculée DANS le redessin : elle suit l'image après un téléchargement. Ronde 1 : `fichier` (facultatif) =
-// la ligne files déjà lue par l'appelant (la zone la lit pour `present`) — une seule lecture par redessin ; absent (undefined), elle est lue ici.
-// UI-1 (D-UI-6) : l'image n'a plus de largeur en ligne, `.photo-plat img` la rend 4:3 dans la colonne de l'en-tête.
+// La figure conserve sa provenance ; le composant partagé reçoit seulement les images visibles.
+// Une empreinte sans octets reste une photo en attente, jamais une absence de photo.
 export async function figurePhotoPlat(recipe, { repo = repoModule, ctxF = {}, fichier: dejaLu = undefined, personnelle = false } = {}) {
   const sha = pointeur(recipe);
   if (!sha) return null;
   let fichier = dejaLu ?? null;
   if (dejaLu === undefined) { try { fichier = await repo.getFile(sha); } catch { fichier = null; } }
-  if (!fichier && !personnelle) return null;
-  // Lot G (ronde 1 de sa tâche 6, recopiée) : sans octets, rien n'est offert si ce qui arrivera ne s'affichera pas — le type que portera le blob reçu (remote.mime), sinon celui
-  // de la ligne (typeAffichage) ; une ligne distante application/pdf réussissait chaque tape sans que rien ne change (boucle muette).
-  if (fichier && !(fichier.blob instanceof Blob) && !(safeDisplayType(fichier.remote?.mime) ?? safeDisplayType(fichier.mime))?.startsWith('image/')) return null;
-  const figure = el('figure', { class: 'photo-plat', dataset: { role: 'photo-plat' }, style: { margin: '0 0 .8rem' } });
-  const legende = () => {
-    if (personnelle) return el('figcaption', { class: 'muted' }, t('Ma photo du plat'));
-    if (recipe.photo_origin === 'image' && provenancePhotoPageValide(recipe.photo_provenance)) return el('figcaption', { class: 'muted' }, t('Image du livre'));
-    if (recipe.photo_origin !== 'web') return null;
+  const image = photoVisible(sha, { fichier, repo, ctxF, personnelle, alt: personnelle ? t('Ma photo du plat') : t('Photo du plat') });
+  let legende = null;
+  if (personnelle) legende = t('Ma photo du plat');
+  else if (recipe.photo_origin === 'image' && provenancePhotoPageValide(recipe.photo_provenance)) legende = t('Image du livre');
+  else if (recipe.photo_origin === 'web') {
     const l = lienSignet(recipe.source_url);
-    return el('figcaption', { class: 'muted', dataset: { role: 'legende-photo-plat' } }, l.ok ? t('Image de la page {hote}', { hote: l.hote }) : t('Image de la page web'));
-  };
-  const dessiner = (f) => {
-    if (f?.blob instanceof Blob) {
-      const src = typeAffichage(f)?.startsWith('image/') ? displayUrl(f, urlDeBlob) : null;
-      if (!src) return false;
-      figure.replaceChildren(el('img', { alt: personnelle ? t('Ma photo du plat') : t('Photo du plat'), src, loading: 'lazy' }), ...[legende()].filter(Boolean));
-      return true;
-    }
-    figure.replaceChildren(...(personnelle ? [el('p', { class: 'muted' }, t('Ta photo n’est pas sur cet appareil.'))] : []), vignettePage({ id: 'photo', sha256: sha }, f, { ...ctxF, telecharger }));
-    return true;
-  };
-  const telecharger = gesteTelechargement({ moteur: ctxF?.moteur ?? null, redessiner: async () => {
-    await relireErreurs(ctxF);
-    dessiner(await repo.getFile(sha));
-  } });
-  return dessiner(fichier) ? figure : null;
+    legende = l.ok ? t('Image de la page {hote}', { hote: l.hote }) : t('Image de la page web');
+  }
+  const figure = el('figure', { class: 'photo-plat', dataset: { role: 'photo-plat' } }, image,
+    legende ? el('figcaption', { class: 'muted', dataset: { role: 'legende-photo-plat' } }, legende) : null);
+  figure.dispose = () => image?.dispose();
+  return figure;
 }
 
 // --- Le texte d'un échec (§ 4.1.2) : les textes existants d'abord ; deux neufs (inaccessible, définitives) ; un refus AVANT l'appel → null.
@@ -184,7 +166,7 @@ async function ecrireChamps(repo, recipeId, champs) {
 // --- Poser (§ 4.1.3) : le mur local, la fiche relue AVANT putFile (une fiche absente n'entraîne aucune ligne files), puis relue encore (C4) — ronde 1 :
 // DANS la transaction d'écriture ; les trois champs ENSEMBLE ; une photo choisie efface le candidat web (D-F10). Ne lève jamais (sauf une origine hors
 // liste : erreur de programmation).
-export async function poserPhotoPlat(recipeId, file, { repo = repoModule, origin } = {}) {
+export async function poserPhotoPlat(recipeId, file, { repo = repoModule, origin, attendu = null } = {}) {
   if (origin !== 'photo' && origin !== 'image') throw new TypeError('poserPhotoPlat : origine ' + String(origin));
   let jpeg;
   try { jpeg = await preparerPhotoLocale(file); }
@@ -193,8 +175,9 @@ export async function poserPhotoPlat(recipeId, file, { repo = repoModule, origin
     if (!(await repo.get('recipes', recipeId))) return { issue: 'refuse', raison: 'fiche_absente' };
     const sha = await sha256Hex(jpeg);
     await repo.putFile(sha, jpeg, { mime: 'image/jpeg' });
-    const issue = await ecrireChamps(repo, recipeId, () => ({ photo_sha256: sha, photo_origin: origin, photo_source_url: null, photo_provenance: null }));
+    const issue = await ecrireChamps(repo, recipeId, c => attendu && (pointeur(c) !== (attendu.sha256 || null) || (!attendu.sha256 && !adressesEgalesOuNulles(c.photo_source_url, attendu.candidat))) ? null : ({ photo_sha256: sha, photo_origin: origin, photo_source_url: null, photo_provenance: null }));
     if (issue === 'absente') return { issue: 'refuse', raison: 'fiche_absente' }; // la ligne files reste : orphelin L5
+    if (issue === 'changee') return { issue: 'refuse', raison: 'fiche_changee' };
     derniersEchecs.delete(recipeId);
     return { issue: 'ok', sha256: sha };
   } catch (e) {

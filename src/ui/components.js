@@ -9,12 +9,15 @@ import { navigate } from '../core/router.js';
 import { displayUrl, typeAffichage } from '../sync/mime.js';
 import { etatFichier, lireErreursFichiers } from '../sync/fichiers.js';
 import * as repo from '../model/repo.js';
-import { pastilleModel, pastilleCourteModel, invalidate } from './state.js';
+import { pastilleModel, pastilleCourteModel, invalidate, getSyncState, getSyncGeneration } from './state.js';
 import { estCreationIA, etiquetteCreationIA } from '../domain/creation-ia.js';
 import { DIFFICULTES, LIMITES_WEB } from '../domain/recherche-web.js';
 import { pointeurValide } from '../domain/photo-web.js';
 import { photoPrincipale } from '../domain/cuisine-personnelle.js';
 import { estThermomix, etiquetteThermomix } from '../domain/thermomix.js';
+import { photoVisible } from './photos-visibles.js';
+import { resumeReperes, lienGestionPhoto } from './reperes-affichage.js';
+import { lireTemps, formaterDureeReperes } from '../domain/reperes.js';
 import { icone } from './icones.js';
 
 // classeTitre (lot UI-1, D-UI-3, H-20) : une classe posée sur le h1 — 'titre-fiche' pour une fiche recette ou livre (tâches 3 et 4) ; sans elle, le
@@ -104,14 +107,10 @@ export function versionBadge(version, recipe = null) {
   return el('span', { class: 'row', style: { gap: '.3rem' } }, who, el('span', { class: 'badge' }, label('version_status', version.status || 'proposed')));
 }
 
-export function timeText(version) {
-  if (!version || estCreationIA(version) || estThermomix(version)) return ''; // C-6 : la durée d'une création n'est qu'une estimation, dite à part (recipe.js)
-  const parts = [];
-  const active = version.active_minutes ?? version.prep_minutes;
-  if (active != null) parts.push(`${t('actif')} ${formatMinutes(active)}`);
-  const total = version.total_minutes ?? ((version.prep_minutes != null || version.cook_minutes != null) ? (version.prep_minutes || 0) + (version.cook_minutes || 0) : null);
-  if (total != null) parts.push(`${t('total')} ${formatMinutes(total)}`);
-  return parts.join(' · ');
+export function timeText(version, recipe = null) {
+  const temps = lireTemps(recipe, version);
+  return [temps?.actif ? `${t('actif')} ${formaterDureeReperes(temps.actif)}` : null,
+    temps?.total ? `${temps.total.complet ? t('total') : t('durée enregistrée')} ${formaterDureeReperes(temps.total)}` : null].filter(Boolean).join(' · ');
 }
 
 // --- Lecture par l'assistant (lot import ciblé, spec § 4.3.6-4.3.7, D-3) ------------------------------------------------------------
@@ -200,27 +199,9 @@ export function provenanceText(recipe, book, edition) {
   return t('Source personnelle');
 }
 
-// Lot F (spec plats-en-images § 4.2, D-F9) : la vignette d'une carte de recette — décorative (alt vide : la carte porte le titre), née cachée ([hidden]
-// du thème), montrée seulement quand les octets sont ICI et d'un type d'image (la règle d'affichage du lot G : typeAffichage puis displayUrl). Sans
-// pointeur valide : null (la carte est celle d'avant le lot) ; sans octets : l'élément reste caché, sans src (I-F6). Ronde 1 : le pointeur est jugé par
-// pointeurValide (photo-web.js), la définition UNIQUE que la zone, le rapatriement et candidatPhotoWeb emploient ; des octets que le navigateur ne
-// décode pas (HEIC hors Safari, octets tronqués) lèvent error : la vignette redevient cachée, sans src, son URL révoquée — jamais un cadre vide.
-export function vignettePlat(recipe, { repo: depot = repo, photo = null } = {}) {
-  const sha = photo?.sha256 ?? recipe?.photo_sha256;
-  if (!pointeurValide({ photo_sha256: sha })) return null;
-  const img = el('img', { class: 'plat-vignette', alt: '', loading: 'lazy', hidden: true });
-  Promise.resolve().then(async () => {
-    const f = await depot.getFile(sha);
-    if (typeAffichage(f)?.startsWith('image/')) return f;
-    return sha !== recipe?.photo_sha256 && pointeurValide(recipe) ? depot.getFile(recipe.photo_sha256) : f;
-  }).then((f) => {
-    if (!typeAffichage(f)?.startsWith('image/')) return;
-    const u = displayUrl(f, urlDeBlob);
-    if (!u) return;
-    img.addEventListener('error', () => { img.hidden = true; img.removeAttribute('src'); revoquerUrlDeBlob(u); }, { once: true });
-    img.src = u; img.hidden = false;
-  }).catch(() => {});
-  return img;
+// La photo prioritaire garde sa place pendant la réception, sans repli silencieux vers une autre image.
+export function vignettePlat(recipe, { repo: depot = repo, photo = null, ctxF = {}, fichier = null } = {}) {
+  return photoVisible(photo?.sha256 ?? recipe?.photo_sha256, { repo: depot, fichier, ctxF, classe: 'vignette-plat', personnelle: !!photo?.personnelle });
 }
 // Les URL blob: des vignettes d'un conteneur : relevées AVANT son vidage et révoquées APRÈS par les écrans qui redessinent leur liste (D-T9).
 export const urlsDesVignettes = (conteneur) => [...conteneur.querySelectorAll('img.plat-vignette')].map((i) => i.getAttribute('src')).filter((u) => typeof u === 'string' && u.startsWith('blob:'));
@@ -229,7 +210,9 @@ export const urlsDesVignettes = (conteneur) => [...conteneur.querySelectorAll('i
 // celles-là seulement — « tout révoquer » emporterait la couverture et toute autre image encore affichée sur la route.
 export function remplacerEnRevoquant(conteneur, ...noeuds) {
   const anciennes = urlsDesVignettes(conteneur);
+  const photos = [...conteneur.querySelectorAll('[data-role="photo-visible"]')];
   conteneur.replaceChildren(...noeuds);
+  for (const photo of photos) photo.dispose?.();
   for (const u of anciennes) revoquerUrlDeBlob(u);
 }
 
@@ -258,20 +241,20 @@ export function suivreLargeurAuMontage(cle, racine, mq, appliquer) {
 // doc : { recipe, version, book, edition, cooked }
 // Lot UI-1 (D-UI-5) : `photoEnTete: true` rend la carte-plat VERTICALE (cartePlat, ci-dessous) à partir de `fichier`, la ligne files que l'appelant a lue
 // en une fois ; sans l'option, la carte horizontale d'avant, inchangée (épinglée par tests/photo-plat.js, « référence construite »).
-export function recipeCard(doc, { extra = null, href = null, reasons = null, photoEnTete = false, fichier = null } = {}) {
-  if (photoEnTete) return cartePlat(doc, { fichier, href, extra });
+export function recipeCard(doc, { extra = null, href = null, reasons = null, photoEnTete = false, fichier = null, ctxF = {} } = {}) {
+  if (photoEnTete) return cartePlat(doc, { fichier, href, extra, ctxF });
   const { recipe, version, book, edition } = doc;
   const etiquette = etiquetteIA(version, recipe); // C-2 : depuis doc.version ou recipe.origine
-  return el('a', { class: 'item-link card', href: href || `#/recipes/${encodeURIComponent(recipe.id)}` }, // vague finale UI-1 : l'identifiant reçu est encodé
+  return el('article', { class: 'item-link card' }, // vague finale UI-1 : l'identifiant reçu est encodé
     el('div', { class: 'row between top' },
       el('div', { style: { flex: '1', minWidth: '0' } },
-        el('h3', null, recipe.display_title || recipe.original_title),
+        el('h3', null, el('a', { href: href || `#/recipes/${encodeURIComponent(recipe.id)}` }, recipe.original_title || recipe.display_title)),
         el('div', { class: 'muted', style: { fontSize: '.85rem' } }, provenanceText(recipe, book, edition)),
         etiquette ? el('div', null, etiquette) : null,
-        version ? el('div', { class: 'muted', style: { fontSize: '.85rem' } }, timeText(version)) : null,
+        resumeReperes(recipe, version),
         reasons?.length ? el('div', { class: 'muted', style: { fontSize: '.8rem' } }, `${t('Correspond à')} : ${reasons.slice(0, 4).join(', ')}`) : null),
       el('div', { class: 'col', style: { alignItems: 'flex-end', gap: '.3rem' } },
-        vignettePlat(recipe, { photo: doc.photo_principale }),
+        vignettePlat(recipe, { photo: doc.photo_principale, fichier, ctxF }),
         availabilityBadge(recipe),
         recipe.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null,
         doc.cooked ? el('span', { class: 'badge' }, t('Cuisinée {n}×', { n: doc.cooked })) : null)),
@@ -283,24 +266,15 @@ export function empreintesPhotos(recipes, index) {
   return [...new Set(recipes.flatMap(recipe => [photoPrincipale(recipe, index)?.sha256, pointeurValide(recipe) ? recipe.photo_sha256 : null]).filter(Boolean))];
 }
 export function fichierPhoto(recipe, index, fichiers) {
-  const principal = fichiers.get(photoPrincipale(recipe, index)?.sha256);
-  return typeAffichage(principal)?.startsWith('image/') ? principal : (pointeurValide(recipe) ? fichiers.get(recipe.photo_sha256) ?? null : null);
+  const principale = photoPrincipale(recipe, index);
+  return principale?.sha256 ? fichiers.get(principale.sha256) ?? null : (pointeurValide(recipe) ? fichiers.get(recipe.photo_sha256) ?? null : null);
 }
 
 // --- Lot UI-1 « Carnet » : la carte-plat et sa grille (spec D-UI-4, D-UI-5, I-UI-5, § 3.3) --------------------------------------------------------
-// dureeTotale(version) : PURE. UN nombre de minutes — total_minutes, sinon prep + cook quand les DEUX sont connus — ou null : rien sans durée (B-I-6),
-// jamais la paire « actif · total » de timeText. Une création IA n'a qu'une estimation, dite à part sur sa fiche (C-6, comme timeText). Une valeur
-// qui n'est pas un nombre fini (fiche reçue ou restaurée) vaut null. Le total ne compte que STRICTEMENT positif (T2-R1 : « PT0S » d'un JSON-LD, -30
-// tapé dans l'éditeur). T3-R1 (rien d'inventé, I-UI-1) : une préparation connue et une cuisson inconnue (lecture qui n'a vu que « Préparation : 20 min »)
-// ne font PAS une durée de recette ; une partie connue vaut ≥ 0 (une cuisson de 0 est connue : 15 + 0 = 15), une somme nulle vaut null.
-export function dureeTotale(version) {
-  if (!version || estCreationIA(version) || estThermomix(version)) return null;
-  const positif = (x) => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : null);
-  const connu = (x) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? x : null);
-  const total = positif(version.total_minutes);
-  if (total !== null) return total;
-  const prep = connu(version.prep_minutes); const cook = connu(version.cook_minutes);
-  return prep === null || cook === null || prep + cook <= 0 ? null : prep + cook;
+// Durée affichable enregistrée : aucune somme de préparation et cuisson. Les filtres exigent un total complet.
+export function dureeTotale(version, recipe = null) {
+  const total = lireTemps(recipe, version)?.total;
+  return total?.max > 0 ? total.max : null;
 }
 
 // ligneSource(doc) : PURE. Une fiche créée avec l'assistant dit d'abord sa provenance (C-2, ronde 1 : ni une adresse ni un livre portés par une fiche
@@ -314,37 +288,27 @@ export function ligneSource(doc) {
   const lien = recipe?.source_url ? lienSignet(recipe.source_url) : null;
   const source = recipe?.origine === 'ia' ? provenanceText(recipe, book, edition)
     : lien?.ok ? t('Du web') : book ? t('De mon livre') : provenanceText(recipe, book, edition);
-  const duree = dureeTotale(version);
+  const duree = dureeTotale(version, recipe);
   return duree === null ? source : `${source} · ${formatMinutes(duree)}`;
 }
 
-// cartePlat(doc, { fichier, href, extra }) : la carte-plat verticale. La décision est SYNCHRONE et ne lit rien : `fichier` (la ligne files passée par
-// l'appelant, lue en une fois par repo.getFiles) est sa seule source d'image (I-UI-5) ; quand typeAffichage en fait une image (liste blanche ; le type du
-// blob gagne : G, F-9), img.plat-vignette.grande 4:3 (alt vide : la carte porte le titre ; la classe plat-vignette la soumet à la révocation au redessin,
-// D-T9) ; sinon .sans-photo, le bloc de titre sur --paper-2 — jamais de cadre vide ni d'image générique. Des octets que le navigateur ne décode pas (HEIC
-// hors Safari, octets tronqués) lèvent error : l'img est retirée, la carte passe .sans-photo, son URL révoquée. La variante ne rend PAS vignettePlat (H-10).
-function cartePlat(doc, { fichier = null, href = null, extra = null } = {}) {
+// Les liens et boutons photo sont frères : aucun contrôle imbriqué dans un lien de carte.
+function cartePlat(doc, { fichier = null, href = null, extra = null, ctxF = {} } = {}) {
   const { recipe, version } = doc;
-  const type = typeAffichage(fichier);
-  const affichable = !!type && type.startsWith('image/');
-  // Vague finale : l'identifiant est ENCODÉ (une fiche reçue ou restaurée peut porter « ? », « & », « # » ou « / » : la carte ouvre la fiche annoncée, comme rid).
-  const carte = el('a', { class: `item-link carte-plat${affichable ? '' : ' sans-photo'}`, href: href || `#/recipes/${encodeURIComponent(recipe.id)}` });
-  if (affichable) {
-    const u = displayUrl(fichier, urlDeBlob);
-    const img = el('img', { class: 'plat-vignette grande', alt: '', loading: 'lazy', src: u });
-    img.addEventListener('error', () => { img.remove(); carte.classList.add('sans-photo'); revoquerUrlDeBlob(u); }, { once: true });
-    carte.append(img);
-  }
-  // Fidélité aux maquettes (28 octobre 2026) : l'état ordinaire « Disponible » ne se répète pas sur chaque carte ; les états qui disent quelque chose
-  // (« À importer », « Partielle », « Lien web ») restent.
+  const sha = doc.photo_principale?.sha256 ?? recipe.photo_sha256;
+  const image = photoVisible(sha, { fichier, ctxF, classe: 'carte-photo', personnelle: !!doc.photo_principale?.personnelle });
+  const destination = href || `#/recipes/${encodeURIComponent(recipe.id)}`;
+  const carte = el('article', { class: `item-link carte-plat${image ? '' : ' sans-photo'}` }, image);
   const dispo = availabilityBadge(recipe);
   const badges = [dispo.classList.contains('available') ? null : dispo, etiquetteIA(version, recipe), recipe.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null,
     doc.cooked ? el('span', { class: 'badge' }, t('Cuisinée {n}×', { n: doc.cooked })) : null].filter(Boolean);
   carte.append(el('div', { class: 'carte-plat-corps' },
-    el('h3', null, recipe.display_title || recipe.original_title),
-    el('div', { class: 'muted carte-plat-source' }, recipe?.origine === 'ia' ? null : recipe?.source_url && lienSignet(recipe.source_url)?.ok ? icone('globe') : doc.book ? icone('livres') : null, ligneSource(doc)),
-    badges.length ? el('div', { class: 'row carte-plat-badges' }, ...badges) : null));
-  // `extra` seulement quand il est donné : Element.append(null) écrirait le texte « null » sous la carte (el() les écarte, append() non).
+    el('h3', null, el('a', { href: destination }, recipe.original_title || recipe.display_title)),
+    recipe.display_title && recipe.display_title !== recipe.original_title ? el('small', { class: 'muted' }, recipe.display_title) : null,
+    el('div', { class: 'muted carte-plat-source' }, provenanceText(recipe, doc.book, doc.edition)),
+    resumeReperes(recipe, version),
+    badges.length ? el('div', { class: 'row carte-plat-badges' }, ...badges) : null,
+    el('div', { class: 'carte-plat-actions' }, lienGestionPhoto(recipe, { connue: !!sha }))));
   if (extra) carte.append(extra);
   return carte;
 }
@@ -352,28 +316,15 @@ function cartePlat(doc, { fichier = null, href = null, extra = null } = {}) {
 // grilleCartes(noeuds) : div.grille-plats (2 colonnes dès 360 px, 3 dès 900 px : styles.css) ; `.grid` reste la grille des couvertures.
 export function grilleCartes(noeuds) { return el('div', { class: 'grille-plats' }, ...noeuds); }
 
-// La vignette d'un livre (spec § 6) : l'image si la LIGNE files est là, sinon le titre sur le fond — et rien de plus.
-// Un pointeur cover_sha256 sans octets (fiche reçue d'un autre appareil, avant L4) n'est pas un manque à signaler ici :
-// une grille de livres n'est pas l'endroit pour dire ce qui n'est pas arrivé (la fiche du livre, elle, le dit).
-// R-UX-14 : quand l'image est là, le titre et l'auteur passent en display:none — c'est l'IMAGE qui doit alors porter
-// le nom, sinon le lien n'a plus de nom du tout pour qui ne voit pas la couverture. Sans titre connu : alt vide
-// (décorative), jamais un nom inventé.
-export function bookCover(edition, book, { href = null, fichier = null } = {}) {
-  // S3 : une ligne `files` peut venir d'une archive ou du serveur et porter n'importe quel `mime` sur n'importe quel
-  // blob. Le type d'affichage passe par la liste blanche et DOIT être une image ; le blob est retypé avec lui (un
-  // blob text/html dans un <img> ne s'afficherait pas, mais l'URL existerait quand même). Hors liste : vignette texte. La règle de displayUrl
-  // (F-9, lot G) : le type du blob, dans la liste blanche, gagne — une copie JPEG reçue sous une ligne image/heic s'affiche.
-  const type = typeAffichage(fichier);
-  const affichable = !!type && type.startsWith('image/');
-  const image = affichable
-    ? el('img', { class: 'cover-img', alt: book?.title || '', src: displayUrl(fichier, urlDeBlob) }) // retypage : une copie de la règle (displayUrl)
-    : null;
-  // D-T9 : sans titre connu, l'image reste décorative (alt vide, jamais un nom inventé) — mais le texte passe en
-  // display:none quand l'image est là, et le lien n'aurait alors plus aucun nom. L'ancre le porte donc toujours.
-  return el('a', { class: 'cover-wrap', href: href || `#/books/${encodeURIComponent(edition.id)}`, 'aria-label': book?.title || t('Sans titre') },
+// Couverture locale ou distante : réception visible et lien nommé même quand la photo occupe la couverture.
+export function bookCover(edition, book, { href = null, fichier = null, ctxF = {} } = {}) {
+  const image = photoVisible(edition.cover_sha256 || fichier?.sha256, { fichier, ctxF, classe: 'cover-photo', classeImage: 'plat-vignette cover-img', alt: book?.title || '' });
+  const destination = href || `#/books/${encodeURIComponent(edition.id)}`;
+  return el('div', { class: 'cover-wrap' },
     el('div', { class: `cover${image ? ' with-img' : ''}` }, image,
-      el('div', { class: 'title' }, book?.title || t('Sans titre')),
-      el('div', { class: 'author' }, [book?.author, edition.year].filter(Boolean).join(' · '))));
+      el('a', { class: 'title', href: destination }, book?.title || t('Sans titre')),
+      el('div', { class: 'author' }, [book?.author, edition.year].filter(Boolean).join(' · '))),
+    image ? el('a', { href: destination, class: 'cover-legende' }, book?.title || t('Sans titre')) : null);
 }
 
 // Carte d'action de la page « Ajouter » (spec § 4) et de l'accueil d'un livre (§ 8).
@@ -648,6 +599,7 @@ export function pdfFrame({ sha256, filename, connecte = false, uid = null, telec
 // de ce compte et dire « Connecte-toi pour la télécharger »), les file_error (Map empreinte → { motif, sens } ; etatFichier n'en lit que `has`) et
 // le moteur (le seul qui télécharge, R53).
 export async function contexteFichiers(ctx) {
+  const generation = getSyncGeneration();
   const sync = ctx?.sync || {};
   const moteur = sync.moteur || null;
   let uid = sync.user?.id || null;
@@ -656,7 +608,11 @@ export async function contexteFichiers(ctx) {
     if (!uid) uid = (await repo.get('sync_state', 'user_id'))?.value || null;
     erreurs = await lireErreursFichiers(repo.db);
   } catch { /* base illisible : ni compte connu ni erreur affichée */ }
-  return { connecte: !!sync.user && !!moteur, uid, erreurs, moteur };
+  return { connecte: !!sync.user && !!moteur, uid, erreurs, moteur, courant: () => {
+    if (getSyncGeneration() === generation) return { uid, moteur, connecte: !!sync.user && !!moteur };
+    const actuel = getSyncState();
+    return { uid: actuel.user?.id || uid, moteur: actuel.moteur || null, connecte: !!actuel.user && !!actuel.moteur };
+  } };
 }
 
 // Relit les file_error d'un écran après une tape (ronde 1 : UNE définition). Réécrit `ctxF.erreurs` EXPRÈS : ctxF est le contexte de l'écran,
@@ -686,7 +642,8 @@ export function gesteTelechargement({ moteur, redessiner = async () => {}, dire 
 // Une miniature de page (§ 4.3) : avec octets, l'image (displayUrl, le type par la liste blanche) ; sinon un figure.fichier-absent qui DIT l'état
 // et n'offre que le geste qui a un sens — « Télécharger » (distante, compte) ou « Réessayer » (erreur, compte : sans compte, la tape effaçait le
 // diagnostic sans rien retenter — ronde 1). `alt` : celui de l'écran (« Page {position} » en séance, « Page originale » sur la fiche recette).
-export function vignettePage(page, fichier, { connecte = false, uid = null, erreurs = new Map(), telecharger = null, alt = t('Page') } = {}) {
+export function vignettePage(page, fichier, { connecte = false, uid = null, erreurs = new Map(), telecharger = null, alt = t('Page'), moteur = null, courant = null } = {}) {
+  if (moteur && (typeAffichage(fichier)?.startsWith('image/') || fichier?.remote?.mime?.startsWith('image/'))) return photoVisible(page?.sha256, { fichier, ctxF: { connecte, uid, erreurs, moteur, courant }, alt, classe: 'page-photo' });
   if (fichier?.blob instanceof Blob) {
     const img = el('img', { alt, loading: 'lazy' });
     const u = displayUrl(fichier);

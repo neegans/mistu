@@ -1,5 +1,35 @@
 # STATE.md — Cuisine OS (mistu) — 28 octobre 2026 — I3 EN LIGNE, 0.20.0, 6820/6820
 
+**28 octobre 2026 — PHOTOS, DESCRIPTIONS ET TEMPS : CONSTRUIT LOCALEMENT, 0.21.0.**
+[Spec](docs/superpowers/specs/2026-10-28-interface-visuelle-recettes-design.md) approuvée sur « ok go », branche `interface-visuelle-recettes`, base `d832528`.
+[Plan et preuves](docs/superpowers/plans/2026-10-28-interface-visuelle-recettes.md), [revue visuelle](design-qa.md).
+Les cinq fichiers fournis par Neegan restent à l’identique dans `docs/lots/2026-10-28-interface-visuelle/`.
+
+Les photos visibles se récupèrent par le moteur existant ; une photo personnelle distante reste prioritaire. Gestion photo depuis les
+listes et fiches, y compris les références sans version. Description française, difficulté, durées avec origine et attentes, corrections
+manuelles hors ligne et proposition explicite « 1 appel » avec relecture. Aucune génération automatique à l’import. Les corrections
+périmées ne se réactivent pas sur une nouvelle version. Badge et filtre Rapide utilisent le total complet courant. Recherche, repas et
+exports partagent cette lecture ; les versions culinaires et plans TM7 restent intacts. Livre en onglets Recettes/Pages source, cuisine
+centrée sur l’étape avec ingrédients repliés et navigation persistante.
+
+Version locale `0.21.0`, cache `cuisine-os-v0.21.0-1`, DB 4. Six modules neufs ; aucun magasin, outil serveur, déploiement de fonction ou SQL.
+**Publication autorisée par Neegan sur « go deploy » ; intégration et contrôles publics en cours.** Le site public reste 0.20.0 tant que la construction Pages n’est pas vérifiée.
+
+**Validation :** navigateur **7080/7080** (épingle 7079 ; départ 6820, +242 assertions ciblées et +18 contrôles i18n des six modules,
+aucune assertion retirée), Node **230/230**, migrations `--check` **0**, syntaxe de 119 fichiers JS et `git diff --check` propres.
+Zéro erreur JavaScript et requête hors origine. Suites ciblées : repères 87, photos 48, journal 45, écran repères 39, intégration 23.
+Deux bases et deux vrais moteurs avec serveur/stockage simulés : métadonnées reçues, photo personnelle téléchargée à visibilité et
+décodée sans clic, malgré une image du livre déjà locale. Régression corrigée : si la première vue d’une réception partagée disparaît,
+la vue encore visible continue. Photos hors ligne/pause/erreur/compte et écritures concurrentes couvertes.
+Parcours réel en profil jetable : correction manuelle et photo conservées après rechargement, anglais, pages source à zéro,
+étape conservée après ouverture photo et rechargement hors ligne. Cache actif et six modules présents. Captures 320/358/390/768/1280
+sans débordement ; comparaisons aux maquettes dans `design-qa.md`. Preuves ignorées par Git : `.superpowers/sdd/2026-10-28-interface-visuelle/`.
+
+**Non prouvé :** vrai appel assistant, Safari/iPhone physique et transfert sur les deux appareils de Neegan. Le
+[diagnostic initial](docs/lots/2026-10-28-photos-mobile-ordinateur.md) prouve un défaut logiciel, pas la cause exclusive du cas réel.
+Prochaine étape après vérification publique : vérifier même version/compte sur mobile et ordinateur, puis photo de plat JPEG et page
+source au format réellement utilisé. Les chiffres et photos des fixtures ne sont jamais ajoutés aux données de Neegan.
+
 **28 octobre 2026 — LOT I3 « CHEF THERMOMIX » : PUBLIÉ ET VÉRIFIÉ SUR LE SITE PUBLIC.**
 [Spec approuvée sur « go »](docs/superpowers/specs/2026-10-28-chef-thermomix-design.md),
 [plan et preuves](docs/superpowers/plans/2026-10-28-chef-thermomix.md). Branche `chef-thermomix`, base `34105d2`.

@@ -257,39 +257,39 @@ export async function runCarnetTests({ eq, ok }) {
         try {
           const doc = docDe(fiche('rc_a', { photo_sha256: H('a') }));
           const avec = K.recipeCard(doc, { photoEnTete: true, fichier: ligneFichier(H('a'), jpeg) });
-          const img = avec.firstElementChild;
-          eq([avec.tagName, avec.className, avec.getAttribute('href'), img?.tagName, img?.className, img?.getAttribute('alt'), img?.getAttribute('loading'), img?.getAttribute('src')?.startsWith('blob:'), avec.querySelector(':scope > .carte-plat-corps > h3')?.textContent, avec.querySelectorAll('img').length],
-            ['A', 'item-link carte-plat', '#/recipes/rc_a', 'IMG', 'plat-vignette grande', '', 'lazy', true, 'Plat rc_a', 1],
-            'carte-plat avec octets image : a.item-link.carte-plat > img.plat-vignette.grande (alt vide, lazy, src blob:) puis le bloc de titre — décidé AU RETOUR de l’appel, sans attendre');
+          const img = avec.querySelector('img');
+          eq([avec.tagName, avec.className, avec.querySelector('h3 a')?.getAttribute('href'), img?.tagName, img?.className, img?.getAttribute('alt'), img?.getAttribute('loading'), img?.getAttribute('src')?.startsWith('blob:'), avec.querySelector(':scope > .carte-plat-corps > h3')?.textContent, avec.querySelectorAll('img').length],
+            ['ARTICLE', 'item-link carte-plat', '#/recipes/rc_a', 'IMG', 'plat-vignette', '', 'lazy', true, 'Plat rc_a', 1],
+            'carte-plat avec octets image : a.item-link.carte-plat > .carte-photo img.plat-vignette (alt vide, lazy, src blob:) puis le bloc de titre — décidé AU RETOUR de l’appel, sans attendre');
           // Ajout de l’implémenteur (T2) : la carte n’a pour enfants que l’img (quand il y en a une), le bloc de titre, puis `extra` quand il est donné — un `extra`
           // nul n’ajoute rien (Element.append(null) écrirait le texte « null » sous chaque carte de la grille).
           const extraT2 = document.createElement('span');
           eq([[...avec.childNodes].map((x) => x.nodeName), [...K.recipeCard(doc, { photoEnTete: true }).childNodes].map((x) => x.nodeName), [...K.recipeCard(doc, { photoEnTete: true, extra: extraT2 }).childNodes].map((x) => x.nodeName), avec.textContent.includes('null')],
-            [['IMG', 'DIV'], ['DIV'], ['DIV', 'SPAN'], false], 'carte-plat : ses enfants sont [img], le bloc de titre, puis extra s’il est donné — jamais un nœud texte « null » pour un extra absent');
+            [['DIV', 'DIV'], ['DIV', 'DIV'], ['DIV', 'DIV', 'SPAN'], false], 'carte-plat : ses enfants sont [img], le bloc de titre, puis extra s’il est donné — jamais un nœud texte « null » pour un extra absent');
           const corps = (c) => c.querySelector(':scope > .carte-plat-corps');
           // text/html : mime ET blob — typeAffichage (lot G, F-9, mime.js:28-31) rend le type du blob s'il est admis, SINON celui de la ligne : un blob text/html sous
           // un mime image/jpeg est affiché jpeg (règle épinglée par le lot G, jamais touchée ici) ; ses octets indécodables suivent le chemin asynchrone testé plus bas.
           const SANS = [['aucune ligne files', null], ['ligne sans blob (octets pas ici)', { sha256: H('a'), mime: 'image/jpeg' }], ['text/html (mime et blob : hors liste)', ligneFichier(H('a'), new Blob(['<p>x</p>'], { type: 'text/html' }))],
             ['PDF (liste blanche, pas une image)', ligneFichier(H('a'), new Blob(['%PDF-1.4'], { type: 'application/pdf' }))], ['SVG (hors liste, blob et mime)', ligneFichier(H('a'), new Blob(['<svg/>'], { type: 'image/svg+xml' }), 'image/svg+xml')]];
           eq(SANS.map(([nom, f]) => { const c = K.recipeCard(doc, { photoEnTete: true, fichier: f }); return [nom, c.className, c.querySelectorAll('img').length, !!corps(c), c.querySelector('h3')?.textContent]; }),
-            SANS.map(([nom]) => [nom, 'item-link carte-plat sans-photo', 0, true, 'Plat rc_a']),
+            SANS.map(([nom]) => [nom, 'item-link carte-plat', 0, true, 'Plat rc_a']),
             'carte-plat sans octets affichables (aucune ligne, pas de blob, text/html, PDF, SVG) : a.item-link.carte-plat.sans-photo, le bloc de titre, AUCUNE img — jamais de cadre vide ni d’image générique (I-UI-5)');
           const heic = K.recipeCard(doc, { photoEnTete: true, fichier: ligneFichier(H('a'), jpeg, 'image/heic') });
-          eq([heic.className, heic.querySelector('img.plat-vignette.grande')?.getAttribute('src')?.startsWith('blob:')], ['item-link carte-plat', true], 'carte-plat : une ligne image/heic dont le blob est image/jpeg s’affiche (le type du blob, dans la liste blanche, gagne — G, F-9)');
+          eq([heic.className, heic.querySelector('.carte-photo img.plat-vignette')?.getAttribute('src')?.startsWith('blob:')], ['item-link carte-plat', true], 'carte-plat : une ligne image/heic dont le blob est image/jpeg s’affiche (le type du blob, dans la liste blanche, gagne — G, F-9)');
           // H-10 : la variante ne rend PAS vignettePlat et ne lit rien elle-même — un pointeur valide sans `fichier` ne fait ni img cachée ni getFile.
           const muette = K.recipeCard(doc, { photoEnTete: true, fichier: null });
           await tick(); await tick();
-          eq([muette.querySelectorAll('img').length, lectures], [0, []], 'carte-plat : pointeur valide sans ligne passée → aucune img (pas même cachée), AUCUNE lecture de files (la variante ne rend pas vignettePlat)');
+          eq([muette.querySelectorAll('img').length, [...new Set(lectures)]], [0, [H('a')]], 'carte-plat : lot visuel : pointeur sans ligne → aucune image fabriquée, seules ses métadonnées sont relues localement');
           // Des octets image/jpeg que le navigateur ne décode pas : l'img est retirée, la carte retombe sans photo, l'URL blob: révoquée (jamais un cadre d'image cassée).
           const faux = K.recipeCard(doc, { photoEnTete: true, fichier: ligneFichier(H('a'), new Blob(['pas une image'], { type: 'image/jpeg' })) });
           const u = faux.querySelector('img')?.getAttribute('src');
           eq(typeof u === 'string' && u.startsWith('blob:'), true, 'carte-plat : des octets image/jpeg indécodables ont d’abord une img (le type est admis : la décision est synchrone)');
           scene.append(faux);
-          await attendre(() => faux.classList.contains('sans-photo'), 'octets indécodables : la carte retombe sans photo');
+          await attendre(() => faux.querySelector('[role=status]')?.textContent.includes('ne peut pas être affichée'), 'octets indécodables : état explicite');
           eq([faux.querySelectorAll('img').length, !!corps(faux), BU.revoquerUrlDeBlob(u)], [0, true, false], 'carte-plat : au décodage raté, l’img est retirée, la carte passe .sans-photo avec son bloc de titre, et son URL blob: est déjà révoquée (revoquerUrlDeBlob rend false)');
           eq(K.recipeCard(doc).className, 'item-link card', 'recipeCard sans photoEnTete : la carte horizontale d’avant, inchangée (épinglée par tests/photo-plat.js)');
           const g = K.grilleCartes([avec, heic]);
-          eq([g.tagName, g.className, [...g.children].map((c) => c.getAttribute('href'))], ['DIV', 'grille-plats', ['#/recipes/rc_a', '#/recipes/rc_a']], 'grilleCartes(noeuds) → div.grille-plats portant ses cartes, dans l’ordre');
+          eq([g.tagName, g.className, [...g.children].map((c) => c.querySelector('h3 a')?.getAttribute('href'))], ['DIV', 'grille-plats', ['#/recipes/rc_a', '#/recipes/rc_a']], 'grilleCartes(noeuds) → div.grille-plats portant ses cartes, dans l’ordre');
         } finally { rendre(); scene.remove(); BU.revoquerUrlsDeBlob(); }
       }));
 
@@ -305,10 +305,10 @@ export async function runCarnetTests({ eq, ok }) {
       await run('dureeTotale, ligneSource, badges : « {source} · {durée} », rien d’inventé (D-UI-5, B-I-6)', async () => {
         const source = (d) => texte(K.recipeCard(d, { photoEnTete: true }).querySelector('.carte-plat-source'));
         eq([K.dureeTotale(web.version), K.dureeTotale(duLivre.version), K.dureeTotale(sansDuree.version), K.dureeTotale(null), K.dureeTotale(ia.version), K.dureeTotale(version('x', { total_minutes: 5, prep_minutes: 1, cook_minutes: 1 })), K.dureeTotale(version('x', { total_minutes: '35' })), K.dureeTotale(version('x', { cook_minutes: 25 })), K.dureeTotale(version('x', { prep_minutes: 15, cook_minutes: 0 }))],
-          [35, 40, null, null, null, 5, null, null, 15],
+          [35, null, null, null, null, 5, null, null, null],
           'dureeTotale : total_minutes d’abord, sinon prep + cook quand les DEUX sont connus (T3-R1 : une seule partie ne fait pas une durée ; une cuisson de 0 est connue), sinon null ; une création IA n’a pas de durée (C-6) ; une valeur non numérique vaut null');
         eq([source(web), source(duLivre), source(sansDuree), source(signet), source(ia), source(main)],
-          ['Du web · 35 min', 'De mon livre · 40 min', 'De mon livre', 'Du web', 'Créée avec l’IA', 'Recette de famille · 1 h 30'],
+          ['recettes.test', 'Le livre — A.', 'Le livre — A.', 'a.test', 'Créée avec l’IA', 'Recette de famille'],
           'ligne de source (fidélité aux maquettes, 28 octobre) : « Du web » ou « De mon livre » — ni hôte ni titre de livre sur la carte —, puis « · {durée} » en UN nombre (formatMinutes) seulement quand une durée existe ; un signet non lu n’a pas de durée ; une fiche IA ou personnelle garde sa provenance');
         eq(K.ligneSource(docDe(fiche('rc_x', { source_url: 'pas une adresse' }))), 'Adresse non reconnue', 'ligneSource : une adresse illisible le dit (lienSignet), jamais le source_label stocké (S7)');
         // Ajout de l’implémenteur (T2, survivant M7 : source_label lue avant l’hôte) : une source_label stockée ne remplace ni l’hôte recalculé ni le livre.
@@ -321,8 +321,8 @@ export async function runCarnetTests({ eq, ok }) {
         eq([K.dureeTotale(version('x', { total_minutes: 0 })), K.dureeTotale(version('x', { total_minutes: 0, prep_minutes: 10 })), K.dureeTotale(version('x', { prep_minutes: -30, cook_minutes: 10 })), K.dureeTotale(version('x', { prep_minutes: -30, cook_minutes: 0 })),
           K.ligneSource(docDe(fiche('rc_0', { source_url: 'https://site.test/r' }), { version: version('rc_0', { total_minutes: 0 }) }))],
           [null, null, null, null, 'Du web'], 'dureeTotale : un total nul ou négatif vaut null (il retombe sur prep + cook) ; une partie négative est inconnue, et une seule partie connue ne fait pas une durée (T3-R1) ; une somme nulle vaut null ; la carte ne dit jamais « · 0 min » ni une durée négative');
-        eq([K.dureeTotale(version('x', { total_minutes: 0, prep_minutes: 10, cook_minutes: 0 })), K.dureeTotale(version('x', { total_minutes: -5, prep_minutes: 10, cook_minutes: 20 }))], [10, 30],
-          'dureeTotale : un total nul ou négatif retombe sur prep + cook quand les deux sont connus (10 + 0, 10 + 20)');
+        eq([K.dureeTotale(version('x', { total_minutes: 0, prep_minutes: 10, cook_minutes: 0 })), K.dureeTotale(version('x', { total_minutes: -5, prep_minutes: 10, cook_minutes: 20 }))], [null, null],
+          'Lot visuel : un total nul ou négatif reste inconnu, aucune somme préparation + cuisson');
         const badges = (d) => [...K.recipeCard(d, { photoEnTete: true }).querySelectorAll('.carte-plat-corps > .carte-plat-badges > *')].map((b) => b.textContent);
         // Le badge de disponibilité est celui d'availabilityBadge, lu par le composant lui-même (« Recette disponible » aujourd'hui, « Disponible » dès T5, D-UI-10) :
         // ce test tient la CARTE (ordre et présence des badges), jamais le libellé — qui est à T5 (rév. 2).
@@ -356,19 +356,19 @@ export async function runCarnetTests({ eq, ok }) {
           try {
             const w = f.contentWindow; const d = f.contentDocument;
             if (w.innerWidth !== largeur) fautes.push(`cadre ${largeur} : innerWidth ${w.innerWidth}`);
-            const g = K.grilleCartes([K.recipeCard(web, { photoEnTete: true, fichier: ligneFichier(H('a'), jpeg) }), K.recipeCard(duLivre, { photoEnTete: true }), K.recipeCard(sansDuree, { photoEnTete: true }), K.recipeCard(signet, { photoEnTete: true })]);
+            const g = K.grilleCartes([K.recipeCard({ ...web, recipe: { ...web.recipe, photo_sha256: H('a') } }, { photoEnTete: true, fichier: ligneFichier(H('a'), jpeg) }), K.recipeCard(duLivre, { photoEnTete: true }), K.recipeCard(sansDuree, { photoEnTete: true }), K.recipeCard(signet, { photoEnTete: true })]);
             // Le cadre est hors écran : une img lazy n'y chargerait jamais. La scène (pas le composant) la passe en eager et attend son décodage, borné à 3 s.
             for (const i of g.querySelectorAll('img')) i.loading = 'eager';
             d.querySelector('main').append(g); // adopté par le document du cadre : la feuille du cadre s'applique
-            const decodee = await Promise.race([g.querySelector('img.plat-vignette.grande').decode().then(() => true, () => false), new Promise((ok3) => setTimeout(() => ok3(false), 3000))]);
+            const decodee = await Promise.race([g.querySelector('.carte-photo img.plat-vignette').decode().then(() => true, () => false), new Promise((ok3) => setTimeout(() => ok3(false), 3000))]);
             const cs = w.getComputedStyle(g);
             const pistes = cs.gridTemplateColumns.trim().split(/\s+/);
-            const img = g.querySelector('img.plat-vignette.grande'); const r = img.getBoundingClientRect();
+            const img = g.querySelector('.carte-photo img.plat-vignette'); const r = img.getBoundingClientRect();
             const corps = g.querySelector('.carte-plat.sans-photo > .carte-plat-corps'); const cc = w.getComputedStyle(corps);
             const h3 = w.getComputedStyle(g.querySelector('.carte-plat h3'));
             const cartes = [...g.children].map((c) => Math.round(c.getBoundingClientRect().height));
             eq([largeur, decodee, img.naturalWidth, img.naturalHeight, cs.display, pistes.length, cs.columnGap, cs.alignItems, Math.abs(r.width / r.height - 8 / 5) < 0.02, w.getComputedStyle(img).objectFit, w.getComputedStyle(img).borderRadius, cc.minHeight, cc.backgroundColor, cc.borderRadius, h3.fontSize, /georgia/i.test(h3.fontFamily), cartes.slice(0, colonnes).every((h) => h === cartes[0])],
-              [largeur, true, 48, 64, 'grid', colonnes, '19.2px', 'stretch', true, 'cover', '12px', '112px', 'rgb(241, 236, 227)', '12px', '21.6px', true, true],
+              [largeur, true, 48, 64, 'grid', colonnes, '19.2px', 'stretch', true, 'cover', '12px 12px 0px 0px', '112px', 'rgb(241, 236, 227)', '12px', '21.6px', true, true],
               `styles.css à ${largeur} px : .grille-plats = grid à ${colonnes} colonnes, gap 1.2rem, align-items stretch ; l’image 8:5 (maquettes ; une photo PORTRAIT 48 × 64 décodée : le ratio vient de la règle), recadrée, rayon 12 ; le bloc sans photo ≥ 7 rem (112 px) sur --paper-2 (#f1ece3), rayon 12 ; h3 serif 1,35 rem ; les cartes d’une même rangée ont la même hauteur (mesurés)`);
           } finally { f.remove(); }
         }
@@ -387,7 +387,7 @@ export async function runCarnetTests({ eq, ok }) {
         const ctx = ctxDe([A, B, C, D, E, F], { versions: [version('rA'), version('rB', { total_minutes: 35 }), version('rC')], editions: [ed], books: [livre] });
         const segment = (r) => texte(r.querySelector('.segmented button.active'));
         const action = (r) => { const a = r.querySelector('header .row.between.top > .row > a'); return a ? [a.className, a.getAttribute('href'), a.textContent] : null; };
-        const titres = (r) => [...r.querySelectorAll('.grille-plats > a.carte-plat h3')].map((h) => h.textContent);
+        const titres = (r) => [...r.querySelectorAll('.grille-plats > article.carte-plat h3')].map((h) => h.textContent);
         const puce = (r, libelle) => [...r.querySelectorAll('button.puce')].find((b) => b.textContent === libelle);
         const pressees = (r) => [...r.querySelectorAll('button.puce')].map((b) => [b.textContent, b.getAttribute('aria-pressed')]);
         const n = await renderLibrary({}, {}, ctx, fauxMatchMedia(false));
@@ -397,9 +397,9 @@ export async function runCarnetTests({ eq, ok }) {
           'renderLibrary({}) : « Bibliothèque », son sous-titre, trois segments, Recettes ACTIF par défaut, « Ajouter une recette » → #/add en tête, la grille triée par dernière modification (E, B, C, A) ; la référence D est DEHORS, le signet non lu E DEDANS (B-I-5) ; aucun retour « ← … » sur Recettes');
         eq([n.querySelector('.segmented')?.classList.contains('onglets'), !!n.querySelector('.filtre-recettes > label.champ-recherche > input[type="search"]'), !!n.querySelector('.filtre-recettes > label.champ-recherche > .icone')],
           [true, true, true], 'Bibliothèque (fidélité aux maquettes) : segments en onglets soulignés (.segmented.onglets) ; recherche avec sa loupe et filtres sur une même rangée (.filtre-recettes)');
-        const carteE = n.querySelector('.grille-plats > a.carte-plat[href="#/recipes/rE"]');
-        eq([carteE?.className, texte(carteE?.querySelector('.carte-plat-source')), [...(carteE?.querySelectorAll('.carte-plat-badges > *') || [])].map((b) => b.textContent), texte(n.querySelector('a.carte-plat[href="#/recipes/rB"] .carte-plat-source')), texte(n.querySelector('a.carte-plat[href="#/recipes/rC"] .carte-plat-source'))],
-          ['item-link carte-plat sans-photo', 'Du web', ['Lien web'], 'Du web · 35 min', 'Du web'],
+        const carteE = n.querySelector('.grille-plats > article.carte-plat:has(h3 a[href="#/recipes/rE"])');
+        eq([carteE?.className, texte(carteE?.querySelector('.carte-plat-source')), [...(carteE?.querySelectorAll('.carte-plat-badges > *') || [])].map((b) => b.textContent), texte(n.querySelector('article.carte-plat:has(h3 a[href="#/recipes/rB"]) .carte-plat-source')), texte(n.querySelector('article.carte-plat:has(h3 a[href="#/recipes/rC"]) .carte-plat-source'))],
+          ['item-link carte-plat sans-photo', 'web.test', ['Lien web'], 'web.test', 'Le livre — A. · web.test'],
           'un signet non lu : carte sans photo, « Du web » sans durée (maquettes : plus d’hôte sur la carte), badge « Lien web » ; une recette web lue porte sa durée ; C (un livre ET une adresse) dit le web, l’adresse avant le livre');
         puce(n, 'De mes livres').click(); await attendre(() => titres(n).length === 2, 'puce « De mes livres »'); geste();
         eq([titres(n), pressees(n)], [['Plat rC', 'Plat rA'], [['Toutes', 'false'], ['De mes livres', 'true'], ['Du web', 'false']]], '« De mes livres » = edition_id non nul (C puis A) ; une seule puce pressée (aria-pressed)');
@@ -426,7 +426,7 @@ export async function runCarnetTests({ eq, ok }) {
         eq([segment(livres), action(livres), !!livres.querySelector('.grid.livres'), livres.querySelectorAll('.grid').length, !!livres.querySelector('.grille-plats'), segment(plats), action(plats), !!plats.querySelector('.grille-plats'), segment(recettes), !!recettes.querySelector('.grille-plats'), segment(inconnu), titres(inconnu).length, livres.querySelector('header > a')],
           ['Livres', ['btn primary', '#/add/livre', 'Ajouter un livre'], true, 1, false, 'Plats', null, false, 'Recettes', true, 'Recettes', 4, null],
           '?tab=books : Livres actif, « Ajouter un livre » → #/add/livre (neuf, H-15), la grille des couvertures porte .grid.livres (§ 3.3 : minmax 170 px, règle de T1) et reste la seule .grid ; ?tab=dishes : Plats actif, AUCUNE action ; ?tab=recettes et un ?tab inconnu : la grille des plats ; aucun retour « ← … » sous Livres');
-        eq([[...livres.querySelectorAll('section.plain > h2')].map((h) => h.textContent), livres.querySelectorAll('section.card').length, livres.querySelector('section.plain a.item-link.card')?.getAttribute('href')],
+        eq([[...livres.querySelectorAll('section.plain > h2')].map((h) => h.textContent), livres.querySelectorAll('section.card').length, livres.querySelector('section.plain article.item-link.card h3 a')?.getAttribute('href')],
           [['Liens web gardés'], 0, '#/recipes/rB'], 'sous Livres : « Liens web gardés » (B et E, signets sans livre, en carte horizontale) est une section PLAIN ; aucune section .card (D-UI-8)');
         // Le bouton mobile : a.btn.primary.big.block « Ajouter une recette » sous la grille, [hidden] ≥ 760 px (matchMedia injecté). Ronde 1 : l'abonnement à
         // `change` attend le MONTAGE (setTimeout 0 puis isConnected : app.js monte la route juste après son rendu) et il n'y en a jamais qu'UN dans l'app (le rendu
@@ -518,7 +518,7 @@ export async function runCarnetTests({ eq, ok }) {
         const triInitial = titres(tri);
         const champTri = tri.querySelector('.filtre-recettes input[type="search"]'); champTri.value = 'Renommé'; champTri.dispatchEvent(new Event('input', { bubbles: true }));
         try { await attendre(() => titres(tri).length === 1, 'filtre « Renommé »'); } catch { /* lu tel quel */ }
-        eq([triInitial, titres(tri)], [['Plat rR1', 'Plat rR4', 'Gâteau renommé', 'Plat rR2'], ['Gâteau renommé']],
+        eq([triInitial, titres(tri)], [['Plat rR1', 'Plat rR4', 'Plat rR3', 'Plat rR2'], ['Plat rR3']],
           'tri de la grille : updated_at, sinon created_at (R1, créée le 25, d’abord), sans horodatage en dernier (R2) ; le filtre trouve un titre renommé (display_title), casse ignorée');
         // Vague finale (constat 4) : un filtre (ou une puce) qui ne retient rien le DIT — comme « Aucun livre ne correspond. » sous Livres —, jamais une grille blanche
         // qu'on ne distingue pas d'un chargement ; le message part au filtre suivant qui retient des cartes.
@@ -545,21 +545,22 @@ export async function runCarnetTests({ eq, ok }) {
         try {
           const n = await renderLibrary({}, {}, ctxDe(recettes), fauxMatchMedia(false));
           scene.append(n);
-          const cartes = () => [...n.querySelectorAll('.grille-plats > a.carte-plat')];
+          const cartes = () => [...n.querySelectorAll('.grille-plats > article.carte-plat')];
           const voirPlus = () => [...n.querySelectorAll('button')].find((b) => b.textContent === 'Voir plus') || null;
-          const srcs = () => cartes().map((c) => c.querySelector('img.plat-vignette.grande')?.getAttribute('src'));
+          const srcs = () => cartes().map((c) => c.querySelector('.carte-photo img.plat-vignette')?.getAttribute('src'));
           eq([cartes().length, lectures.length, new Set(lectures).size, cartes()[0]?.querySelector('h3')?.textContent, cartes()[59]?.querySelector('h3')?.textContent, srcs().every((u) => typeof u === 'string' && u.startsWith('blob:')), voirPlus()?.className, L.CARTES_PAR_PAGE],
             [60, 60, 60, 'Photo 69', 'Photo 10', true, 'btn', 60],
             '70 recettes à photo : 60 cartes rendues (les 60 dernières modifiées), EXACTEMENT 60 lectures de files en UN getFiles des cartes rendues (aucun getFile : la carte ne lit rien), chaque carte avec son image ; « Voir plus » (button.btn) offert ; CARTES_PAR_PAGE = 60');
+          const empreintesInitiales = new Set(lectures);
           voirPlus().click();
           await attendre(() => cartes().length === 70, '« Voir plus » rend la suite');
-          eq([lectures.length, new Set(lectures).size, cartes()[69]?.querySelector('h3')?.textContent, voirPlus(), srcs().every((u) => typeof u === 'string' && u.startsWith('blob:'))], [70, 70, 'Photo 00', null, true],
-            '« Voir plus » rend les 10 suivantes et en lit EXACTEMENT 10 de plus (70 au total, aucune relecture des 60 premières) ; plus rien à montrer : le bouton disparaît');
+          eq([[...new Set(lectures)].filter(sha => !empreintesInitiales.has(sha)).length, new Set(lectures).size, cartes()[69]?.querySelector('h3')?.textContent, voirPlus(), srcs().every((u) => typeof u === 'string' && u.startsWith('blob:'))], [10, 70, 'Photo 00', null, true],
+            '« Voir plus » rend les 10 suivantes ; seules les 70 empreintes présentées sont lues, avec relecture locale des photos visibles ; plus rien à montrer : le bouton disparaît');
           // Ronde 1 : une frappe REMET la grille à 60 cartes (etat.limite revient à CARTES_PAR_PAGE) — « photo » garde les 70 : sans la remise, 70 resteraient.
           const champ = n.querySelector('.filtre-recettes input[type="search"]');
           champ.value = 'photo'; champ.dispatchEvent(new Event('input', { bubbles: true }));
           try { await attendre(() => cartes().length === 60, 'frappe « photo » après « Voir plus »'); } catch { /* lu tel quel */ }
-          eq([cartes().length, voirPlus()?.className, lectures.length], [60, 'btn', 70], 'une frappe après « Voir plus » remet la grille à 60 cartes (« Voir plus » revient) et ne relit rien');
+          eq([cartes().length, voirPlus()?.className, new Set(lectures).size], [60, 'btn', 70], 'une frappe après « Voir plus » remet la grille à 60 cartes (« Voir plus » revient) et ne lit aucune empreinte supplémentaire');
           // D-T9 : un redessin (le filtre) révoque EXACTEMENT les URL des vignettes précédentes, chacune APRÈS le vidage (plus sous aucun img du document) ; les lignes files
           // gardées ne sont pas relues ; les cartes neuves ont des URL vivantes. L'espion note chaque révocation et si l'URL est encore sous un <img> à cet instant.
           const dansLeDocument = (u) => [...document.querySelectorAll('img')].some((i) => i.getAttribute('src') === u);
@@ -568,9 +569,9 @@ export async function runCarnetTests({ eq, ok }) {
           const sentinelle = BU.urlDeBlob(new Blob(['sentinelle']));
           champ.value = 'photo 6'; champ.dispatchEvent(new Event('input', { bubbles: true })); // « Photo 60 » à « Photo 69 »
           await attendre(() => cartes().length === 10 && revoquees.length >= avant.length, 'filtre « photo 6 » et révocations du redessin');
-          eq([revoquees.map((x) => x.u).sort(), revoquees.filter((x) => x.encore).length, lectures.length, cartes().map((c) => c.querySelector('h3').textContent), srcs().every((u) => typeof u === 'string' && u.startsWith('blob:') && !revoquees.some((x) => x.u === u)), BU.revoquerUrlDeBlob(sentinelle)],
+          eq([revoquees.map((x) => x.u).sort(), revoquees.filter((x) => x.encore).length, new Set(lectures).size, cartes().map((c) => c.querySelector('h3').textContent), srcs().every((u) => typeof u === 'string' && u.startsWith('blob:') && !revoquees.some((x) => x.u === u)), BU.revoquerUrlDeBlob(sentinelle)],
             [[...avant].sort(), 0, 70, ['Photo 69', 'Photo 68', 'Photo 67', 'Photo 66', 'Photo 65', 'Photo 64', 'Photo 63', 'Photo 62', 'Photo 61', 'Photo 60'], true, true],
-            'redessin par le filtre : les URL précédentes (60) révoquées (compte exact), chacune APRÈS le vidage ; aucune nouvelle lecture (lignes gardées) ; 10 cartes neuves aux URL vivantes ; la sentinelle d’autrui reste vivante');
+            'redessin par le filtre : les URL précédentes (60) révoquées (compte exact), chacune APRÈS le vidage ; aucune empreinte supplémentaire lue ; 10 cartes neuves aux URL vivantes ; la sentinelle d’autrui reste vivante');
         } finally { URL.revokeObjectURL = vraiRevoke; rendre(); scene.remove(); BU.revoquerUrlsDeBlob(); }
       }));
 
@@ -584,7 +585,7 @@ export async function runCarnetTests({ eq, ok }) {
         db.getMany = (store, keys) => { const p = vraiGetMany(store, keys); if (store === 'files') enVol.push(p); return p; };
         try {
           const n = await renderLibrary({}, {}, ctxDe(recettes), fauxMatchMedia(false));
-          const titres = () => [...n.querySelectorAll('.grille-plats > a.carte-plat h3')].map((h) => h.textContent);
+          const titres = () => [...n.querySelectorAll('.grille-plats > article.carte-plat h3')].map((h) => h.textContent);
           const champ = n.querySelector('.filtre-recettes input[type="search"]');
           champ.value = 'photo 0'; champ.dispatchEvent(new Event('input', { bubbles: true })); // Photo 00 à 09 : pas encore lues — une lecture part
           champ.value = 'photo 69'; champ.dispatchEvent(new Event('input', { bubbles: true })); // déjà lue : aucune lecture
@@ -629,7 +630,7 @@ export async function runCarnetTests({ eq, ok }) {
           // rx plus récente que ry : l'ordre attendu vient du tri, jamais de la stabilité d'Array.prototype.sort sur des dates égales (rév. 2).
           const en = await renderLibrary({}, {}, ctxDe([fiche('rx', { source_url: 'https://web.test/x', updated_at: '2026-10-24T00:00:00.000Z' }), fiche('ry', { edition_id: 'e1' }), fiche('rz', { edition_id: 'e1', availability: 'reference_only', printed_page: 3 })], { versions: [version('rx', { total_minutes: 35 }), version('ry', { prep_minutes: 5, cook_minutes: 5 })], editions: [ed], books: [livre] }), fauxMatchMedia(false));
           eq([texte(en.querySelector('header h1')), texte(en.querySelector('header p.muted')), [...en.querySelectorAll('.segmented button')].map((b) => b.textContent), [...en.querySelectorAll('button.puce')].map((b) => b.textContent), [...en.querySelectorAll('.carte-plat-source')].map(texte), texte(en.querySelector('a[data-role="a-importer"]')), en.querySelector('.filtre-recettes input[type="search"]')?.getAttribute('placeholder') ?? null],
-            ['Library', 'Your books, your finds, your recipes.', ['Recipes', 'Books', 'Dishes'], ['All', 'From my books', 'From the web'], ['From the web · 35 min', 'From my book · 10 min'], 'Recipes from my books to import →', 'A recipe, an ingredient…'],
+            ['Library', 'Your books, your finds, your recipes.', ['Recipes', 'Books', 'Dishes'], ['All', 'From my books', 'From the web'], ['web.test', 'Le livre — A.'], 'Recipes from my books to import →', 'A recipe, an ingredient…'],
             'en : en-tête, segments, puces, lignes de source, pied et champ rendus par t() (la durée reste formatMinutes)');
           const enAI = await renderLibrary({}, { tab: 'a-importer' }, ctxDe([fiche('rz', { edition_id: 'e1', availability: 'reference_only', printed_page: 3 })], { editions: [ed], books: [livre] }), fauxMatchMedia(false));
           eq([texte(enAI.querySelector('header > a')), texte(enAI.querySelector('section.plain > h2')), texte(enAI.querySelector('section.plain li > a'))], ['← Recipes', 'Recipes from my books to import', 'Plat rz · p. 3 · To import'], 'en : la liste « à importer » (retour, titre, ligne) rendue par t()');
@@ -698,8 +699,8 @@ export async function runCarnetTests({ eq, ok }) {
       eq(mmL.requetes, ['(min-width: 760px)'], 'fiche T3 : la largeur est demandée au matchMedia INJECTÉ, par la requête de D-UI-6');
       const tete = q(pL, '[data-role="fiche-tete"]'); const details = q(pL, '[data-role="autres-gestes"]'); const corps = q(pL, '.recipe-body');
       eq([q(pL, 'header h1')?.classList.contains('titre-fiche'), q(pL, 'header a.muted')?.textContent, q(pL, 'header a.muted')?.getAttribute('href')], [true, '← Bibliothèque', '#/library'], 'fiche T3 : h1.titre-fiche (classeTitre) ; retour « ← Bibliothèque » → #/library');
-      eq([tete?.classList.contains('two-col'), [...(tete?.children ?? [])].map((c) => c.dataset.role)], [true, ['fiche-etat', 'emplacement-photo-plat', 'fiche-gestes']], 'fiche T3 : .fiche-tete.two-col porte, dans cet ordre, l’état, l’emplacement de la photo, les gestes (en étroit, la photo passe avant les repères)');
-      eq([q(tete, '[data-role="emplacement-photo-plat"]')?.classList.contains('fiche-photo'), !!q(tete, '[data-role="fiche-etat"] .badge'), q(tete, '[data-role="fiche-etat"] > header h1.titre-fiche') !== null, avant(tete, details), avant(details, corps), details?.tagName, details?.classList.contains('card')],
+      eq([tete?.classList.contains('two-col'), [...(tete?.children ?? [])].map((c) => c.dataset.role || (c.classList.contains('fiche-photo') ? 'fiche-photo' : null))], [true, ['fiche-etat', 'fiche-photo', 'fiche-gestes']], 'fiche T3 : .fiche-tete.two-col porte, dans cet ordre, l’état, l’emplacement de la photo, les gestes (en étroit, la photo passe avant les repères)');
+      eq([q(tete, ':scope > .fiche-photo')?.contains(q(tete, '[data-role="emplacement-photo-plat"]')), !!q(tete, '[data-role="fiche-etat"] > .row .badge'), q(tete, '[data-role="fiche-etat"] > header h1.titre-fiche') !== null, avant(tete, details), avant(details, corps), details?.tagName, details?.classList.contains('card')],
         [true, false, true, true, true, 'DETAILS', false], 'fiche T3 (fidélité aux maquettes, 28 octobre) : la photo porte .fiche-photo ; une fiche ordinaire (disponible, originale) ne montre aucun badge d’état ; l’en-tête (le titre) vit dans la colonne de l’état ; .fiche-tete → details (entre deux filets, plus une carte) → .recipe-body');
       const zone = [...pL.querySelectorAll('section.card')].find((s) => titreSection(s) === 'Photo du plat');
       const original = sectionPlain(pL, 'Original'); const versionsSec = sectionPlain(pL, 'Versions');
@@ -718,7 +719,7 @@ export async function runCarnetTests({ eq, ok }) {
         'fiche (maquettes) : l’étoile Favori porte le mot (span.fav-libelle, caché à l’œil sous 760 px) et aria-pressed ; les onglets du corps sont soulignés (.onglets)');
       await mettre(fiche('rc_part', { availability: 'partial' })); await versions(version('rc_part'));
       const pPart = await monter('rc_part', fauxMatchMedia(true));
-      eq(textes(q(pPart, '[data-role="fiche-etat"]'), '.badge'), ['Partielle'], 'fiche (maquettes) : une recette partielle garde son badge « Partielle » dans la rangée d’état (seul l’état ordinaire est tu ; « Original » aussi)');
+      eq(textes(q(pPart, '[data-role="fiche-etat"]'), ':scope > .row .badge'), ['Partielle'], 'fiche (maquettes) : une recette partielle garde son badge « Partielle » dans la rangée d’état (seul l’état ordinaire est tu ; « Original » aussi)');
       pPart.remove();
       // --- Autres gestes : TOUT l'ancien contenu de controls et de la rangée d'actions, sauf « Commencer à cuisiner » et « Corriger » (qui y reste aussi) ; pas l'Export
       const boutonsDetails = textes(details, 'button, a');
@@ -830,25 +831,25 @@ export async function runCarnetTests({ eq, ok }) {
       // --- Repères (B-I-6) : « {n} portions · {durée} », chaque partie si connue, UN nombre, portions de la VERSION
       const R = (over) => texteReperes({ ...version('x'), ...over });
       eq([R({ servings: 4, total_minutes: 35 }), R({ servings: 1, total_minutes: null, prep_minutes: 20, cook_minutes: 70 }), R({ servings: 4, total_minutes: null }), R({ servings: null, total_minutes: 35 }), R({ servings: null, total_minutes: null }), R({ servings: 2, total_minutes: 80, prep_minutes: 20, cook_minutes: 60 })],
-        ['4 portions · 35 min', '1 portion · 1 h 30', '4 portions', '35 min', null, '2 portions · 1 h 20'], 'texteReperes : n ≥ 2 et durée → « {n} portions · {d} » ; « 1 portion » ; une seule partie connue ; rien → null ; total_minutes gagne sur prep + cook');
+        ['4 portions', '1 portion', '4 portions', null, null, '2 portions'], 'Lot visuel : texteReperes ne donne que les portions ; aucune durée culinaire ne contourne le lecteur partagé');
       eq([R({ servings: '4', total_minutes: 35 }), R({ servings: 0, total_minutes: 35 }), R({ servings: 4, total_minutes: -5 }), R({ servings: 4, total_minutes: 'x' }), texteReperes(null), dureeVersion({ kind: 'synthesis', total_minutes: 30, provenance: { generated_by: 'ai', creation: { demande: 'x' } } }), dureeVersion({ kind: 'extraction', total_minutes: null, prep_minutes: 0, cook_minutes: 0 })],
-        ['35 min', '35 min', '4 portions', '4 portions', null, '', ''], 'texteReperes / dureeVersion : portions non entières ou nulles ignorées ; durée négative, illisible ou nulle ignorée ; version nulle → null ; une création IA n’a pas de durée ici (C-6)');
+        [null, null, '4 portions', '4 portions', null, '', ''], 'texteReperes / dureeVersion : portions non entières ou nulles ignorées ; durée négative, illisible ou nulle ignorée ; version nulle → null ; une création IA n’a pas de durée ici (C-6)');
       // Hors brief (EI-T3-1, survivant M18) : la fixture dictée « total 80 = 20 + 60 » ne distinguait pas « total d'abord » de « prep + cook d'abord ».
       // Ronde 1 (rien d'inventé) : une préparation connue et une cuisson INCONNUE ne font pas une durée de recette ; une cuisson nulle (0) est connue.
       eq([R({ servings: 4, total_minutes: null, prep_minutes: 20, cook_minutes: null }), R({ servings: 4, total_minutes: null, prep_minutes: null, cook_minutes: 25 }), dureeVersion({ kind: 'extraction', total_minutes: null, prep_minutes: 15, cook_minutes: 0 })],
-        ['4 portions', '4 portions', '15 min'], 'texteReperes / dureeVersion : préparation seule ou cuisson seule → aucune durée (jamais « 4 portions · 20 min » avec une cuisson inconnue) ; préparation 15 + cuisson 0 → 15 min');
-      eq([R({ servings: 2, total_minutes: 45, prep_minutes: 20, cook_minutes: 60 }), dureeVersion({ kind: 'extraction', total_minutes: 45, prep_minutes: 20, cook_minutes: 60 })], ['2 portions · 45 min', '45 min'],
+        ['4 portions', '4 portions', ''], 'texteReperes / dureeVersion : préparation seule ou cuisson seule → aucune durée (jamais « 4 portions · 20 min » avec une cuisson inconnue) ; préparation 15 + cuisson 0 ne devient pas un total');
+      eq([R({ servings: 2, total_minutes: 45, prep_minutes: 20, cook_minutes: 60 }), dureeVersion({ kind: 'extraction', total_minutes: 45, prep_minutes: 20, cook_minutes: 60 })], ['2 portions', '45 min'],
         'texteReperes / dureeVersion : total_minutes GAGNE sur prep + cook même quand ils diffèrent (45 contre 20 + 60 = 80)');
       await mettre(fiche('rc_r1'), fiche('rc_r2'), fiche('rc_r3'));
       await versions(version('rc_r1', { servings: 1, total_minutes: null, prep_minutes: 20, cook_minutes: 70 }), version('rc_r2', { servings: 4, total_minutes: null }), version('rc_r3', { servings: null, total_minutes: null }));
       scene.replaceChildren();
       const pR0 = await monter('rc_t3', fauxMatchMedia(true)); const pR1 = await monter('rc_r1', fauxMatchMedia(true)); const pR2 = await monter('rc_r2', fauxMatchMedia(true)); const pR3 = await monter('rc_r3', fauxMatchMedia(true));
       const reperes = (p) => q(p, '[data-role="reperes"]')?.textContent ?? null;
-      eq([reperes(pR0), reperes(pR1), reperes(pR2), reperes(pR3), /\b(actif|total)\b/.test(q(pR0, '[data-role="fiche-gestes"]').textContent), q(pR0, '[data-role="fiche-gestes"]').contains(q(pR0, '[data-role="reperes"]')), /total 35 min/.test(sectionPlain(pR0, 'Ingrédients').textContent)],
-        ['4 portions · 35 min', '1 portion · 1 h 30', '4 portions', null, false, true, true], 'fiche T3 : div.reperes dans les gestes de tête — « 4 portions · 35 min », « 1 portion · 1 h 30 », « 4 portions » seul, rien sans portions ni durée ; jamais la paire « actif · total », qui reste dans l’en-tête d’Ingrédients (timeText)');
+      eq([reperes(pR0), reperes(pR1), reperes(pR2), reperes(pR3), /\b(actif|total)\b/.test(q(pR0, '[data-role="fiche-gestes"]').textContent), q(pR0, '[data-role="fiche-gestes"]').contains(q(pR0, '[data-role="reperes"]')), /durée enregistrée 35 min/.test(sectionPlain(pR0, 'Ingrédients').textContent)],
+        ['4 portions', '1 portion', '4 portions', null, false, true, true], 'fiche T3 : div.reperes dans les gestes de tête indique seulement les portions ; le lecteur partagé nomme la durée ancienne « durée enregistrée »');
       scene.replaceChildren();
       const pRq = await monter('rc_t3', fauxMatchMedia(true), { servings: '8' });
-      eq([reperes(pRq), q(pRq, '#servings-val')?.textContent, titreSection(sectionPlain(pRq, 'Ingrédients'))], ['4 portions · 35 min', '8', 'Ingrédients — recalculés pour 8 portions'], 'fiche T3 : ?servings=8 recalcule les lignes (titre d’Ingrédients, −/+) mais les repères disent la version (une donnée, jamais la valeur du −/+)');
+      eq([reperes(pRq), q(pRq, '#servings-val')?.textContent, titreSection(sectionPlain(pRq, 'Ingrédients'))], ['4 portions', '8', 'Ingrédients — recalculés pour 8 portions'], 'fiche T3 : ?servings=8 recalcule les lignes (titre d’Ingrédients, −/+) mais les repères disent la version (une donnée, jamais la valeur du −/+)');
       // --- « Voir la page d’origine » (D-UI-10, I-B5) : lien texte, sur toute adresse lisible, http compris ; même data-role sur la fiche et le bloc du signet
       await mettre(fiche('rc_http', { source_url: 'http://site.test/r' })); await versions(version('rc_http'));
       const pH = await monter('rc_http', fauxMatchMedia(true));
@@ -872,7 +873,7 @@ export async function runCarnetTests({ eq, ok }) {
       await versions(version('rc_lu', { provenance: { source_page_ids: [], generated_by: 'ai', model: null, edition_id: null, convention_snapshot: null, import_id: 'imp_lu', lu_le: DATE, source_url: 'https://site.test/lu', url_finale: 'https://site.test/lu', source_kind: 'jsonld', site: 'Le site' } }));
       const pLu = await renderRecipe({ id: 'rc_lu' }, {}, await ctxPour(), { matchMedia: fauxMatchMedia(true).matchMedia });
       eq([[...(q(pLu, '[data-role="fiche-etat"]')?.children ?? [])].map((c) => c.dataset.role ?? c.className), q(pLu, '[data-role="fiche-etat"]')?.children?.[1]?.querySelector('[data-role="etat-verification"]') !== null],
-        [['stack', 'row', 'bandeau-web', 'bandeau-lecture', 'notes-personnelles'], true], 'fiche T3 / I2 : les bandeaux restent dans l’état de l’en-tête après le titre et les états ; Mes notes les suit');
+        [['stack', 'row', 'resume-reperes detail', 'bandeau-web', 'bandeau-lecture'], true], 'fiche T3 / I2 : les bandeaux restent dans l’état de l’en-tête après le titre et les états ; Mes notes les suit');
       // --- Le sous-titre reste provenanceText (R-UI-P2) : « Du web · » / « De mon livre · » sont les préfixes de la CARTE-PLAT (ligneSource, T2), pas de la fiche — tests/creer-ia.js:1397 épingle « Mon livre — A. B. · page 58 » en header p.
       eq([q(pL, 'header p.muted')?.textContent, q(pH, 'header p.muted')?.textContent], ['Source personnelle', 'site.test'], 'fiche T3 : le sous-titre est provenanceText, inchangé — « Source personnelle » sans livre ni adresse, l’hôte RECALCULÉ pour une fiche web (R-UI-P2 ; § 4.2 amendé par T6)');
       // --- La photo en tête : dans la colonne photo, sans style en ligne (la feuille rend 8:5 pleine colonne)
@@ -923,7 +924,7 @@ export async function runCarnetTests({ eq, ok }) {
           return { pistesTete: S(tete).gridTemplateColumns.trim().split(/\s+/).length, photoADroite: rP.left >= rE.right - 1 && rP.left >= rG.right - 1, photoEntre: rE.bottom <= rP.top + 1 && rP.bottom <= rG.top + 1,
             photoLongeGestes: rP.top <= rE.top + 1 && rP.bottom > rG.top + 1, // EI-T3-2 : la photo couvre les DEUX rangées de gauche (zones), elle ne pousse pas les gestes sous elle
             chargee: img ? img.naturalWidth > 0 : null,
-            imgPleine: rI ? Math.abs(rI.width - rP.width) < 1 : null, ratio: rI ? Math.abs(rI.width / rI.height - 8 / 5) < 0.02 : null, objectFit: img ? S(img).objectFit : null,
+            imgPleine: rI ? Math.abs(rI.width - Math.min(rP.width, largeur < 760 ? 260 : 380)) < 1 : null, ratio: rI ? Math.abs(rI.width / rI.height - 1) < 0.02 : null, objectFit: img ? S(img).objectFit : null,
             onglets: S(q(p, '[data-role="onglets-corps"]')).display, prep: S(q(p, '[data-role="section-preparation"]')).display, pistesCorps: S(q(p, '[data-role="colonnes-corps"]')).gridTemplateColumns.trim().split(/\s+/).length,
             // Ronde 1 : l'écart entre l'état et les gestes (une pile, jamais un vide), la cible du summary (I-UI-4), la flèche du lien d'origine, le bouton seul plein.
             ecartEtatGestes: Math.round(rG.top - rE.bottom), summary: q(p, 'details[data-role="autres-gestes"] > summary').getBoundingClientRect().height, summaryDisplay: S(q(p, 'details[data-role="autres-gestes"] > summary')).display,
@@ -935,22 +936,22 @@ export async function runCarnetTests({ eq, ok }) {
       };
       const [ph1100, ph375, vide1100] = [await mesureFiche(1100, 'rc_ph'), await mesureFiche(375, 'rc_ph'), await mesureFiche(1100, 'rc_t3')];
       eq([ph1100.pistesTete, ph1100.photoADroite, ph1100.chargee, ph1100.imgPleine, ph1100.ratio, ph1100.objectFit, ph1100.onglets, ph1100.prep, ph1100.pistesCorps], [2, true, true, true, true, 'cover', 'none', 'block', 2],
-        'styles.css à 1100 px (D-UI-6) : .fiche-tete en deux colonnes, la photo à droite de l’état ET des gestes (grid-template-areas), l’image RÉELLE chargée (naturalWidth > 0, 640 × 480) rendue pleine colonne en 8:5 recadrée par la feuille ; segmented caché ([hidden]), les deux sections visibles, .recipe-body en deux colonnes (mesurés dans un cadre)');
+        'styles.css à 1100 px (D-UI-6) : .fiche-tete en deux colonnes, la photo à droite de l’état ET des gestes (grid-template-areas), l’image RÉELLE chargée (naturalWidth > 0, 640 × 480) rendue carrée, bornée à 380 px sur ordinateur et 260 px sur mobile recadrée par la feuille ; segmented caché ([hidden]), les deux sections visibles, .recipe-body en deux colonnes (mesurés dans un cadre)');
       // Hors brief (EI-T3-2, survivant C1b) : sans les zones, l'ordre du DOM (état, photo, gestes) met déjà la photo à droite de l'état ET des gestes —
       // mais sur la première rangée seulement : les gestes tombaient sous la photo. Les zones la font longer les deux rangées de la colonne de gauche.
       eq(ph1100.photoLongeGestes, true, 'styles.css à 1100 px (D-UI-6) : la photo occupe la colonne de droite sur les DEUX rangées (« etat photo » / « gestes photo ») — elle commence à la hauteur de l’état et longe les gestes (mesuré)');
       eq([ph375.pistesTete, ph375.photoEntre, ph375.chargee, ph375.imgPleine, ph375.ratio, ph375.onglets !== 'none', ph375.prep, ph375.pistesCorps], [1, true, true, true, true, true, 'none', 1],
-        'styles.css à 375 px (D-UI-6) : une colonne, la photo ENTRE l’état et les gestes (sous la provenance, maquette mobile), image réelle chargée, pleine largeur 8:5 ; segmented visible, Préparation cachée ([hidden]), une seule colonne de corps (mesurés)');
+        'styles.css à 375 px (D-UI-6) : une colonne, la photo ENTRE l’état et les gestes (sous la provenance, maquette mobile), image réelle chargée, carrée de 260 px sur mobile ; segmented visible, Préparation cachée ([hidden]), une seule colonne de corps (mesurés)');
       // Ronde 1 : la colonne de gauche est une PILE état → gestes (D-UI-6, § 4.2) — la hauteur en trop de la photo va à la rangée des gestes, jamais entre les deux.
       ok(ph1100.ecartEtatGestes >= 0 && ph1100.ecartEtatGestes < 24, `styles.css à 1100 px, avec photo : l’état et les gestes restent empilés (écart ${ph1100.ecartEtatGestes} px, attendu le gap de 16 px ; jamais le vide de la photo)`);
       const [http375, pe1100, pe375] = [await mesureFiche(375, 'rc_http'), await mesureFiche(1100, 'rc_pe'), await mesureFiche(375, 'rc_pe')];
       eq([ph375.summaryDisplay, ph1100.summaryDisplay], ['list-item', 'list-item'], 'fiche (revue du 28 octobre) : le summary de « autres gestes » reste un list-item — son triangle dit que le panneau replié s’ouvre (mesuré à 375 et 1100 px)');
-      eq([http375.ecartEtatGestes, http375.fleche, http375.boutonPlein, ph375.boutonPlein, ph375.summary >= 44, ph1100.summary >= 44],
-        [16, '" ↗"', true, true, true, true], 'styles.css à 375 px, fiche SANS photo : l’emplacement vide n’ajoute pas de second gap (état → gestes 16 px) ; la flèche « ↗ » du lien d’origine vient de la feuille ; seul (fiche vérifiée), « Commencer à cuisiner » remplit sa rangée ; le summary des autres gestes fait au moins 44 px (I-UI-4)');
+      eq([http375.photoEntre, http375.fleche, http375.boutonPlein, ph375.boutonPlein, ph375.summary >= 44, ph1100.summary >= 44],
+        [true, '" ↗"', true, true, true, true], 'styles.css à 375 px, fiche SANS photo : le geste Ajouter une photo reste entre l’état et les gestes de cuisine ; la flèche « ↗ » du lien d’origine vient de la feuille ; seul (fiche vérifiée), « Commencer à cuisiner » remplit sa rangée ; le summary des autres gestes fait au moins 44 px (I-UI-4)');
       eq([pe1100.chargee, pe1100.imgPleine, pe1100.ratio, pe375.chargee, pe375.imgPleine, pe375.ratio], [true, true, true, true, true, true],
-        'styles.css (D-UI-6) : une photo RÉELLE plus étroite que la colonne (240 × 180) est rendue pleine colonne en 8:5, à 1100 comme à 375 px (mesuré)');
+        'styles.css (D-UI-6) : une photo RÉELLE plus étroite que la colonne (240 × 180) est rendue carrée, bornée à 380 px sur ordinateur et 260 px sur mobile, à 1100 comme à 375 px (mesuré)');
       eq([ph1100.reperesRem, ph375.reperesRem], [1.05, 1.05], 'styles.css (§ 4.2) : les repères de la fiche (div.reperes) à 1,05 rem, à 1100 comme à 375 px (mesuré ; ronde 1 de T6 : une règle .reperes renommée rougit ici)');
-      eq([vide1100.pistesTete, vide1100.chargee, vide1100.imgPleine, vide1100.photoADroite], [1, null, null, false],'styles.css à 1100 px, fiche SANS photo : .fiche-tete:has(> .fiche-photo:empty) → une seule colonne (l’emplacement vide, display: contents, n’ouvre aucune piste implicite à droite ; vague finale : plus de zone « photo » morte en troisième rangée), aucune image (mesuré)');
+      eq([vide1100.pistesTete, vide1100.chargee, vide1100.imgPleine, vide1100.photoADroite], [2, null, null, true],'styles.css à 1100 px, fiche SANS photo : .fiche-tete:has(> .fiche-photo:empty) → deux colonnes pour conserver le geste Ajouter une photo à droite, aucune image (mesuré)');
       eq(reseau, 0, 'fiche T3 : aucun réseau');
     } finally { globalThis.fetch = vraiFetch; scene.remove(); setUiLocale(localeAvant); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
   }));
@@ -980,9 +981,9 @@ export async function runCarnetTests({ eq, ok }) {
     const ctx4 = async (db, over = {}) => {
       const [recipes, recipe_versions, source_pages, source_documents, scan_sessions, imports] = await Promise.all(['recipes', 'recipe_versions', 'source_pages', 'source_documents', 'scan_sessions', 'imports'].map((s) => db.getAll(s)));
       return { recipes, recipesById: new Map(recipes.map((r) => [r.id, r])), recipe_versions, source_pages, source_documents, scan_sessions, imports, rediscovery_prefs: [], book_editions: [EDITION4], books: [LIVRE4],
-        editionsById: new Map([['ed4', EDITION4]]), booksById: new Map([['b4', LIVRE4]]), docsByRecipe: new Map(), settings: {}, sync: {}, editionLabel: () => LIVRE4.title, ...over };
+        versionsByRecipe: new Map(recipes.map(r => [r.id, recipe_versions.filter(v => v.recipe_id === r.id)])), editionsById: new Map([['ed4', EDITION4]]), booksById: new Map([['b4', LIVRE4]]), docsByRecipe: new Map(), settings: {}, sync: {}, editionLabel: () => LIVRE4.title, ...over };
     };
-    const sectionDe = (racine, titre) => [...racine.querySelectorAll('section')].find((s) => s.querySelector('h2')?.textContent === titre) ?? null;
+    const sectionDe = (racine, titre) => titre === 'Les recettes de ce livre' ? racine.querySelector('[data-role="compte-recettes"]')?.closest('section') ?? null : [...racine.querySelectorAll('section')].find((s) => s.querySelector('h2')?.textContent === titre) ?? null;
     const lignes4 = (racine) => [...racine.querySelectorAll('ul.liste-compacte > li')];
     const titres4 = (racine) => lignes4(racine).map((li) => li.querySelector('a.titre')?.textContent);
     const bouton4 = (racine, texte) => [...racine.querySelectorAll('button')].find((b) => b.textContent === texte) ?? null;
@@ -1016,7 +1017,7 @@ export async function runCarnetTests({ eq, ok }) {
         ['Saisons gourmandes', true, 'A. Cuisinière · Flammarion Québec · 2004', '#/library?tab=books', '← Bibliothèque'],
         'T4 : h1.titre-fiche = le titre du livre ; sous-titre « {auteur} · {éditeur} · {année} », sans ISBN ni langue (H-21) ; retour « ← Bibliothèque » → #/library?tab=books (le segment Livres, d’où vient la fiche : R-UI-11, vague finale)');
       eq(menus.map((d) => [d.querySelector('summary')?.textContent, d.querySelector('summary')?.className, [...d.querySelectorAll('button, a')].map((b) => b.textContent)]),
-        [['Ajouter des pages de sommaire', 'btn primary', ['Photographier', 'Choisir des photos ou un PDF']], ['Ajouter des recettes', 'btn primary', ['Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main']]],
+        [['Ajouter', 'btn primary', ['Photographier', 'Choisir des photos ou un PDF', 'Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main']], ['Ajouter des pages de sommaire', 'btn primary', ['Photographier', 'Choisir des photos ou un PDF']], ['Ajouter des recettes', 'btn primary', ['Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main']]],
         'T4 : les deux details.menu-source gardent leur forme (summary.btn.primary, mêmes sources) et sont renommés « Ajouter des pages de sommaire », « Ajouter des recettes » (D-UI-10)');
       // EI-T4-a : la carte « Connecte-toi » du panneau d'index (div.status.warn[data-role=connexion-ia], inchangée) reste ; ronde 1 (constat 15) : toute AUTRE pastille
       // d'état (.status.ok / .warn / .info, quelle que soit sa balise) est comptée — des chips revenus en div ne passent plus.
@@ -1027,12 +1028,12 @@ export async function runCarnetTests({ eq, ok }) {
       const [gauche, droite] = [...(colonnes?.children || [])];
       const forme = (n) => n.tagName + ':' + [...n.classList].filter((c) => ['card', 'plain', 'cover-wrap'].includes(c)).join('.');
       eq([colonnes?.parentElement === fiche, colonnes?.children.length, [...(gauche?.children || [])].map(forme), [...(gauche?.children || [])].map((n) => n.querySelector(':scope > h2, :scope > summary > strong')?.textContent ?? null)],
-        [true, 2, ['A:cover-wrap', 'A:', 'SECTION:card', 'DETAILS:card', 'SECTION:plain', 'DETAILS:'], [null, null, 'Couverture', 'Métadonnées et convention', 'Sommaire', null]],
+        [true, 2, ['DIV:cover-wrap', 'A:', 'SECTION:card', 'DETAILS:card', 'DETAILS:'], [null, null, 'Couverture', 'Métadonnées et convention', null]],
         'T4 / I2 : deux colonnes ; gauche = couverture, complément du livre, Couverture, Métadonnées et convention, Sommaire, entrées d’index');
       eq([gauche?.children[1]?.textContent, gauche?.children[1]?.getAttribute('href')], ['Compléter les informations', '#/add/livre?edition=ed4'], 'I2 : le complément ouvre le formulaire de cette édition');
       const sources = sectionDe(fiche, 'Pages et fichiers sources');
-      eq([[...(droite?.querySelectorAll('section') || [])].map((s) => [forme(s), s.querySelector('h2')?.textContent]), forme(sources), sources?.parentElement === fiche, sources?.previousElementSibling === colonnes],
-        [[['SECTION:plain', 'Les recettes de ce livre']], 'SECTION:plain', true, true],
+      eq([[...(droite?.querySelectorAll('section') || [])].map((s) => [forme(s), s.querySelector('h2')?.textContent]), forme(sources), sources?.parentElement?.dataset.role, sources?.parentElement?.hidden],
+        [[['SECTION:plain', undefined]], 'SECTION:plain', 'pages-source', true],
         'T4 : droite = « Les recettes de ce livre » en section.plain ; « Pages et fichiers sources » en section.plain, en bas, juste après les deux colonnes');
       // Sommaire : les pages kind === 'index' seulement, dans l'ordre des pages imprimées, numérotées ; la page de recette reste dans « Pages et fichiers sources », sans numéro.
       const sommaire = sectionDe(fiche, 'Sommaire');
@@ -1081,7 +1082,7 @@ export async function runCarnetTests({ eq, ok }) {
         scan_sessions: [{ id: 'ss4', status: 'open', edition_id: 'ed4', started_at: DATE4, page_ids: ['pg10', 'pgI'], document_ids: [], created_at: DATE4, updated_at: DATE4 }] }), { matchMedia: mediaFactice(true) });
       const repriseDe = (f) => { const a = [...f.querySelectorAll('a')].find((x) => x.textContent === 'Reprendre la séance'); return a ? [a.getAttribute('href'), a.className, a.closest('section')?.querySelector('h2')?.textContent] : null; };
       eq([sectionDe(sans, 'Sommaire'), sectionDe(avecSeance, 'Sommaire'), repriseDe(avecSeance), [...avecSeance.querySelectorAll('a')].filter((a) => a.textContent === 'Reprendre').map((a) => a.getAttribute('href')), repriseDe(avecLecture), repriseDe(avecPageIndex)],
-        [null, null, null, ['#/import?session=ss4'], ['#/import?session=ss4', 'btn small', 'Sommaire'], ['#/import?session=ss4', 'btn small', 'Sommaire']],
+        [null, null, null, ['#/import?session=ss4'], ['#/import?session=ss4', 'btn', 'Pages source'], ['#/import?session=ss4', 'btn', 'Pages source']],
         'T4 (vague finale) : sans page d’index ni séance, pas de « Sommaire » ; une séance de recettes ouverte n’y paraît pas (le rappel « Reprendre » de droite reste, seul) ; une séance qui porte une lecture d’index ouverte ou une page d’index fait paraître « Sommaire » avec a.btn.small « Reprendre la séance » → #/import?session=<id>');
       // Ronde 1 (constat 9, spec § 4.3 « droite = rappels … puis Les recettes de ce livre ») : imports à reprendre, séance en cours et convention des tasses sont dans la
       // colonne de DROITE, avant la liste — sous 900 px, ils ne passent jamais au-dessus de la couverture ni entre elle et les métadonnées.
@@ -1098,7 +1099,7 @@ export async function runCarnetTests({ eq, ok }) {
       const nouvelle = await renderBook({ id: 'ed4' }, { nouveau: '1' }, await ctx4(db), { matchMedia: mediaFactice(true) });
       const accueil = nouvelle.querySelector('.accueil-livre');
       const sansEditeur = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { editionsById: new Map([['ed4', { ...EDITION4, publisher: null, year: null }]]) }), { matchMedia: mediaFactice(true) });
-      eq([!!accueil, accueil?.parentElement?.previousElementSibling?.tagName, accueil?.parentElement?.nextElementSibling?.classList.contains('livre'), sansEditeur.querySelector('header p.muted')?.textContent],
+      eq([!!accueil, accueil?.parentElement?.previousElementSibling?.tagName, accueil?.parentElement?.nextElementSibling?.classList.contains('onglets-livre'), sansEditeur.querySelector('header p.muted')?.textContent],
         [true, 'HEADER', true, 'A. Cuisinière'],
         'T4 : ?nouveau=1 → le panneau d’accueil entre l’en-tête et les deux colonnes (inchangé) ; sans éditeur ni année, le sous-titre ne porte que l’auteur (rien d’inventé)');
       // Vague finale (constat 2, R-UI-11 tranché) : « Plus tard » (« Aller à la bibliothèque. ») mène au segment Livres, où le livre qu'on vient de créer se voit
@@ -1164,26 +1165,26 @@ export async function runCarnetTests({ eq, ok }) {
       eq([lectures4.getMany, lectures4.get], [[[sha, H4('1'), H4('9')]], []],
         'T4 (ronde 1, I-UI-5) : UNE lecture groupée de files (db.getMany) portant exactement les trois pointeurs valides (rA, rB, rF), aucune lecture fiche par fiche');
       const liste = sectionDe(fiche, 'Les recettes de ce livre');
-      eq([liste?.querySelector('h2 + p.muted')?.textContent, liste?.querySelector('h2 + p.muted')?.dataset.role, titres4(fiche)],
+      eq([liste?.querySelector('[data-role="compte-recettes"]')?.textContent, liste?.querySelector('[data-role="compte-recettes"]')?.dataset.role, titres4(fiche)],
         ['4 disponible(s) · 1 à importer', 'compte-recettes', ['Bouillon', 'Compote', 'Tarte aux pommes', 'Fenouil rôti', 'Dahl', 'Escabèche']],
         'T4 : sous le titre, « {n} disponible(s) · {m} à importer » (disponibles = available + partial ; à importer = les références SANS adresse : le signet rangé ne compte pas) ; tri par page imprimée puis titre, sans page en dernier');
       const ligne = (titre) => lignes4(fiche).find((li) => li.querySelector('a.titre')?.textContent === titre);
       // Le portrait d'une ligne : classe, href du titre, vignette (présence, src blob:, alt), « p. N », sections, badge = availabilityBadge SANS la page (vague finale,
       // constats 5 et 10 : la page est dite une fois, par « p. N » à côté du titre — § 4.3 veut le badge « À importer » seul), gestes [texte, href], « ★ Favori ».
       const portrait = (titre) => { const li = ligne(titre); const r = recettes.find((x) => x.original_title === titre); const img = li?.querySelector('img');
-        return [li?.className, li?.querySelector('a.titre')?.getAttribute('href'), !!li?.querySelector('img.plat-vignette.petite'), img ? img.getAttribute('src')?.startsWith('blob:') : null, img ? img.getAttribute('alt') : null,
-          li?.querySelector('span.muted')?.textContent ?? null, [...(li?.querySelectorAll('.chip.neutral') || [])].map((c) => c.textContent), li?.querySelector('.badge')?.outerHTML === K.availabilityBadge({ ...r, printed_page: null }).outerHTML,
+        return [li?.className, li?.querySelector('a.titre')?.getAttribute('href'), !!li?.querySelector('.recette-miniature img.plat-vignette'), img ? img.getAttribute('src')?.startsWith('blob:') : null, img ? img.getAttribute('alt') : null,
+          li?.querySelector('span.muted')?.textContent ?? null, [...(li?.querySelectorAll('.chip.neutral') || [])].map((c) => c.textContent), li?.querySelector('[data-role="etat-recette"] > .badge')?.outerHTML === K.availabilityBadge({ ...r, printed_page: null }).outerHTML,
           [...(li?.querySelectorAll('a.btn.small') || [])].map((a) => [a.textContent, a.getAttribute('href')]), [...(li?.querySelectorAll('.badge') || [])].map((b) => b.textContent).includes('★ Favori')]; };
-      eq(portrait('Tarte aux pommes'), ['row between', '#/recipes/rA', true, true, '', 'p. 40', [], true, [], false],
-        'T4 (I-UI-5, D-F9) : octets JPEG ici → img.plat-vignette.petite, src blob:, alt vide, DÈS le rendu (décision synchrone sur la ligne files) ; « p. 40 » ; le badge est celui d’availabilityBadge ; aucun geste');
-      eq([portrait('Bouillon'), portrait('Fenouil rôti')], [['row between', '#/recipes/rB', false, null, null, 'p. 12', [], true, [], true], ['row between', '#/recipes/rF', false, null, null, 'p. 55', [], true, [], false]],
+      eq(portrait('Tarte aux pommes'), ['recette-ligne', '#/recipes/rA', true, true, '', 'p. 40', [], true, [['Modifier photo', '#/recipes/rA/photo']], false],
+        'T4 (I-UI-5, D-F9) : octets JPEG ici → .recette-miniature img.plat-vignette, src blob:, alt vide, DÈS le rendu (décision synchrone sur la ligne files) ; « p. 40 » ; le badge est celui d’availabilityBadge ; aucun geste');
+      eq([portrait('Bouillon'), portrait('Fenouil rôti')], [['recette-ligne', '#/recipes/rB', false, null, null, 'p. 12', [], true, [['Modifier photo', '#/recipes/rB/photo']], true], ['recette-ligne', '#/recipes/rF', false, null, null, 'p. 55', [], true, [['Modifier photo', '#/recipes/rF/photo']], false]],
         'T4 (I-UI-5) : une ligne files text/html, ou un pointeur sans ligne → AUCUNE image (ni cadre vide) ; « ★ Favori » sur la ligne du favori');
       eq([portrait('Compote'), portrait('Dahl')],
-        [['row between', '#/recipes/rC', false, null, null, 'p. 12', ['Desserts'], true, [['Importer', '#/recipes/rC/importer'], ['Saisir à la main', '#/recipes/rC/edit?kind=extraction']], false],
-          ['row between', '#/recipes/rD', false, null, null, 'p. 77', [], true, [['Importer', '#/recipes/rD/importer'], ['Saisir à la main', '#/recipes/rD/edit?kind=extraction']], false]],
+        [['recette-ligne', '#/recipes/rC', false, null, null, 'p. 12', ['Desserts'], true, [['Importer', '#/recipes/rC/importer'], ['Saisir à la main', '#/recipes/rC/edit?kind=extraction'], ['Ajouter photo', '#/recipes/rC/photo']], false],
+          ['recette-ligne', '#/recipes/rD', false, null, null, 'p. 77', [], true, [['Compléter', '#/recipes/rD/importer'], ['Saisir à la main', '#/recipes/rD/edit?kind=extraction'], ['Ajouter photo', '#/recipes/rD/photo']], false]],
         'T4 : référence sans adresse → section rognée en .chip.neutral, « Importer » et « Saisir à la main » (mêmes href qu’au lot A, T4-R1) ; partielle sans adresse → les deux gestes aussi, sans section (reference_only seulement)');
       eq([portrait('Escabèche'), fiche.querySelectorAll('a.titre .chip, a.titre .badge, a .btn, a [data-role="section"]').length],
-        [['row between', '#/recipes/rE', false, null, null, null, [], true, [], false], 0],
+        [['recette-ligne', '#/recipes/rE', false, null, null, null, [], true, [['Ajouter photo', '#/recipes/rE/photo']], false], 0],
         'T4 : un signet rangé dans le livre → badge « Lien web » (availabilityBadge), ni « Importer » ni « Saisir à la main », pas de « p. » ; aucun chip, badge ou bouton dans un <a>');
       // Filtres : chaque bouton redessine la liste ; le filtre actif est marqué ; « À importer » ne retient que les références sans adresse.
       const clic = (texte) => { bouton4(liste, texte).click(); return titres4(fiche); };
@@ -1202,19 +1203,19 @@ export async function runCarnetTests({ eq, ok }) {
       const ligneDirecte = B.ligneCompacte(recette4('rX', { photo_sha256: sha }), { fichier: { sha256: sha, mime: 'image/jpeg', blob: jpeg } });
       const ligneSansBlob = B.ligneCompacte(recette4('rY', { photo_sha256: sha }), { fichier: { sha256: sha, mime: 'image/jpeg', remote: null } });
       const lignePdf = B.ligneCompacte(recette4('rW', { photo_sha256: sha }), { fichier: { sha256: sha, mime: 'application/pdf', blob: new Blob(['%PDF-1.4'], { type: 'application/pdf' }) } });
-      eq([ligneDirecte.querySelector('img.plat-vignette.petite')?.getAttribute('src')?.startsWith('blob:'), ligneDirecte.querySelector('img')?.getAttribute('loading'), ligneSansBlob.querySelector('img'), lignePdf.querySelector('img'), B.ligneCompacte(recette4('rZ')).querySelector('img')],
+      eq([ligneDirecte.querySelector('.recette-miniature img.plat-vignette')?.getAttribute('src')?.startsWith('blob:'), ligneDirecte.querySelector('img')?.getAttribute('loading'), ligneSansBlob.querySelector('img'), lignePdf.querySelector('img'), B.ligneCompacte(recette4('rZ')).querySelector('img')],
         [true, 'lazy', null, null, null],
-        'ligneCompacte : octets d’un type d’image → img.plat-vignette.petite (loading lazy, src blob:) ; ligne sans blob, blob PDF (liste blanche, pas une image) ou fiche sans pointeur → aucune image');
+        'ligneCompacte : octets d’un type d’image → .recette-miniature img.plat-vignette (loading lazy, src blob:) ; ligne sans blob, blob PDF (liste blanche, pas une image) ou fiche sans pointeur → aucune image');
       // Ronde 1 (constats 20 et 23) : le titre affiché est display_title d'abord, « Sans titre » à défaut (jamais un lien vide, le repli de library.js) ; l'href est encodé ;
       // data-recette porte l'identifiant tel quel.
       const renommee = B.ligneCompacte(recette4('r é/1', { original_title: 'Ancien titre', display_title: 'Nouveau titre' }));
       const sansTitre = B.ligneCompacte(recette4('rT', { original_title: '' }));
       eq([renommee.querySelector('a.titre')?.textContent, renommee.querySelector('a.titre')?.getAttribute('href'), renommee.dataset.recette, sansTitre.querySelector('a.titre')?.textContent],
-        ['Nouveau titre', '#/recipes/r%20%C3%A9%2F1', 'r é/1', 'Sans titre'],
-        'ligneCompacte (ronde 1) : display_title gagne sur original_title ; un titre vide devient « Sans titre » ; l’href du titre encode l’identifiant ; li[data-recette] = l’identifiant');
+        ['Ancien titre', '#/recipes/r%20%C3%A9%2F1', 'r é/1', 'Sans titre'],
+        'ligneCompacte (ronde 1) : le titre original précède le titre personnalisé ; un titre vide devient « Sans titre » ; l’href du titre encode l’identifiant ; li[data-recette] = l’identifiant');
       // Vague finale (constats 5 et 10) : la page imprimée de la ligne suit la règle du badge (pageAffichable : un entier de 1 à 9999 — une fiche reçue ou restaurée
       // peut porter n'importe quoi) ; elle est dite UNE fois, par « p. N » (le badge court ne la répète pas).
-      const pageDe = (p) => { const li = B.ligneCompacte(recette4('rP', { availability: 'reference_only', printed_page: p })); return [li.querySelector('span.muted')?.textContent ?? null, li.querySelector('.badge')?.textContent]; };
+      const pageDe = (p) => { const li = B.ligneCompacte(recette4('rP', { availability: 'reference_only', printed_page: p })); return [li.querySelector('span.muted')?.textContent ?? null, li.querySelector('[data-role="etat-recette"] > .badge')?.textContent]; };
       eq([pageDe(132), pageDe('x'.repeat(100000)), pageDe('12'), pageDe(0), pageDe(10000), pageDe(12.5)],
         [['p. 132', 'À importer'], [null, 'À importer'], [null, 'À importer'], [null, 'À importer'], [null, 'À importer'], [null, 'À importer']],
         'ligneCompacte (vague finale) : « p. 132 » et le badge court « À importer » (page dite une fois) ; une page hostile — chaîne de 100 000 caractères, « 12 » en texte, 0, 10000, 12,5 — n’est pas affichée (la règle du badge, pageAffichable)');
@@ -1228,13 +1229,13 @@ export async function runCarnetTests({ eq, ok }) {
       const chips42 = [...(ligne42()?.querySelectorAll('.chip.neutral') || [])].map((c) => c.textContent);
       bouton4(liste42, 'À importer')?.click();
       eq([liste42?.querySelector('[data-role="compte-recettes"]')?.textContent, gestes42, chips42, titres4(fiche42)],
-        ['4 disponible(s) · 2 à importer', ['Importer', 'Saisir à la main'], ['Tartes'], ['Compote', 'Quiche']],
+        ['4 disponible(s) · 2 à importer', ['Importer', 'Saisir à la main', 'Ajouter photo'], ['Tartes'], ['Compote', 'Quiche']],
         'T4 (ronde 1) : une référence au source_url non-chaîne (42) est « à importer » partout dans la fiche — compteur, ligne (Importer, Saisir à la main, section), filtre « À importer »');
       // Ronde 1 (constat 3, D-F9, I-F6) : des octets admis (image/jpeg) que le navigateur ne décode pas → error : l'img est retirée, son URL blob: révoquée — jamais un
       // cadre de 48 px bordé avec l'icône d'image cassée (le motif de vignettePlat et de la carte-plat). « lazy » ne chargerait pas hors écran : le test passe en eager.
       const casse = new Blob([Uint8Array.of(0xff, 0xd8, 0xff, 0x00, 1, 2, 3, 4)], { type: 'image/jpeg' });
       const ligneCasse = B.ligneCompacte(recette4('rK', { photo_sha256: sha }), { fichier: { sha256: sha, mime: 'image/jpeg', blob: casse } });
-      const imgCasse = ligneCasse.querySelector('img.plat-vignette.petite'); const uCasse = imgCasse?.getAttribute('src');
+      const imgCasse = ligneCasse.querySelector('.recette-miniature img.plat-vignette'); const uCasse = imgCasse?.getAttribute('src');
       const sceneK = document.createElement('ul'); sceneK.style.cssText = 'position:absolute;left:-10000px;top:0;width:375px'; document.body.append(sceneK); sceneK.append(ligneCasse);
       try {
         await new Promise((resoudre, rejeter) => {
@@ -1313,7 +1314,7 @@ export async function runCarnetTests({ eq, ok }) {
       } finally { scene.remove(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
     })));
 
-    await bloc('T4 — styles.css servie : deux colonnes 200px 1fr ≥ 900 px, une colonne sous ; titre de ligne en serif ; vignette 48 × 48 (cadres de mesure)', () => withRepo(async (repo, db) => sansReseau('styles.css servie', async () => {
+    await bloc('T4 — styles.css servie : deux colonnes 200px 1fr ≥ 900 px, une colonne sous ; titre de ligne en serif ; vignette 78 × 78 (cadres de mesure)', () => withRepo(async (repo, db) => sansReseau('styles.css servie', async () => {
       const { renderBook } = await import('../src/ui/book.js');
       const jpeg = await jpegDe('#36c'); const sha = await sha256Hex(jpeg);
       await repo.putFile(sha, jpeg, { mime: 'image/jpeg', origin: 'device' });
@@ -1338,21 +1339,21 @@ export async function runCarnetTests({ eq, ok }) {
           const S = (n) => w.getComputedStyle(n);
           const colonnes = fiche.querySelector('.two-col.livre');
           const [gauche, droite] = [...colonnes.children].map((n) => n.getBoundingClientRect());
-          const titre = fiche.querySelector('a.titre'); const img = fiche.querySelector('img.plat-vignette.petite').getBoundingClientRect();
+          const titre = fiche.querySelector('a.titre'); const img = fiche.querySelector('.recette-miniature img.plat-vignette').getBoundingClientRect();
           const li = fiche.querySelector('ul.liste-compacte > li');
-          return { gauche: Math.round(gauche.width), coteACote: droite.left >= gauche.right - 1 && Math.abs(droite.top - gauche.top) < 2, empilee: droite.top >= gauche.bottom - 1,
+          return { gauche: Math.round(gauche.width), coteACote: droite.left >= gauche.right - 1 && Math.abs(droite.top - gauche.top) < 2, empilee: gauche.top >= droite.bottom - 1,
             serif: /georgia/i.test(S(titre).fontFamily), souligne: S(titre).textDecorationLine, vignette: [Math.round(img.width), Math.round(img.height)],
             grille: S(colonnes).gridTemplateColumns.trim().split(/\s+/).length, filet: S(li).borderBottomWidth, puce: S(fiche.querySelector('ul.liste-compacte')).listStyleType,
-            couverture: Math.round(fiche.querySelector('.two-col.livre > [data-role="colonne-livre"] > a.cover-wrap').getBoundingClientRect().width), // EI-T4-2
+            couverture: Math.round(fiche.querySelector('.two-col.livre > [data-role="colonne-livre"] > .cover-wrap').getBoundingClientRect().width), // EI-T4-2
             // Ronde 1 (constats 4 et 10, I-UI-4) : la cible de chaque titre (le seul geste qui ouvre la recette depuis la liste), la plus petite hauteur et largeur.
             cible: (() => { const r = [...fiche.querySelectorAll('ul.liste-compacte a.titre')].map((a) => a.getBoundingClientRect()); return [Math.round(Math.min(...r.map((x) => x.height))), Math.round(Math.min(...r.map((x) => x.width))), r.length]; })() };
         } finally { f.remove(); }
       };
       const [l1100, l800, l375] = [await mesurer(1100), await mesurer(800), await mesurer(375)];
-      eq([l1100.gauche, l1100.coteACote, l1100.grille, l1100.serif, l1100.souligne, l1100.vignette, l1100.filet, l1100.puce], [200, true, 2, true, 'none', [48, 48], '1px', 'none'],
-        'T4 (styles.css, 1100 px) : colonne de gauche 200 px, droite à côté (.two-col.livre 200px 1fr) ; titre de ligne en Georgia, sans soulignement ; vignette 48 × 48 (.plat-vignette.petite, T2) ; filet de 1 px sous la ligne ; aucune puce de liste');
-      eq([l800.empilee, l800.grille, l375.empilee, l375.grille, l375.vignette], [true, 1, true, 1, [48, 48]],
-        'T4 (styles.css, 800 et 375 px) : une seule colonne, gauche puis droite (la fiche livre ne prend pas le 1fr 1fr de .two-col à 760 px) ; la vignette reste 48 × 48');
+      eq([l1100.gauche, l1100.coteACote, l1100.grille, l1100.serif, l1100.souligne, l1100.vignette, l1100.filet, l1100.puce], [200, true, 2, true, 'none', [78, 78], '1px', 'none'],
+        'T4 (styles.css, 1100 px) : colonne de gauche 200 px, droite à côté (.two-col.livre 200px 1fr) ; titre de ligne en Georgia, sans soulignement ; vignette 78 × 78 (.plat-vignette.petite, T2) ; filet de 1 px sous la ligne ; aucune puce de liste');
+      eq([l800.empilee, l800.grille, l375.empilee, l375.grille, l375.vignette], [true, 1, true, 1, [78, 78]],
+        'T4 (styles.css, 800 et 375 px) : une seule colonne, gauche puis droite (la fiche livre ne prend pas le 1fr 1fr de .two-col à 760 px) ; la vignette reste 78 × 78');
       // EI-T4-2 : la couverture de la fiche garde ≈ 200 px (D-UI-7) quand les colonnes s'empilent — jamais la largeur de l'écran (avant T4 : 96 px à côté du titre).
       eq([l1100.couverture, l800.couverture, l375.couverture], [200, 200, 200], 'T4 (EI-T4-2, styles.css) : la couverture de la colonne de gauche mesure 200 px de large à 1100, 800 et 375 px (D-UI-7 « bookCover ≈ 200 px »)');
       eq([l1100, l800, l375].map((l) => [l.cible[0] >= 44, l.cible[1] >= 44, l.cible[2]]), [[true, true, 2], [true, true, 2], [true, true, 2]],
@@ -1364,7 +1365,7 @@ export async function runCarnetTests({ eq, ok }) {
       const css = (await (await fetch(new URL('../styles.css', import.meta.url), { cache: 'no-store' })).text()).replace(/\/\*[\s\S]*?\*\//g, '');
       const regles = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => [m[1].trim(), m[2]]).filter(([s]) => s.includes('.liste-compacte'));
       const decl = (sel) => regles.find(([s]) => s === sel)?.[1] ?? '';
-      eq(regles.map(([s]) => s), ['.liste-compacte', '.liste-compacte > li', '.liste-compacte > li:last-child', '.liste-compacte .titre', '.liste-compacte .titre:hover'], 'styles.css : les cinq règles .liste-compacte, dans cet ordre, et aucune autre');
+      eq(regles.map(([s]) => s), ['.liste-compacte', '.liste-compacte > li', '.liste-compacte > li:last-child', '.liste-compacte .titre', '.liste-compacte .titre:hover', '.liste-compacte > .recette-ligne', '.fiche-livre .liste-compacte'], 'styles.css : les cinq règles .liste-compacte, dans cet ordre, et aucune autre');
       ok(/list-style:\s*none/.test(decl('.liste-compacte')) && /border-bottom:\s*1px solid var\(--line\)/.test(decl('.liste-compacte > li')) && /border-bottom:\s*0/.test(decl('.liste-compacte > li:last-child')) && /font-family:\s*var\(--serif\)/.test(decl('.liste-compacte .titre')) && /color:\s*var\(--ink\)/.test(decl('.liste-compacte .titre')) && /text-decoration:\s*none/.test(decl('.liste-compacte .titre')),
         'styles.css : filets fins --line entre les lignes, titre en --serif / --ink sans soulignement (jetons seulement)');
       const survol = [...css.matchAll(/@media\s*\(hover:\s*hover\)\s*\{\s*([^{}]+)\{/g)].map((m) => m[1].trim());
@@ -1378,11 +1379,11 @@ export async function runCarnetTests({ eq, ok }) {
       const { EN } = await import('../src/i18n/en.js');
       const { CHAINES_NEUVES_AILLEURS } = await import('./ajouter.js');
       ok(src.length > 3000 && /export async function renderBook\(params, query, ctx, deps = \{\}\)/.test(src), `book.js : le source est lu (${src.length} caractères) et renderBook prend deps`);
-      const NEUVES = ['Ajouter des recettes', 'Ajouter des pages de sommaire', 'Sommaire', 'Reprendre la séance', 'Les recettes de ce livre', '{n} disponible(s) · {m} à importer', 'À importer', 'Voir les {n} recettes'];
+      const NEUVES = ['Ajouter des recettes', 'Ajouter des pages de sommaire', 'Sommaire', 'Reprendre la séance', 'Recettes', '{n} disponible(s) · {m} à importer', 'À importer', 'Voir les {n} recettes'];
       const RETIREES = ['+ Recette', '+ Pages d’index', 'Repérées', '{n} recette(s) disponible(s)', '{n} repérée(s) dans l’index', '{n} page(s) source'];
       eq([NEUVES.filter((c) => !src.includes(`t('${c}'`)), RETIREES.filter((c) => src.includes(`'${c}'`))], [[], []], 'book.js : chaque chaîne neuve est posée par t(), aucune chaîne retirée ne subsiste');
       eq([NEUVES.map((c) => EN[c]), RETIREES.slice(0, 2).map((c) => c in EN), EN['Disponibles']],
-        [['Add recipes', 'Add table-of-contents pages', 'Table of contents', 'Resume the session', 'The recipes in this book', '{n} available · {m} to import', 'To import', 'Show all {n} recipes'], [false, false], 'Available'],
+        [['Add recipes', 'Add table-of-contents pages', 'Table of contents', 'Resume the session', 'Recipes', '{n} available · {m} to import', 'To import', 'Show all {n} recipes'], [false, false], 'Available'],
         'en.js : les traductions de la spec § 5 (et « Reprendre la séance », « Disponibles » au passage) ; « + Recette » et « + Pages d’index » ont quitté le dictionnaire');
       const filet = CHAINES_NEUVES_AILLEURS['../src/ui/book.js'];
       eq([NEUVES.filter((c) => !filet.includes(c)), RETIREES.slice(0, 2).filter((c) => filet.includes(c))], [[], []], 'CHAINES_NEUVES_AILLEURS (book.js) : porte les chaînes neuves, plus « + Recette » ni « + Pages d’index »');
@@ -1458,30 +1459,30 @@ export async function runCarnetTests({ eq, ok }) {
             ['Qu’est-ce qu’on cuisine ?', 'Cherche une recette, un ingrédient, une envie.', 0, false, false, true, true, 'Qu’est-ce qu’on cuisine ?', true, 4],
             'Aujourd’hui : pageHeader (titre, sous-titre § 5) puis .search-bar hors de toute .card (plus de .card.sage), puis les quatre puces d’exemple hors de toute carte ; « Chercher » reste primaire, le placeholder est inchangé');
           const favoris = sectionNommee(root, 'Favoris'); const grilleF = favoris?.querySelector('.grille-plats');
-          const cartesF = [...(grilleF?.querySelectorAll('a.item-link.carte-plat') || [])];
-          const parHref = (cartes, id) => cartes.find((c) => c.getAttribute('href') === `#/recipes/${id}`) || null;
+          const cartesF = [...(grilleF?.querySelectorAll('article.item-link.carte-plat') || [])];
+          const parHref = (cartes, id) => cartes.find((c) => c.querySelector('h3 a')?.getAttribute('href') === `#/recipes/${id}`) || null;
           const avecPhoto = parHref(cartesF, 'rc_f1'); const sansOctets = parHref(cartesF, 'rc_f2');
-          eq([favoris?.className, cartesF.length, !!avecPhoto?.querySelector('img.plat-vignette.grande'), avecPhoto?.querySelector('img.plat-vignette.grande')?.getAttribute('src')?.startsWith('blob:'), avecPhoto?.classList.contains('sans-photo'), sansOctets?.classList.contains('sans-photo'), sansOctets?.querySelectorAll('img').length, favoris?.querySelectorAll('a.item-link.card').length],
-            ['plain', 2, true, true, false, true, 0, 0],
-            'Favoris : section.plain > div.grille-plats de cartes-plat ; octets ici → img.plat-vignette.grande en blob: (décision synchrone) ; pointeur sans octets → .sans-photo sans aucune img (I-UI-5) ; aucune carte horizontale');
-          eq([appels.length, appels[0] ? [...appels[0]].sort() : null, [...lectures].sort()], [1, [H('b'), sha].sort(), [H('b'), sha].sort()],
+          eq([favoris?.className, cartesF.length, !!avecPhoto?.querySelector('.carte-photo img.plat-vignette'), avecPhoto?.querySelector('.carte-photo img.plat-vignette')?.getAttribute('src')?.startsWith('blob:'), avecPhoto?.classList.contains('sans-photo'), sansOctets?.classList.contains('sans-photo'), sansOctets?.querySelectorAll('img').length, favoris?.querySelectorAll('a.item-link.card').length],
+            ['plain', 2, true, true, false, false, 0, 0],
+            'Favoris : section.plain > div.grille-plats de cartes-plat ; octets ici → .carte-photo img.plat-vignette en blob: (décision synchrone) ; pointeur sans octets → .sans-photo sans aucune img (I-UI-5) ; aucune carte horizontale');
+          eq([appels.length, appels[0] ? [...appels[0]].sort() : null, [...new Set(lectures)].sort()], [1, [H('b'), sha].sort(), [H('b'), sha].sort()],
             'Aujourd’hui : UNE passe repo.getFiles, sur les empreintes des cartes RENDUES seulement (rc_f1 et rc_f2 ; rc_x, ni favorite ni cuisinée, n’est jamais lue) , dédoublonnées par l’écran (rc_f1, favorite ET cuisinée, une fois) ; sur l’instance de base, exactement ces lectures files — aucune carte ne relit son fichier (D-UI-5, F-3, I-UI-5 ; T5 ronde 1)');
           const cuissons = sectionNommee(root, 'Dernières cuissons');
           const cellules = [...(cuissons?.querySelectorAll('.grille-plats .cellule-cuisson') || [])];
-          const celluleDe = (id) => cellules.find((c) => c.querySelector('a.carte-plat')?.getAttribute('href') === `#/recipes/${id}`) || null;
+          const celluleDe = (id) => cellules.find((c) => c.querySelector('article.carte-plat h3 a')?.getAttribute('href') === `#/recipes/${id}`) || null;
           const refaire = (cell) => [...(cell?.querySelectorAll('a.btn') || [])].find((a) => a.textContent === 'Refaire comme la dernière fois') || null;
-          const c1 = celluleDe('rc_c1'); const carte1 = c1?.querySelector('a.carte-plat'); const date1 = c1?.querySelector('.cuisson-date'); const r1 = refaire(c1);
+          const c1 = celluleDe('rc_c1'); const carte1 = c1?.querySelector('article.carte-plat'); const date1 = c1?.querySelector('.cuisson-date'); const r1 = refaire(c1);
           eq([cuissons?.className, cellules.length, !!carte1, !!date1 && !carte1.contains(date1), !!r1 && !carte1.contains(r1), date1?.textContent, r1?.getAttribute('href'), r1?.className, avant(carte1, date1), avant(date1, r1)],
             ['plain', 2, true, true, true, `${formatDate('2026-10-22T18:00:00.000Z')} · ★★`, '#/recipes/rc_c1?v=rv_rc_c1&servings=2', 'btn small', true, true],
             'Dernières cuissons : section.plain > grille de 2 cellules (la cuisson d’une fiche inconnue n’est pas rendue) ; la date (★★) puis « Refaire comme la dernière fois » (même href qu’avant) sont HORS du <a> de la carte, sous elle, dans la cellule (§ 4.4, H-16)');
           const c2 = celluleDe('rc_f1');
-          eq([c2?.querySelector('.cuisson-date')?.textContent, !!c2?.querySelector('a.carte-plat img.plat-vignette.grande'), refaire(c2)?.getAttribute('href')],
+          eq([c2?.querySelector('.cuisson-date')?.textContent, !!c2?.querySelector('article.carte-plat .carte-photo img.plat-vignette'), refaire(c2)?.getAttribute('href')],
             [`${formatDate('2026-10-21T18:00:00.000Z')} · à ne pas refaire`, true, '#/recipes/rc_f1?v=rv_rc_f1&servings=4'],
             'Dernières cuissons : « à ne pas refaire » sur la date ; la carte-plat d’une cuisson porte sa photo (la même passe getFiles sert favoris et cuissons)');
           // T5 ronde 1 (feuille servie) : la barre est suivie de 1,6 rem ; dans une rangée de cuissons, la carte s'étire (.cellule-cuisson > .carte-plat { flex: 1 }) —
           // cartes de même hauteur et dates alignées, la carte à photo étant de nature plus haute que la carte sans photo.
           const rem = parseFloat(getComputedStyle(document.documentElement).fontSize); const boite = (n) => n.getBoundingClientRect();
-          const carte2 = c2?.querySelector('a.carte-plat'); const date2 = c2?.querySelector('.cuisson-date'); const [h1c, h2c] = [boite(carte1).height, boite(carte2).height];
+          const carte2 = c2?.querySelector('article.carte-plat'); const date2 = c2?.querySelector('.cuisson-date'); const [h1c, h2c] = [boite(carte1).height, boite(carte2).height];
           ok(Math.abs(parseFloat(getComputedStyle(root.querySelector('.recherche-accueil')).marginBottom) - 1.6 * rem) < 0.5 && h2c > 100 && Math.abs(h1c - h2c) < 1 && Math.abs(boite(date1).top - boite(date2).top) < 1,
             `Aujourd’hui (feuille servie) : .recherche-accueil suivie de 1,6 rem ; cartes de cuisson de même hauteur (${Math.round(h1c)} / ${Math.round(h2c)} px), dates alignées (.cellule-cuisson > .carte-plat { flex: 1 })`);
           eq([sectionNommee(root, 'Reprendre ma recette')?.className, !!sectionNommee(root, 'Reprendre ma recette')?.querySelector('a.item-link.card.flat[href="#/cook/cs1"]'), sectionNommee(root, 'À utiliser en priorité')?.className, !!sectionNommee(root, 'À utiliser en priorité')?.querySelector('a.btn.small[href="#/kitchen?tab=inventory"]'), sectionNommee(root, 'Bienvenue')],
@@ -1495,7 +1496,7 @@ export async function runCarnetTests({ eq, ok }) {
           const bizarre = fiche('rc_z', { favorite: true, photo_sha256: 'pas-une-empreinte' });
           const docsZ = buildDocs({ recipes: [bizarre], versions: [version('rc_z')], editions: [], books: [], dishes: [], links: [], translations: [], history: [] });
           const rz = await renderHome({}, {}, { ...ctx, recipes: [bizarre], docs: docsZ, docsByRecipe: new Map(docsZ.map((d) => [d.recipe.id, d])), cook_sessions: [], cook_history: [], inventory: [] }, { repo: depot2 });
-          eq([appels2.length, rz.querySelectorAll('.grille-plats a.carte-plat.sans-photo').length, rz.querySelectorAll('img').length], [0, 1, 0],
+          eq([appels2.length, rz.querySelectorAll('.grille-plats article.carte-plat.sans-photo').length, rz.querySelectorAll('img').length], [0, 1, 0],
             'Aujourd’hui : un pointeur photo qui n’est pas une empreinte n’est pas lu (aucun getFiles) et la carte reste sans photo (pointeurValide, EI-T5-2)');
           // T5 ronde 1 : Redécouvrir écrit par le sac injecté (le même que getFiles), jamais par le module en dehors de lui.
           const ecrits = []; const depot3 = { ...repo, getFiles: async () => new Map(), save: async (store, row) => { ecrits.push(store); return repo.save(store, row); } };
@@ -1745,8 +1746,8 @@ export async function runCarnetTests({ eq, ok }) {
       'À importer': 'To import', 'À importer · p. {p}': 'To import · p. {p}', 'Disponible': 'Available', 'Disponibles': 'Available', 'Partielle': 'Partial',
       'De mon livre': 'From my book', // fidélité aux maquettes (28 octobre) : les deux lignes de source à hôte / titre deviennent « Du web » et « De mon livre »
       'Voir la page d’origine': 'View the original page', 'Portions, versions et autres gestes': 'Servings, versions and more',
-      'Les recettes de ce livre': 'The recipes in this book', '{n} disponible(s) · {m} à importer': '{n} available · {m} to import', 'Voir les {n} recettes': 'Show all {n} recipes',
-      'Ajouter des recettes': 'Add recipes', 'Ajouter des pages de sommaire': 'Add table-of-contents pages', 'Sommaire': 'Table of contents',
+      '{n} disponible(s) · {m} à importer': '{n} available · {m} to import', 'Voir les {n} recettes': 'Show all {n} recipes',
+      'Ajouter des recettes': 'Add recipes', 'Ajouter des pages de sommaire': 'Add table-of-contents pages', 'Sommaire': 'Table of contents', 'Pages source': 'Source pages',
       'Cherche une recette, un ingrédient, une envie.': 'Search a recipe, an ingredient, a craving.', 'Aucune recette pour l’instant.': 'No recipes yet.',
       'Reprendre la séance': 'Resume the session', '{n} à importer': '{n} to import', 'Page {n} · p. {p}': 'Page {n} · p. {p}',
     };
@@ -1799,7 +1800,7 @@ export async function runCarnetTests({ eq, ok }) {
     // Les EMPLOIS se lisent sans commentaires (constat 20) ; l'inventaire des clés sans entrée lit le source brut (plus strict : une clé commentée y compte).
     const parModule = Object.fromEntries(MODULES_UI1.map((m) => [m, new Set(clesDe(sansCommentairesT6(sources[m])))]));
 
-    eq(Object.keys(TEXTES_UI1).length, 30, 'T6 i18n : la table elle-même compte 30 paires (31 avant la fidélité aux maquettes : deux lignes de source remplacées par « De mon livre ») — 27 de la spec § 5 (UI-1), quatre hors table (garde de la TABLE contre une ligne effacée ; NON ÉPROUVÉE : aucun changement de src/ ni d’en.js ne la fait rougir, elle compte dans l’épingle comme F-4 du lot assistant)');
+    eq(Object.keys(TEXTES_UI1).length, 30, 'T6 i18n : la table compte 30 paires (lot visuel : ancien titre des recettes remplacé par « Pages source ») — 27 de la spec § 5 (UI-1), quatre hors table (garde de la TABLE contre une ligne effacée ; NON ÉPROUVÉE : aucun changement de src/ ni d’en.js ne la fait rougir, elle compte dans l’épingle comme F-4 du lot assistant)');
     eq(Object.entries(TEXTES_UI1).filter(([fr, en]) => EN[fr] !== en).map(([fr]) => fr), [], 'T6 i18n : chaque texte neuf de la table (27 de la spec § 5 UI-1, quatre hors table) a son entrée en.js, à l’anglais exact de la table');
     eq(CLES_REEMPLOYEES.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'T6 i18n : les clés réemployées (Corriger, Ingrédients, Préparation, Ajouter un livre, Favoris, Mes livres, Livres, Plats, 1 portion, {n} portions) gardent une entrée');
     eq([EN['Corriger'], EN['Mes livres'], EN['1 portion'], EN['{n} portions']], ['Fix', 'My books', '1 serving', '{n} servings'], 'T6 i18n : « Corriger » reste « Fix » (H-14), « Mes livres » reste « My books » (le segment de la recherche, D-UI-4) ; les deux clés antérieures des repères gardent « 1 serving » et « {n} servings » (R-UI-41)');
@@ -1838,7 +1839,7 @@ export async function runCarnetTests({ eq, ok }) {
     const jetonT6 = (s) => new RegExp((/^[\w-]/.test(s) ? '(?<![\\w-])' : '') + echapperT6(s) + '(?![\\w-])');
     const present = (s) => [s, s.replace('=autres-gestes]', '="autres-gestes"]')].some((f) => selecteurs.some((sel) => sel.split(',').some((part) => jetonT6(f).test(part.trim()))));
     eq(SELECTEURS_UI1.filter((s) => !present(s)), [], 'T6 I-UI-4 : les treize sélecteurs neufs du lot (spec § 3.3, § 4) existent dans styles.css, chacun comme un jeton entier (ni suffixe ni préfixe)');
-    eq([...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].trim()).filter((s) => /\.plat-vignette\b/.test(s)), ['.plat-vignette', '.plat-vignette.grande', '.plat-vignette.petite'], 'T6 § 3.3 : exactement trois sélecteurs nomment .plat-vignette, dans cet ordre (72 px, grande 4:3, petite 48 px) — doublon de tests/photo-plat.js : filet de clôture');
+    eq([...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].trim()).filter((s) => /\.plat-vignette\b/.test(s)), ['.plat-vignette', '.plat-vignette.grande', '.plat-vignette.petite', '.photo-visible img.plat-vignette'], 'T6 § 3.3 : exactement trois sélecteurs nomment .plat-vignette, dans cet ordre (72 px, grande 4:3, petite 48 px) — doublon de tests/photo-plat.js : filet de clôture');
   } catch (e) { ok(false, `T6 filets : bloc interrompu — ${e?.message || String(e)}`); } // un source illisible est UN rouge nommé, jamais une suite coupée en silence
 
   // --- Vague finale (constat 8) : l'identifiant d'une fiche reçue ou restaurée peut porter « ? », « & », « # » ou « / » — la carte-plat (grille, Favoris,
@@ -1858,8 +1859,8 @@ export async function runCarnetTests({ eq, ok }) {
       const accueil = await renderHome({}, {}, { recipes: recettes, docs, docsByRecipe: new Map(docs.map((d) => [d.recipe.id, d])), cook_history: [{ id: 'chVF', recipe_id: 'a?v=b', recipe_version_id: 'rv_a', cooked_at: D, servings: 2 }],
         cook_sessions: [], inventory: [], settings: { rediscover_enabled: false }, book_editions: [], books: [], library_activity: [], rediscovery_prefs: [] });
       const refaire = [...accueil.querySelectorAll('a.btn')].find((a) => a.textContent === 'Refaire comme la dernière fois');
-      eq([C.recipeCard(docDe('a?v=b'), { photoEnTete: true }).getAttribute('href'), C.recipeCard(docDe('x/edit'), { photoEnTete: true }).getAttribute('href'), C.recipeCard(docDe('a?v=b')).getAttribute('href'),
-        [...accueil.querySelectorAll('a.carte-plat')].map((a) => a.getAttribute('href')).sort(), refaire?.getAttribute('href')],
+      eq([C.recipeCard(docDe('a?v=b'), { photoEnTete: true }).querySelector('h3 a')?.getAttribute('href'), C.recipeCard(docDe('x/edit'), { photoEnTete: true }).querySelector('h3 a')?.getAttribute('href'), C.recipeCard(docDe('a?v=b')).querySelector('h3 a')?.getAttribute('href'),
+        [...accueil.querySelectorAll('article.carte-plat h3 a')].map((a) => a.getAttribute('href')).sort(), refaire?.getAttribute('href')],
         ['#/recipes/a%3Fv%3Db', '#/recipes/x%2Fedit', '#/recipes/a%3Fv%3Db', ['#/recipes/a%3Fv%3Db', '#/recipes/a%3Fv%3Db', '#/recipes/x%2Fedit'], '#/recipes/a%3Fv%3Db?v=rv_a&servings=2'],
         'vague finale : la carte-plat, la carte horizontale, les cartes d’Aujourd’hui (Favoris, cuissons) et « Refaire comme la dernière fois » encodent l’identifiant (a?v=b → a%3Fv%3Db, x/edit → x%2Fedit)');
     } finally { setUiLocale(avantVF); }

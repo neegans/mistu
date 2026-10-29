@@ -54,7 +54,7 @@ export async function runThemeTests({ eq, ok }) {
   const mainBas = base('main.content').map((d) => d['padding-bottom'] || (termes(d.padding).length >= 3 ? termes(d.padding)[2] : termes(d.padding)[0])).filter(Boolean).pop();
   ok(calePile.test(toastBas || ''), `R-VIS-14 (T-1) : .toast (règle de base) calé sur calc(var(--nav-h) + var(--safe-b) + …) : « ${toastBas} »`);
   ok(calePile.test(mainBas || ''), `R-VIS-14 (T-1) : main.content (règle de base) a son bas calé sur calc(var(--nav-h) + var(--safe-b) + …) : « ${mainBas} »`);
-  eq([...hors.matchAll(/([^{}]+)\{[^{}]*\b56px[^{}]*\}/g)].map((m) => m[1].trim()), ['.btn.big'], 'T-11 : seul .btn.big garde 56px en dur (le panneau latéral suit --topbar-h)');
+  eq([...hors.matchAll(/([^{}]+)\{[^{}]*\b56px[^{}]*\}/g)].map((m) => m[1].trim()), ['.btn.big', '.navigation-cuisine .btn'], 'T-11 : gestes principaux et navigation cuisine gardent 56px (le panneau latéral suit --topbar-h)');
   // Survol réservé aux appareils à pointeur (sur iOS il reste collé après une tape) : les deux :hover des boutons vivent sous @media (hover: hover), aucun au niveau racine.
   const survols = [...hors.matchAll(/@media\s*\(hover:\s*hover\)\s*\{\s*([^{}]+)\{/g)].map((m) => m[1].trim());
   ok(survols.includes('.btn:hover') && survols.includes('.btn.primary:hover') && !/(?:^|\})\s*\.btn(?:\.primary)?:hover\s*\{/.test(hors), 'survol : .btn:hover et .btn.primary:hover seulement sous @media (hover: hover)');

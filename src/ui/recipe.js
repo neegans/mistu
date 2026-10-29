@@ -29,6 +29,8 @@ import { estThermomix, gardeThermomix, etiquetteThermomix } from '../domain/ther
 import { enregistrerSessionCuisine } from '../domain/thermomix-session.js';
 import { renderCopieCookidoo } from './cookidoo.js';
 import { BLOCAGE_THERMOMIX, rappelThermomix } from './thermomix-garde.js';
+import { resumeReperes, lienGestionPhoto } from './reperes-affichage.js';
+import { photoPrincipale } from '../domain/cuisine-personnelle.js';
 import { panneauPhotoPage } from './photo-page.js';
 
 // S7 : une adresse refusée s'affiche INERTE (jamais un <a>), et BORNÉE — une fiche venue d'une archive ou du
@@ -48,10 +50,9 @@ export function dureeVersion(version) {
 export function texteReperes(version) {
   if (!version) return null;
   const n = Number.isInteger(version.servings) && version.servings >= 1 ? version.servings : null;
-  const d = dureeVersion(version);
+
   const parties = []; // ronde 1 : les parties sont toujours jointes par « · » (plus de clé combinée « {n} portions · {d} », doublon de « {n} portions »)
   if (n === 1) parties.push(t('1 portion')); else if (n !== null) parties.push(t('{n} portions', { n }));
-  if (d) parties.push(d);
   return parties.length ? parties.join(' · ') : null;
 }
 
@@ -140,7 +141,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // R-UI-P2 : le sous-titre reste la provenance (« {titre} — {auteur} · page N », hôte recalculé, étiquette IA) ; « Du web · » / « De mon livre · » sont les préfixes de la
   // CARTE-PLAT (ligneSource), pas de la fiche — § 4.2 amendé par T6 ; tests/creer-ia.js:1338, 1375, 1397, 1400 lisent ce header p tel quel.
   // Fidélité aux maquettes (28 octobre 2026) : le titre vit dans la colonne de gauche de l'en-tête, en face de la photo (posé plus bas, dans .fiche-etat).
-  const entete = pageHeader(recipe.display_title || recipe.original_title, {
+  const entete = pageHeader(recipe.original_title || recipe.display_title, {
     subtitle: provenanceText(recipe, book, edition), back: edition ? { href: `/books/${edition.id}`, label: book?.title || t('Livre') } : { href: '/library', label: t('Bibliothèque') },
     actions: [favBtn], classeTitre: 'titre-fiche',
   });
@@ -167,6 +168,8 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // provenance, avant les repères : la maquette mobile). Les gestes ne sont posés qu'avec une version (plus bas).
   const etat = el('div', { class: 'stack fiche-etat', dataset: { role: 'fiche-etat' } }, entete,
     rangeeEtat(availabilityBadge(recipe), versionBadge(version, recipe), lecture ? etatVerification(version) : null, recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
+  if (recipe.display_title && recipe.display_title !== recipe.original_title) etat.append(el('p', { class: 'muted alias-recette' }, recipe.display_title));
+  etat.append(resumeReperes(recipe, version, { detail: true, modifier: true }));
   const web = bandeauWeb(version);
   if (web) etat.append(web); // lot B (§ 4.5) : la source d'une version lue sur le web, d'abord — puis la bannière du lot A
   if (lecture) etat.append(bandeauLecture(lecture));
@@ -174,10 +177,10 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const ctxF = await contexteFichiers(ctx); // lot G : compte, file_error et moteur, pour les vignettes et la photo du plat (§ 4.4)
   // Lot F (§ 4.1.1) : l'emplacement de tête (un div, jamais null : aucun nœud texte direct) ; la zone est insérée plus bas, après la préparation.
   const photo = await monterPhotoPlat(recipe, ctx, { ...deps, ctxF });
-  photo.entete.classList.add('fiche-photo');
-  const tete = el('div', { class: 'two-col fiche-tete', dataset: { role: 'fiche-tete' } }, etat, photo.entete);
+  const photoFiche = el('div', { class: 'fiche-photo' }, photo.entete, lienGestionPhoto(recipe, { connue: !!photoPrincipale(recipe, history)?.sha256 }));
+  const tete = el('div', { class: 'two-col fiche-tete', dataset: { role: 'fiche-tete' } }, etat, photoFiche);
   root.append(tete);
-  etat.append(await monterNotesPersonnelles(recipe, { repo: gestesLecture.repo, toast: dire }));
+  root.append(await monterNotesPersonnelles(recipe, { repo: gestesLecture.repo, toast: dire }));
 
   if (!version) {
     root.append(await referenceOnly());
@@ -258,7 +261,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const body = el('div', { class: 'recipe-body' }); // C-7 : overflow-wrap (styles.css)
   root.append(body);
   drawBody();
-  root.append(photo.zone); // lot F (D-F2, D-F8) : seulement quand la fiche a une version
+  root.append(el('details', { class: 'photo-source-details' }, el('summary', null, t('Image de la recette')), photo.zone)); // lot F (D-F2, D-F8) : seulement quand la fiche a une version
   const photoPage = await panneauPhotoPage(recipe, ctx, { ...deps, repo: gestesLecture.repo, ctxF, onPhotoChange: () => photo.redessiner?.() });
   if (photoPage) root.append(photoPage);
   root.append(await monterMesPhotos(recipe, history, { ...deps, repo: gestesLecture.repo, toast: dire, ctxF, apres: () => photo.redessiner?.() }));
@@ -344,7 +347,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     // la section non choisie cachée par hidden, les deux toujours dans le DOM). Le segmented est reconstruit à chaque drawBody ; le choix (state.onglet)
     // survit. La liste garde ingredientLineEl et « Remplacer » ; le select « Évaluer une restriction… » et timeText (« actif · total ») restent dans l'en-tête de la section.
     const ingredients = sectionPlain(`${t('Ingrédients')}${scaled.ok && scaled.factor !== 1 ? ` — ${t('recalculés pour {n} portions', { n: state.servings })}` : version.servings ? ` — ${t('{n} portions', { n: version.servings })}` : ''}`,
-      el('div', { class: 'row between' }, el('span', { class: 'muted' }, timeText(version)), dietSel),
+      el('div', { class: 'row between' }, el('span', { class: 'muted' }, timeText(version, recipe)), dietSel),
       assessment ? el('div', { style: { margin: '.4rem 0' } }, dietChip(assessment), assessment.unknown.length ? el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `${t('Inconnus')} : ${assessment.unknown.join(', ')}`) : null) : null,
       wantsTranslation && !translation ? el('div', { class: 'status warn' }, t('Aucune traduction {l} pour cette version.', { l: state.lang.toUpperCase() }), el('a', { class: 'btn small', href: lienEdition('translation', version.id) }, t('Traduire'))) : null,
       translation ? el('div', { class: 'row' }, el('span', { class: 'badge' }, t('Traduction')), el('span', { class: 'muted' }, translation.translated_content.title || '')) : null,

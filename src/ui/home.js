@@ -12,7 +12,7 @@ import { pickSuggestion, snoozeUntil } from '../domain/rediscover.js';
 import { parseQuery } from '../domain/search.js';
 import { pointeurValide } from '../domain/photo-web.js';
 import { comparerCuissons, photosPersonnellesParRecette } from '../domain/cuisine-personnelle.js';
-import { empreintesPhotos, fichierPhoto } from './components.js';
+import { empreintesPhotos, fichierPhoto, contexteFichiers } from './components.js';
 import { recipeCard, section, sectionPlain, grilleCartes, pageHeader, emptyState, availabilityBadge, provenanceText, etoiles } from './components.js';
 
 // `deps.repo` : le sac injecté des routes (la suite y compte la passe getFiles) ; l'app ne passe rien (route('/', renderHome) : trois arguments) et le
@@ -51,9 +51,10 @@ export async function renderHome(params, query, ctx, { repo: depot = repo } = {}
   const recent = [...ctx.cook_history].sort(comparerCuissons).slice(0, 4)
     .map((h) => ({ h, doc: ctx.docsByRecipe.get(h.recipe_id) })).filter((x) => x.doc); // une cuisson d'une fiche inconnue n'est pas rendue (comme avant)
   const photosPersonnelles = photosPersonnellesParRecette(ctx.cook_history);
+  const ctxF = await contexteFichiers(ctx);
   const empreintes = empreintesPhotos([...favs, ...recent.map(x => x.doc)].map(d => d.recipe), photosPersonnelles);
   const fichiers = empreintes.length ? await depot.getFiles(empreintes) : new Map();
-  const cartePlat = (d) => recipeCard(d, { photoEnTete: true, fichier: fichierPhoto(d.recipe, photosPersonnelles, fichiers) });
+  const cartePlat = (d) => recipeCard(d, { photoEnTete: true, fichier: fichierPhoto(d.recipe, photosPersonnelles, fichiers), ctxF });
   if (favs.length) root.append(sectionPlain(t('Favoris'), grilleCartes(favs.map(cartePlat))));
 
   // Dernières cuissons → Refaire comme la dernière fois : la date et le bouton HORS du <a> de la carte, sous elle, dans la cellule de grille (§ 4.4, H-16).

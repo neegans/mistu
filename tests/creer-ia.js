@@ -8,7 +8,7 @@ import { EN } from '../src/i18n/en.js';
 export async function runCreerIaTests({ eq, ok }) {
   const C = await import('../src/domain/creation-ia.js');
   buildIngredientIndex(INGREDIENTS); // l'index des lignes est global (lines.js:6) : la suite le pose elle-même (F10)
-  eq(APP_VERSION, '0.20.0', 'T1 : APP_VERSION 0.20.0 (lot UI-1)');
+  eq(APP_VERSION, '0.21.0', 'T1 : APP_VERSION 0.21.0 (lot UI-1)');
 
   // --- estCreationIA (C-2, F6)
   const synth = { kind: 'synthesis', provenance: { generated_by: 'ai', creation: { demande: 'x' } } };
@@ -1312,7 +1312,7 @@ export async function runCreerIaTests({ eq, ok }) {
         ['Recette de famille', 'Recette de famille', 'Mon livre — A. B. · page 58', 'Ricardo', 'Ricardo'], 'provenance : sans origine ia, rien ne change — c’est `origine`, pas source_label, qui décide');
 
       // --- timeText : jamais une durée pour une création (C-6), même si une ligne reçue en portait une
-      eq([K.timeText(creation), K.timeText({ ...creation, total_minutes: 30, prep_minutes: 10 }), K.timeText(extractionIA)], ['', '', 'actif 20 min · total 1 h'], 'timeText : vide pour une création (même une ligne reçue qui porterait des durées) ; une extraction de livre inchangée');
+      eq([K.timeText(creation), K.timeText({ ...creation, total_minutes: 30, prep_minutes: 10 }), K.timeText(extractionIA)], ['', '', 'durée enregistrée 60 min'], 'timeText : vide pour une création (même une ligne reçue qui porterait des durées) ; une extraction de livre inchangée');
 
       // --- recipeCard : la ligne d'étiquette sous la provenance
       const docs = buildDocs({ recipes: [fiche, ficheLivre, ficheMain], versions: [creation, extractionIA, manuelle], editions: [edition], books: [livre], dishes: [], links: [] });
@@ -1394,7 +1394,7 @@ export async function runCreerIaTests({ eq, ok }) {
 
         // Témoins : extraction IA d'un livre (F6) et recette à la main — inchangés
         const pageL = await renderRecipe({ id: ficheLivre.id }, {}, ctxFiche([ficheLivre], [extractionIA]));
-        eq([texte(pageL.querySelector('header p')), textes(pageL, '.badge.original').length >= 2, pageL.querySelector('[data-role="etiquette-ia"]') === null, pageL.querySelector('[data-role="adapter-ia"]') === null, pucesV1(pageL).length, pageL.textContent.includes('Extraction IA (claude-extraction) — vérifiée à la main ensuite ?'), boutons(pageL, 'Marquer testée').length, pageL.querySelector('[data-role="avertissement-ia"]') === null, /total 1 h/.test(pageL.textContent)],
+        eq([texte(pageL.querySelector('header p')), textes(pageL, '.badge.original').length >= 2, pageL.querySelector('[data-role="etiquette-ia"]') === null, pageL.querySelector('[data-role="adapter-ia"]') === null, pucesV1(pageL).length, pageL.textContent.includes('Extraction IA (claude-extraction) — vérifiée à la main ensuite ?'), boutons(pageL, 'Marquer testée').length, pageL.querySelector('[data-role="avertissement-ia"]') === null, /durée enregistrée 60 min/.test(pageL.textContent)],
           ['Mon livre — A. B. · page 58', true, true, true, 3, true, 0, true, true], 'fiche d’une extraction IA de livre : « Original », puces V1, ligne « Extraction IA », durée — jamais d’étiquette ni de bouton d’adaptation (F6)');
         const pageM = await renderRecipe({ id: ficheMain.id }, {}, ctxFiche([ficheMain], [manuelle]));
         eq([texte(pageM.querySelector('header p')), textes(pageM, '.badge.original').length >= 2, pageM.querySelector('[data-role="etiquette-ia"]') === null, pageM.querySelector('[data-role="adapter-ia"]') === null, pucesV1(pageM).length], ['Recette de famille', true, true, true, 3], 'fiche saisie à la main : inchangée');

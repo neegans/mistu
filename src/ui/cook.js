@@ -5,15 +5,16 @@ import { t } from '../core/i18n.js';
 import { navigate, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { scaleVersion } from '../domain/scaling.js';
-import { normalizeText } from '../domain/units.js';
 import { createTimerLaunch, shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice, TIMER_STATE_HELP } from '../domain/timers.js';
 import { label } from '../core/i18n.js';
-import { qtyEl, section, field, etiquetteIA, estExtractionNonRelue } from './components.js';
+import { qtyEl, section, field, etiquetteIA, estExtractionNonRelue, contexteFichiers, empreintesPhotos, fichierPhoto } from './components.js';
 import { estCreationIA, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
 import { deviceId } from './import.js';
 import { estThermomix } from '../domain/thermomix.js';
 import { portionsSession } from '../domain/thermomix-session.js';
 import { panneauGardeThermomix, rappelThermomix } from './thermomix-garde.js';
+import { photosPersonnellesParRecette, photoPrincipale } from '../domain/cuisine-personnelle.js';
+import { photoVisible } from './photos-visibles.js';
 import { ouvrirCuissons, noteEnCuisine } from './cuisson.js';
 
 export async function renderCook(params, query, ctx, deps = {}) {
@@ -32,8 +33,14 @@ export async function renderCook(params, query, ctx, deps = {}) {
   const progress = session.progress || {};
   progress.done_step_ids = progress.done_step_ids || [];
   progress.by_version = progress.by_version || {};
-  const root = el('div', null);
-  const title = items.length === 1 ? (items[0].recipe.display_title || items[0].recipe.original_title) : t('Repas — {n} recettes', { n: items.length });
+  const root = el('div', { class: 'mode-cuisine' });
+  const ctxF = await contexteFichiers(ctx);
+  const photos = photosPersonnellesParRecette(ctx.cook_history);
+  const fichiers = await (deps.repo ?? repo).getFiles(empreintesPhotos(items.map(it => it.recipe), photos));
+  const nettoyages = [];
+  const nettoyer = () => { for (const photo of area.querySelectorAll('[data-role="photo-visible"]')) photo.dispose?.(); for (const fn of nettoyages.splice(0)) fn(); };
+  root.dispose = () => nettoyer();
+  const title = items.length === 1 ? (items[0].recipe.original_title || items[0].recipe.display_title) : t('Repas — {n} recettes', { n: items.length });
   root.append(el('div', { class: 'row between', style: { marginBottom: '.6rem' } },
     el('h1', null, title),
     el('div', { class: 'row' },
@@ -86,6 +93,7 @@ export async function renderCook(params, query, ctx, deps = {}) {
   }
 
   function draw() {
+    nettoyer();
     area.replaceChildren();
     if (planOpen) { area.append(commonPlan()); return; }
     const it = items[activeIdx];
@@ -93,17 +101,16 @@ export async function renderCook(params, query, ctx, deps = {}) {
     const idx = currentStepIndex(it);
     const step = steps[idx];
     const ingUl = el('ul', { class: 'ingredients list plain' });
-    const stepNorm = step ? normalizeText(step.text) : '';
-    const recalled = [];
+
     for (const ri of it.scaled.ingredients) {
       const ing = ri.ingredient_id ? ctx.ingredientsById.get(ri.ingredient_id) : null;
-      const names = [ri.name_text, ing?.labels?.fr?.label, ing?.labels?.en?.label, ...(ing?.labels?.fr?.aliases || []), ...(ing?.labels?.en?.aliases || [])].filter(Boolean).map(normalizeText);
-      const hit = step && names.some((n) => n.length >= 3 && stepNorm.includes(n));
-      const li = el('li', { class: hit ? 'hit' : '' }, el('span', null, ing && ri.verification_state === 'verified' ? ing.labels.fr.label : (ri.name_text || ri.source_text), ri.preparation ? el('span', { class: 'muted' }, `, ${ri.preparation}`) : null), qtyEl(ri, { system: session.units || 'original', convention_id: it.convention_id, ingredient: ing && ri.verification_state === 'verified' ? ing : null }));
-      if (hit) recalled.push(li.cloneNode(true));
+      const li = el('li', null, el('span', null, ing && ri.verification_state === 'verified' ? ing.labels.fr.label : (ri.name_text || ri.source_text), ri.preparation ? el('span', { class: 'muted' }, `, ${ri.preparation}`) : null), qtyEl(ri, { system: session.units || 'original', convention_id: it.convention_id, ingredient: ing && ri.verification_state === 'verified' ? ing : null }));
       ingUl.append(li);
     }
-    const left = el('div', null, section(t('Ingrédients'), el('div', { class: 'muted', style: { fontSize: '.85rem' } }, it.servings ? t('{n} portions', { n: it.servings }) : ''), ingUl, ...it.scaled.notes.map((n) => el('small', { class: 'muted', style: { display: 'block' } }, n))));
+    const ingredients = el('details', { class: 'ingredients-cuisine', dataset: { role: 'ingredients-cuisine' } },
+      el('summary', null, t('Ingrédients de la recette')),
+      el('div', { class: 'muted' }, it.servings ? t('{n} portions', { n: it.servings }) : ''), ingUl,
+      ...it.scaled.notes.map(n => el('small', { class: 'muted' }, n)));
     const right = el('div', { class: 'stack' });
     const personnelle = noteEnCuisine(it.recipe);
     if (personnelle) right.append(personnelle);
@@ -111,15 +118,19 @@ export async function renderCook(params, query, ctx, deps = {}) {
     if (!step) right.append(el('div', { class: 'step-big' }, t('Aucune étape numérisée pour cette version.')));
     else {
       right.append(el('div', { class: 'step-big' }, el('div', { class: 'muted', style: { fontSize: '.9rem', marginBottom: '.4rem' } }, `${t('Étape')} ${idx + 1} / ${steps.length}`), el('div', { style: { whiteSpace: 'pre-line' }, dataset: { role: 'texte-etape' } }, step.text), // m10 : étape entière, sauts de ligne gardés
-        recalled.length ? el('ul', { class: 'ingredients list plain', style: { fontSize: '1rem', marginTop: '.8rem' } }, ...recalled) : null));
+        null));
       for (const tm of step.timers || []) right.append(timerCard(tm, it, step));
     }
     const speak = 'speechSynthesis' in window && step ? el('button', { class: 'btn', onClick: () => { const u = new SpeechSynthesisUtterance(step.text); u.lang = (it.recipe.original_language || 'fr') === 'en' ? 'en-CA' : 'fr-CA'; speechSynthesis.cancel(); speechSynthesis.speak(u); } }, t('Lire à voix haute')) : null;
-    right.append(el('div', { class: 'controls' },
+    const navigation = el('div', { class: 'controls navigation-cuisine' },
       el('button', { class: 'btn', disabled: idx === 0, onClick: () => go(it, idx - 1) }, `← ${t('Précédent')}`),
-      idx < steps.length - 1 ? el('button', { class: 'btn primary', onClick: () => go(it, idx + 1, step) }, `${t('Suivant')} →`) : el('button', { class: 'btn primary', onClick: () => { if (step) markDone(step); finish(); } }, t('Terminer'))),
-      el('div', { class: 'row' }, speak, el('small', { class: 'muted' }, t('Commandes vocales : à venir après validation sur iOS. Pour une minuterie, parle à Siri directement.'))));
-    area.append(el('div', { class: 'cook' }, left, right));
+      idx < steps.length - 1 ? el('button', { class: 'btn primary', onClick: () => go(it, idx + 1, step) }, `${t('Suivant')} →`) : el('button', { class: 'btn primary', onClick: () => { if (step) markDone(step); finish(); } }, t('Terminer')));
+    right.append(ingredients, el('div', { class: 'row' }, speak, el('small', { class: 'muted' }, t('Commandes vocales : à venir après validation sur iOS. Pour une minuterie, parle à Siri directement.'))));
+    const sha = photoPrincipale(it.recipe, photos)?.sha256;
+    const photo = el('details', { class: 'photo-cuisine', dataset: { role: 'photo-cuisine' } }, el('summary', null, t('Voir la photo du plat')));
+    photo.append(photoVisible(sha, { fichier: fichierPhoto(it.recipe, photos, fichiers), ctxF, classe: 'photo-cuisine-image', personnelle: !!photos.get(it.recipe.id) }) || el('p', { class: 'muted' }, t('Aucune photo pour cette recette.')));
+    right.append(photo);
+    area.append(el('div', { class: 'cook' }, right), navigation);
   }
 
   function markDone(step) { if (!progress.done_step_ids.includes(step.id)) progress.done_step_ids.push(step.id); }
@@ -138,6 +149,7 @@ export async function renderCook(params, query, ctx, deps = {}) {
     const stateEl = el('div', { class: 'muted', style: { fontSize: '.9rem' } });
     const mirror = el('div', { class: 'mirror', style: { display: 'none' } });
     let mirrorTimer = null;
+    nettoyages.push(() => clearInterval(mirrorTimer));
     const setState = async (state) => { if (!launch) return; launch.handoff_state = state; launch = await repo.save('timer_launches', launch); stateEl.textContent = `${label('timer_state', state)} — ${TIMER_STATE_HELP[state]}`; };
     const request = async (channel) => {
       launch = createTimerLaunch({ cook_session_id: session.id, recipe_version_id: it.version.id, step_id: step.id, device_id: deviceId(), duration_seconds: seconds, channel });

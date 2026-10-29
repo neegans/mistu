@@ -1529,7 +1529,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const sigpart = await renderRecipe({ id: 'rc_sigpart' }, {}, ctxFiche);
         eq([lien(sigpart, 'Relire les pages'), lien(sigpart, 'Importer cette recette')], [null, null], 'fiche d’un signet devenu partial : aucune entrée vers l’import (un lien web s’importe au lot suivant)');
         const fiche = await renderBook({ id: 'ed1' }, {}, { ...ctxFiche, recipes: ctx.recipes.filter((r) => ['rc_ref', 'rc_part', 'rc_dispo', 'rc_sigpart'].includes(r.id)) });
-        const importers = [...fiche.querySelectorAll('a, button')].filter((n) => n.textContent === 'Importer');
+        const importers = [...fiche.querySelectorAll('a, button')].filter((n) => ['Importer', 'Compléter'].includes(n.textContent));
         const saisies = [...fiche.querySelectorAll('a, button')].filter((n) => n.textContent === 'Saisir à la main' && !n.hidden); // lot C, tâche 4 : le bouton « Saisir à la main » du panneau d'index, caché hors d'une lecture reçue, n'est pas une entrée de la fiche
         eq([importers.length, importers.every((n) => !n.parentElement.closest('a')), importers.map((n) => n.getAttribute('href')).sort(), saisies.length, saisies.every((n) => !n.parentElement.closest('a')), fiche.textContent.includes('Scanner cette recette')], [2, true, ['#/recipes/rc_part/importer', '#/recipes/rc_ref/importer'], 3, true, false], 'fiche du livre (m4, T4-R1) : « Importer » sous la carte de la référence et de la partielle SEULEMENT (pas sous le signet devenu partial : même règle que « Relire les pages »), jamais descendant d’un <a>, vers la route ciblée ; « Saisir à la main » (menu + deux rangées) hors de tout <a> ; « Scanner cette recette » absent');
         ok(importers.every((n) => n.classList.contains('btn') && n.classList.contains('small')), 'fiche du livre : « Importer » est un .btn.small');
@@ -1684,7 +1684,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const etatC = pageC.querySelector('[data-role="etat-verification"]');
         eq([texte(etatC), etatC?.classList.contains('ok'), texte(pageC.querySelector('[data-role="ligne-lecture"]')), texte(pageC.querySelector('[data-role="incertain-lecture"]')), [...pageC.querySelectorAll('.recipe-body .chip')].filter((c) => c.textContent === 'incertain').length], ['Vérifiée', true, `Lue par l’assistant le ${formatDate(LU)} · page possiblement manquante`, 'Incertain : ' + INCERTAIN_ATTENDU, 0], 'fiche (?v= d’une correction vérifiée) : « Vérifiée » ; bandeau toujours là, daté de la LECTURE, sans « ligne(s) incertaine(s) » ; aucune puce « incertain »');
         const pageSo = await renderRecipe({ id: 'rc_sansoctets' }, {}, await ctxDe()); scene.append(pageSo);
-        eq([pageSo.querySelector('[data-role="photo-plat"]'), !!pageSo.querySelector('[data-role="bandeau-lecture"]')], [null, true], 'fiche : un photo_sha256 sans octets dans files ne rend rien (pas même un cadre vide) ; le bandeau reste');
+        eq([!!pageSo.querySelector('[data-role="photo-visible"]'), !!pageSo.querySelector('[data-role="bandeau-lecture"]')], [true, true], 'fiche : un photo_sha256 sans octets conserve son emplacement de réception ; le bandeau reste');
         const pageS = await renderRecipe({ id: 'rc_simple' }, {}, await ctxDe()); scene.append(pageS);
         eq([pageS.querySelector('[data-role="bandeau-lecture"]'), pageS.querySelector('[data-role="etat-verification"]'), pageS.querySelector('[data-role="photo-plat"]'), [...pageS.querySelectorAll('[data-role="texte-etape"]')].map((n) => n.textContent)], [null, null, null, ['Peler.', 'Cuire.']], 'témoin : une recette saisie à la main n’a ni bandeau, ni état de lecture, ni photo ; ses étapes passent par le même rendu');
         // Ronde 1 (Critique) : `Element.append(null)` écrit le nœud texte « null » — la fiche n'a AUCUN nœud texte direct, avec ou sans photo.
@@ -1696,7 +1696,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const pageF = await renderRecipe({ id: 'rc_imp' }, { v: 'rv_formes' }, await ctxDe());
         eq([...pageF.querySelectorAll('.recipe-body ul.list.plain > li')].map((li) => [...li.querySelectorAll('.chip')].some((c) => c.textContent === 'incertain')), [false, false, true], 'fiche : la puce « incertain » pour uncertain === true seulement — « oui » et 1 (formes reçues ou restaurées) n’en ont pas');
         const pageP = await renderRecipe({ id: 'rc_pdf' }, {}, await ctxDe());
-        eq([pageP.querySelector('[data-role="photo-plat"]'), textesDirects(pageP), !!pageP.querySelector('[data-role="bandeau-lecture"]')], [null, [], true], 'fiche : une photo du plat dont les octets ne sont pas une image (application/pdf) ne rend rien (S3), ni cadre ni nœud texte');
+        eq([!!pageP.querySelector('[data-role="photo-visible"]'), textesDirects(pageP), !!pageP.querySelector('[data-role="bandeau-lecture"]')], [true, [], true], 'fiche : une photo non affichable conserve un état explicite, sans nœud texte parasite');
         const pageX = await renderRecipe({ id: 'rc_simple' }, { v: extraction.id }, await ctxDe());
         eq([pageX.querySelector('[data-role="bandeau-lecture"]'), [...pageX.querySelectorAll('[data-role="texte-etape"]')].map((n) => n.textContent)], [null, ['Peler.', 'Cuire.']], 'fiche : ?v= d’une version d’une AUTRE recette est ignoré (retour à la version courante) — jamais la lecture d’un autre import sur cette fiche');
       }
@@ -2523,7 +2523,7 @@ export async function runImportCibleTests({ eq, ok }) {
     const ligneDe = (root, id) => root.querySelector(`[data-role="ligne-import"][data-id="${CSS.escape(id)}"]`);
     try {
       // --- 1. Domaine PUR (§ 4.7) : une lecture web est listée, avec ses gestes ; la table entière.
-      eq(D.KINDS_IMPORT, ['recette', 'index', 'web', 'classement', 'couverture', 'livre', 'thermomix'], 'Lots B/D/E/I2 : les sortes du journal comprennent web, classement, couverture et livre');
+      eq(D.KINDS_IMPORT, ['recette', 'index', 'web', 'classement', 'couverture', 'livre', 'thermomix', 'reperes'], 'Lots B/D/E/I2 : les sortes du journal comprennent web, classement, couverture et livre');
       eq(D.KINDS_PAGES, ['recette', 'index', 'classement'], 'lot B (P-1) : KINDS_PAGES — les sortes à pages, seules ouvertes par le chemin photo (« web » listée, jamais ouverte par lui) ; lot D (I-D11) : une ligne de classement porte des photos');
       const ICI = 'doc-ici', MOI = 'dev-ici', AUTRE = 'dev-ailleurs';
       const ilYa = (min) => new Date(Date.parse(NOW) - min * 60000).toISOString();

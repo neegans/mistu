@@ -7,7 +7,7 @@ import * as repo from '../model/repo.js';
 import { summarizeMeal } from '../domain/pairing.js';
 import { assessMeal } from '../domain/diet.js';
 import { MEAL_ROLES, DIET_TAGS, RECIPE_TYPES } from '../model/schema.js';
-import { pageHeader, section, emptyState, select, field, dietChip, versionBadge, vignettePlat } from './components.js';
+import { pageHeader, section, emptyState, select, field, dietChip, versionBadge, vignettePlat, contexteFichiers } from './components.js';
 import { libelleSource } from '../core/lien.js';
 import { deviceId } from './import.js';
 import { estThermomix, gardeThermomix } from '../domain/thermomix.js';
@@ -60,6 +60,7 @@ export async function addToMealFlow(ctx, doc, { role = 'accompagnement', mainDoc
 }
 
 export async function renderMeal(params, query, ctx, deps = {}) {
+  const ctxF = await contexteFichiers(ctx);
   const meal = ctx.meals.find((m) => m.id === params.id);
   if (!meal) return el('div', { class: 'card' }, t('Repas introuvable.'));
   meal.items = meal.items || [];
@@ -86,7 +87,7 @@ export async function renderMeal(params, query, ctx, deps = {}) {
     // Lot F (§ 4.2) : une vignette à gauche du titre quand les octets sont ici ; sans photo, le DOM de la carte est celui d'avant le lot. Ronde 1 : à côté
     // d'une vignette, le bloc prend la place qui reste (flex 1, min-width 0) — sans quoi l'enveloppe .row (flex-wrap) le renvoyait SOUS la vignette dès
     // que le titre ne tenait plus sur sa ligne (D-F9 : la vignette à gauche du titre) ; sans vignette, aucun style.
-    const vignette = vignettePlat(it.recipe, { photo: photoPrincipale(it.recipe, photosPersonnelles) });
+    const vignette = vignettePlat(it.recipe, { photo: photoPrincipale(it.recipe, photosPersonnelles), ctxF });
     const bloc = el('div', vignette ? { style: { flex: '1', minWidth: '0' } } : null, el('a', { href: `#/recipes/${it.recipe.id}?v=${it.recipe_version_id || ''}` }, el('strong', null, it.recipe.display_title || it.recipe.original_title)), ' ', versionBadge(it.version, it.recipe),
       // S8 : l'hôte d'un signet est RECALCULÉ depuis l'adresse, ici comme ailleurs — `source_label` stocké peut
       // venir d'une archive ou du serveur et nommer n'importe quel site (S7). C-2 : une fiche IA est « Créée avec l’IA », texte de
@@ -112,7 +113,7 @@ export async function renderMeal(params, query, ctx, deps = {}) {
       el('a', { class: 'btn', href: '#/search?mode=all' }, t('Choisir moi-même')))));
 
   // Résumé : temps, conflits, contraintes
-  const summary = summarizeMeal(items.map((it) => ({ version: it.version, title: it.recipe.original_title })));
+  const summary = summarizeMeal(items.map((it) => ({ version: it.version, recipe: it.recipe, title: it.recipe.original_title })));
   const dietRows = meal.constraints_snapshot.diets.map((d) => ({ diet: d, res: assessMeal(items.filter((it) => it.version).map((it) => ({ version: it.version, title: it.recipe.original_title })), ctx.ingredientsById, d) }));
   root.append(section(t('Résumé du repas'),
     el('ul', { class: 'list plain' }, ...summary.notes.map((n) => el('li', null, n)), ...summary.conflicts.map((c) => el('li', { class: 'status warn' }, c))),

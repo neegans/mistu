@@ -13,7 +13,7 @@ import { chercherRecettesWeb, construireDemande, dateLisible, reperesDe } from '
 import { lireApercusWeb, LIMITES_APERCU_WEB } from '../domain/apercu-web.js';
 import { RECIPE_TYPES, DIET_TAGS } from '../model/schema.js';
 import { COVER_INPUT_MIME } from '../sync/mime.js';
-import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant, carteConnexion, texteRefusAssistant, ligneReperes, remplacerEnRevoquant } from './components.js';
+import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant, carteConnexion, texteRefusAssistant, ligneReperes, remplacerEnRevoquant, contexteFichiers } from './components.js';
 import { demarrerLectureWeb } from './import-web.js';
 import { addToMealFlow } from './meals.js';
 import { demarrerConnexion } from './settings.js';
@@ -90,6 +90,7 @@ export async function garderEtLire(lien, { ctx, ...deps } = {}) {
 }
 
 export async function renderSearch(params, query, ctx, deps = {}) {
+  const ctxF = await contexteFichiers(ctx);
   const root = el('div', null);
   // UI-2 (F-10) : deps.apercus vaut lireApercusWeb par défaut, et null quand deps.chercher est injecté sans deps.apercus — les tests de route des lots web et B,
   // qui comptent leurs appels réseau, ne demandent aucun aperçu (P-UI2-11).
@@ -172,7 +173,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
         hit.timeState === 'unknown' ? el('span', { class: 'chip neutral' }, t('Durée inconnue')) : null,
         hit.why ? el('div', null, el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Pourquoi cet accord ?')), ...hit.why.map((w) => el('div', { style: { fontSize: '.9rem' } }, w.text, ' ', el('span', { class: 'badge' }, w.origin)))) : null,
         forRecipe ? el('button', { class: 'btn small sage', onClick: (e) => { e.preventDefault(); e.stopPropagation(); addToMealFlow(ctx, hit.doc, { role: role === 'soupe' ? 'entree' : 'accompagnement', mainDoc: forRecipe, mealId: query.meal || null }); } }, t('Ajouter à mon repas')) : null);
-      return recipeCard(hit.doc, { extra, reasons: hit.reasons });
+      return recipeCard(hit.doc, { extra, reasons: hit.reasons, ctxF });
     };
     const total = groups.admissible.length + groups.to_verify.length + groups.adaptation.length + groups.time_unknown.length;
     if (groups.admissible.length) results.append(section(forRecipe ? t('Propositions') : t('Recettes admissibles'), ...groups.admissible.slice(0, forRecipe ? 3 : 50).map(card),
@@ -182,7 +183,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     if (groups.adaptation.length) results.append(section(t('Adaptation nécessaire (ingrédient facultatif à retirer)'), ...groups.adaptation.map(card)));
     if (groups.references.length && state.mode !== 'recipes') results.append(section(t('Repérées dans tes livres — recettes incomplètes'),
       el('p', { class: 'muted' }, t('Références d’index : ingrédients, durées et compatibilités inconnus tant que la recette n’est pas scannée.')),
-      ...groups.references.slice(0, 30).map((h) => recipeCard(h.doc, { reasons: h.reasons }))));
+      ...groups.references.slice(0, 30).map((h) => recipeCard(h.doc, { reasons: h.reasons, ctxF }))));
     if (!total && !groups.references.length) {
       const opts = [];
       if (parsed.filters.max_total_minutes) opts.push(el('button', { class: 'btn', onClick: () => { parsed.filters.max_total_minutes += 15; render(); } }, t('Allonger à {n} min', { n: parsed.filters.max_total_minutes + 15 })));

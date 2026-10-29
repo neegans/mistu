@@ -393,8 +393,8 @@ export function phrasesInspection(summary = {}) {
   if (summary.files_distants > 0) {
     puces.push(t('pages manquantes : {n}', { n: summary.files_distants }));
     phrases.push(summary.files_distants === 1 // ronde 1 (#35) : jamais « 1 pages »
-      ? t('Cette archive renvoie à 1 page qui n’est pas dedans : si elle est sur le serveur, elle pourra être téléchargée (sur la fiche, ou Réglages → Télécharger toutes les pages).')
-      : t('Cette archive renvoie à {n} pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les pages).', { n: summary.files_distants }));
+      ? t('Cette archive renvoie à 1 page qui n’est pas dedans : si elle est sur le serveur, elle pourra être téléchargée (sur la fiche, ou Réglages → Télécharger toutes les photos et fichiers).')
+      : t('Cette archive renvoie à {n} pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les photos et fichiers).', { n: summary.files_distants }));
   }
   if (summary.files_copies > 0) puces.push(t('copies du serveur : {n}', { n: summary.files_copies }));
   return { puces, phrases };
@@ -857,10 +857,10 @@ function modeleFichiers(moteur, { qualite, refuses }) {
     aEnvoyer: t('Photos à envoyer : {n}', { n: compte(f.aEnvoyer) }),
     envoi: prog?.sens === 'envoi' ? t('Envoi des photos : {n}/{m}', { n: prog.n, m: prog.total }) : null,
     pause: moteur.pauseFichiers ? t('Espace photos plein sur le serveur : les photos attendent sur cet appareil, les fiches continuent de partir.') : null,
-    aTelecharger: aTelecharger ? t('Pages à télécharger : {n} (~{m} Mo)', { n: aTelecharger, m: mo }) : null,
+    aTelecharger: aTelecharger ? t('Photos et fichiers à télécharger : {n} (~{m} Mo)', { n: aTelecharger, m: mo }) : null,
     // Ronde 1 (§ 3.2) : sous `pause_fichiers`, la passe fichiers entière est suspendue, téléchargement global compris — le bouton ne ferait rien
     // descendre : il n'est pas offert (« Arrêter le téléchargement » reste si le global était demandé ; la tape sur une page, elle, marche).
-    telechargerTout: aTelecharger && moteur.telechargementGlobal !== true && !moteur.pauseFichiers ? t('Télécharger toutes les pages ({n} fichiers, ~{m} Mo)', { n: aTelecharger, m: mo }) : null,
+    telechargerTout: aTelecharger && moteur.telechargementGlobal !== true && !moteur.pauseFichiers ? t('Télécharger toutes les photos et fichiers ({n} fichiers, ~{m} Mo)', { n: aTelecharger, m: mo }) : null,
     reception: prog?.sens === 'reception' ? t('Téléchargement des pages : {n}/{m}', { n: prog.n, m: prog.total }) : null,
     arreter: moteur.telechargementGlobal === true,
     renvoi: qualite === 'originale' && compte(f.aRenvoyer) ? t('Renvoyer en originale les {n} photos de cet appareil envoyées en réduite', { n: f.aRenvoyer }) : null,
