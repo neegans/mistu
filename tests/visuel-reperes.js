@@ -61,8 +61,8 @@ export async function runVisuelReperesTests({ eq, ok }) {
   const contexteB = R.construireContexteReperes({ recipe, version: nouvelleVersion });
   const actualisee = { ...corrigee, reperes: R.fusionnerReperes(corrigee.reperes, { proposition: proposition(contexteB) }) };
   const luB = R.lireReperes(actualisee, nouvelleVersion);
-  eq([luB.temps, luB.rapide, luB.champs.temps.etat], [null, false, 'perime'], 'Repères : nouvelle analyse ne revalide pas une correction ancienne');
-  eq(luB.champs.temps.valeur.total.max, 30, 'Repères : ancienne correction reste éditable');
+  eq([luB.temps.total.max, luB.rapide, luB.champs.temps.etat], [25, true, 'courant'], 'Repères : nouvelle analyse B utilise ses propres repères sans reprendre la correction A');
+  eq(R.lireReperes(actualisee, version).champs.temps.valeur.total.max, 30, 'Repères : ancienne correction A reste éditable sur A');
   eq(R.lireReperes(fiche(), nouvelleVersion).difficulte, null, 'Repères : autre version n’emprunte pas le niveau');
   const corrompue = clone(fiche()); corrompue.reperes.proposition.temps.total.max = 1e9;
   eq(R.lireReperes(corrompue, version).temps, null, 'Repères : revalidation après restauration');
@@ -83,7 +83,7 @@ export async function runVisuelReperesTests({ eq, ok }) {
   const docs = documents([fiche()], [version]);
   eq(searchDocs(docs, parseQuery('rapide'), {}).admissible.length, 1, 'Repères : recherche rapide avec même lecteur');
   eq(searchDocs(documents([recipe], [version]), parseQuery('rapide'), {}).time_unknown.length, 1, 'Repères : somme ancienne ne passe pas un filtre de temps');
-  eq(searchDocs(documents([actualisee], [nouvelleVersion]), parseQuery('rapide'), {}).time_unknown.length, 1, 'Repères : correction périmée exclue du filtre rapide');
+  eq(searchDocs(documents([actualisee], [nouvelleVersion]), parseQuery('rapide'), {}).admissible.length, 1, 'Repères : le filtre rapide utilise la proposition B liée à B');
   eq(searchDocs(documents([videFiche], [videVersion]), parseQuery('rapide'), {}).time_unknown.length, 1, 'Repères : mêmes critères de recette renseignée dans recherche et badge');
   const { summarizeMeal } = await import('../src/domain/pairing.js');
   const repas = summarizeMeal([{ recipe: fiche(), version, title: 'Soupe' }, { title: 'Référence', version: null }]);

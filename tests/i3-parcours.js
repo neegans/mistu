@@ -71,7 +71,7 @@ export async function runI3ParcoursTests({ eq, ok }) {
     let row = await P.ouvrirThermomix(entree(), d); row = await P.proposerThermomix({ importId: row.id, session: SESSION, documentId: 'doc' }, d);
     eq([row.status, row.resultat.type], ['a_verifier', 'questions'], 'I3 questions à vérifier');
     await refuse(() => P.garderThermomix({ importId: row.id, relu: true }, d), 'proposition_requise', 'I3 questions non conservables comme recette');
-    row = await P.modifierThermomix(row.id, { precisions: { reponses: ['Oui'] } }, d);
+    row = await P.modifierThermomix(row.id, { precisions: { reponses: ['Oui'] } }, { ...d, questionsAttendues: row.questions_tour_id });
     eq([row.status, row.questions, row.resultat], ['a_lancer', ['Le bol est-il froid ?'], null], 'I3 questions gardées malgré invalidation du résultat');
     row = await P.proposerThermomix({ importId: row.id, session: SESSION, documentId: 'doc' }, d);
     eq([row.status, row.resultat.type], ['a_verifier', 'refus'], 'I3 refus distinct d’une panne');

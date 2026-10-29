@@ -88,7 +88,7 @@ export async function runVisuelReperesEcranTests({ eq, ok }) {
       const navigations = [], root = await renderReperesRoute({ id: 'r-reperes' }, { import: row.id }, {}, depsDe(repo, { navigate: p => navigations.push(p) })); document.body.append(root);
       try {
         eq(root.querySelector('[name=description_fr]').disabled, true, 'Repères écran : saisie distante désactivée');
-        eq(root.querySelector('[data-role=ignorer-reperes]').disabled, true, 'Repères écran : clôture distante désactivée');
+        eq(root.querySelector('[data-role=ignorer-reperes]').disabled, false, 'Repères écran : clôture volontaire distante accessible sans reprendre la proposition');
         eq(root.querySelector('[data-role=proposer-reperes]').disabled, true, 'Repères écran : appareil distant sans appel');
         await P.ignorerReperes(row.id, { repo: autre }); root.querySelector('[data-role=actualiser-reperes]').click(); await root.attendreEcritures();
         eq(root.querySelector('[data-role=copier-reperes]').hidden, false, 'Repères écran : copie offerte après clôture distante');

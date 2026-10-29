@@ -3,6 +3,7 @@ import { mentionCycleRecette } from './corbeille.js';
 // Éditeur de version : extraction (saisie ou IA), correction ciblée, adaptation personnelle, traduction (spec §3.3, §6, §16).
 // L'original n'est jamais réécrit : chaque enregistrement crée une nouvelle RecipeVersion liée à son parent.
 import { estThermomix } from '../domain/thermomix.js';
+import { lireSourceSansThermomix } from '../domain/version-personnelle.js';
 import { el, toast, promptDialog, confirmDialog } from '../core/dom.js';
 import { t, label } from '../core/i18n.js';
 import { navigate } from '../core/router.js';
@@ -42,6 +43,8 @@ export async function renderRecipeEdit(params, query, ctx) {
   // `?v=` n'est suivi que pour une version de CETTE fiche (ronde 1) : jamais la base, ni l'héritage de lecture, d'une autre recette — retour à la courante.
   const demandee = recipe && query.v ? ctx.versionsById.get(query.v) : null;
   const base = recipe ? ((demandee?.recipe_id === recipe.id ? demandee : null) || currentVersion(recipe, versions)) : null;
+  const sourcePersonnelle = estThermomix(base) && kind !== 'translation' ? await lireSourceSansThermomix(base, { lire: id => repo.get('recipe_versions', id) }) : null;
+  let sansThermomix = false;
   const translationLocale = ['fr', 'en'].includes(query.locale) ? query.locale : f_defaultTranslation(recipe);
   // La traduction vérifie ses bornes et sa structure AVANT les jointures des champs de l'éditeur culinaire.
   if (kind === 'translation') return translationEditor({ recipe, base, ctx, gardeRecette, f: { translationLocale } });
@@ -117,6 +120,7 @@ export async function renderRecipeEdit(params, query, ctx) {
   const ingTa = el('textarea', { rows: 10, value: f.ingredientsText, placeholder: '2 c. à soupe d’huile d’olive\n400 g de spaghetti\n1 boîte (400 g) de tomates italiennes\nsel, au goût', onInput: (e) => { f.ingredientsText = e.target.value; } });
   const stepsTa = el('textarea', { rows: 10, value: f.stepsText, placeholder: aideEtapes, onInput: (e) => { f.stepsText = e.target.value; } });
   const notesTa = el('textarea', { rows: 2, value: f.notes, onInput: (e) => { f.notes = e.target.value; } }); // lot D : gardée pour y poser les notes lues
+  const changesTa = el('textarea', { rows: 3, value: f.changes, onInput: (e) => { f.changes = e.target.value; } });
   const champEtapes = field(t('Étapes'), stepsTa, parParagraphe ? aideEtapes : null);
   const linesPreview = el('div', null);
   const stepsPreview = el('div', null);
@@ -247,6 +251,21 @@ export async function renderRecipeEdit(params, query, ctx) {
   const aiStatus = el('div', { class: 'muted', style: { fontSize: '.9rem' } });
   const numInputs = { servings: num('servings'), prep: num('prep'), cook: num('cook'), active: num('active'), total: num('total'), printed_page: num('printed_page') };
 
+  const autreSource = versions.find(v => !estThermomix(v) && v.kind !== 'adaptation');
+  const panneauSource = sourcePersonnelle ? el('div', { class: 'status warn stack', style: { display: 'block' }, dataset: { role: 'correction-thermomix' } },
+    el('p', null, t('Une correction manuelle invalide les réglages TM7. Tu peux conserver ce document ou repartir des étapes source pour créer une version personnelle.')),
+    sourcePersonnelle.ok ? el('button', { class: 'btn', type: 'button', dataset: { role: 'reprendre-source-sans-thermomix' }, onClick: e => {
+      sansThermomix = true;
+      parParagraphe = porteUnSaut(sourcePersonnelle.source.steps);
+      f.stepsText = joindreEtapes(sourcePersonnelle.source.steps);
+      stepsTa.value = f.stepsText; stepsTa.placeholder = aideDe();
+      f.changes = [f.changes.trim(), t('Étapes source reprises sans les réglages Thermomix générés.')].filter(Boolean).join('\n\n');
+      changesTa.value = f.changes;
+      drawSteps(); e.currentTarget.disabled = true;
+      panneauSource.append(el('p', { role: 'status' }, t('Relis les étapes source et tes ingrédients avant d’enregistrer cette nouvelle version personnelle.')));
+    } }, t('Repartir des étapes source sans réglages TM7'))
+      : el('p', null, t('La version source est absente ou a changé. Le document reste conservé ; aucun ancien réglage n’est réutilisé.')),
+    !sourcePersonnelle.ok && autreSource ? el('a', { class: 'btn', href: `#/recipes/${recipe.id}?v=${autreSource.id}` }, t('Consulter une version source')) : null) : null;
   const right = el('div', { class: 'stack' },
     provider.configured ? null : carteConnexion(() => demarrerConnexion(ctx.sync?.auth), ctx), el('div', { class: 'row' }, aiBtn, aiStatus),
     field(t('Titre original *'), titleInput),
@@ -270,8 +289,8 @@ export async function renderRecipeEdit(params, query, ctx) {
       field(t('Portions'), numInputs.servings), field(t('Préparation (min)'), numInputs.prep), field(t('Cuisson (min)'), numInputs.cook), field(t('Actif (min)'), numInputs.active), field(t('Total (min)'), numInputs.total)),
     field(t('Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)'), ingTa),
     el('button', { class: 'btn small', onClick: reparse }, t('Analyser les lignes')), linesPreview,
-    champEtapes, stepsPreview, // l'aide « par paragraphe » reste visible : une zone préremplie cache son placeholder
-    kind === 'adaptation' ? field(t('Résumé des changements, raisons et compromis *'), el('textarea', { rows: 3, value: f.changes, onInput: (e) => { f.changes = e.target.value; } })) : null,
+    panneauSource, champEtapes, stepsPreview, // l'aide « par paragraphe » reste visible : une zone préremplie cache son placeholder
+    kind === 'adaptation' ? field(t('Résumé des changements, raisons et compromis *'), changesTa) : null,
     kind === 'adaptation' ? field(t('Statut'), select([{ value: 'proposed', label: t('Proposée') }, { value: 'tested', label: t('Testée par Neegan') }], f.status, (v) => { f.status = v; })) : null,
     field(t('Notes'), notesTa),
     el('div', { class: 'row' }, el('button', { class: 'btn primary big', onClick: save }, recipe ? t('Enregistrer une nouvelle version') : t('Enregistrer la recette')),
@@ -323,7 +342,7 @@ export async function renderRecipeEdit(params, query, ctx) {
       const dup = ctx.recipes.find((r) => r.edition_id === editionId && r.original_title.trim().toLowerCase() === f.title.trim().toLowerCase() && String(r.printed_page ?? '') === String(f.printed_page ?? ''));
       if (dup && !(await confirmDialog(t('Une recette « {t} » existe déjà dans ce livre à la même page. Créer quand même ?', { t: dup.original_title }), { okLabel: t('Créer un doublon') }))) return;
     }
-    const kindVersion = recipe && kind !== 'adaptation' && versions.length ? 'correction' : kind;
+    const kindVersion = estThermomix(base) ? 'adaptation' : recipe && kind !== 'adaptation' && versions.length ? 'correction' : kind;
     // Import ciblé (spec § 4.3.7, I4) : une correction hérite de sa parente ce que la lecture a dit — import_id (souple), incomplete, missing_page,
     // titre_lu — et la date de la lecture (lu_le : celle que la parente porte, sinon sa création), pour que le bandeau de la fiche date la LECTURE ;
     // rien hors d'une lecture (une parente sans import_id ne lègue rien), rien pour une adaptation, et RIEN pour une relecture par l'assistant faite
@@ -344,10 +363,10 @@ export async function renderRecipeEdit(params, query, ctx) {
     const lectureJournal = lu ? { ...(fermer ? { import_id: ligneLue.id } : {}), incomplete: lu.incomplete === true, missing_page: lu.missing_page === true, titre_lu: typeof lu.title === 'string' ? lu.title : null, uncertain_fields: champsIncertains(lu.uncertain_fields) } : {};
     const version = {
       id: repo.newId('rv'), recipe_id: recipeId, kind: kindVersion, parent_version_id: base?.id || null,
-      status: kind === 'adaptation' ? f.status : null, servings: n(f.servings), prep_minutes: n(f.prep), cook_minutes: n(f.cook), active_minutes: n(f.active), total_minutes: n(f.total),
+      status: kindVersion === 'adaptation' ? f.status : null, servings: n(f.servings), prep_minutes: n(f.prep), cook_minutes: n(f.cook), active_minutes: n(f.active), total_minutes: n(f.total),
       // Une ligne VÉRIFIÉE n'est plus incertaine (ronde 1, une seule règle) : la personne l'a relue — la fiche ne dit jamais « Vérifiée » et « incertaine ».
       ingredients: parsedLines.map((l) => ({ ...l, unit_candidates: l.unit_candidates || null, ...(Object.hasOwn(l, 'uncertain') ? { uncertain: l.uncertain === true && l.verification_state !== 'verified' } : {}) })), steps, constraints: estThermomix(base) ? structuredClone(base.constraints || {}) : {}, changes: f.changes.trim(), notes: f.notes.trim(),
-      provenance: { source_page_ids: pageIds, source_document_id: doc?.id || null, generated_by: f.aiUsed ? 'ai' : 'manual', model: f.aiModel, edition_id: editionId, convention_snapshot: convention ? { id: convention.id, revision: convention.revision, values: convention.values } : null, ...heritageLecture, ...lectureJournal, ...(estThermomix(base) ? { thermomix: structuredClone(base.provenance.thermomix), thermomix_invalide: true } : {}) },
+      provenance: { source_page_ids: pageIds, source_document_id: doc?.id || null, generated_by: f.aiUsed ? 'ai' : 'manual', model: f.aiModel, edition_id: editionId, convention_snapshot: convention ? { id: convention.id, revision: convention.revision, values: convention.values } : null, ...heritageLecture, ...lectureJournal, ...(sansThermomix ? { derived_from: base.id, thermomix_source_version_id: sourcePersonnelle.source.id } : estThermomix(base) ? { thermomix: structuredClone(base.provenance.thermomix), thermomix_invalide: true } : {}) },
       verification_state: parsedLines.some((l) => l.verification_state !== 'verified') ? 'to_verify' : 'verified',
     };
     const rec = targetRecipe ? { ...targetRecipe } : { id: recipeId, edition_id: editionId, favorite: false, tags: [], source_page_ids: [], ingredient_ids: [] };
@@ -356,7 +375,7 @@ export async function renderRecipeEdit(params, query, ctx) {
       printed_page: n(f.printed_page), source_label: f.source_label.trim() || rec.source_label || null,
       source_page_ids: [...new Set([...(rec.source_page_ids || []), ...pageIds])],
     });
-    if (kind !== 'adaptation') {
+    if (kindVersion !== 'adaptation') {
       rec.availability = availability === 'reference_only' && rec.availability ? rec.availability : availability;
       // I-1 : une page possiblement manquante ou une lecture incomplète n'est jamais comblée par une correction — la fiche reste partial au plus.
       if ((heritageLecture.incomplete || heritageLecture.missing_page || lectureJournal.incomplete || lectureJournal.missing_page) && rec.availability === 'available') rec.availability = 'partial';
@@ -378,6 +397,11 @@ export async function renderRecipeEdit(params, query, ctx) {
         if (Object.hasOwn(relue, champ)) r[champ] = champ === 'photo_origin' ? originePhotoAdmise(relue[champ]) : relue[champ];
         else delete r[champ];
       }
+      // Une adaptation n'édite pas l'original courant ; une correction arrivée pendant ce formulaire reste courante.
+      if (kindVersion === 'adaptation') for (const champ of ['current_version_id', 'availability', 'verification_state', 'ingredient_ids']) {
+        if (Object.hasOwn(relue, champ)) r[champ] = relue[champ];
+        else delete r[champ];
+      }
       assertVocabulaire(r, 'recipes');
       return r;
     };
@@ -385,7 +409,10 @@ export async function renderRecipeEdit(params, query, ctx) {
     const lot = { ...(targetRecipe ? {} : { recipes: [avecPhotoDe(rec)] }), recipe_versions: [version], source_pages: pageUpdates };
     const conditionFiche = targetRecipe ? {
       recipes: [{ key: targetRecipe.id, fusion: c => { if (!c) throw new TransitionRefusee('recipes', targetRecipe.id, null); return avecPhotoDe(c); } }],
-      ...(base ? { recipe_versions: [{ key: base.id, fusion: c => {
+      ...(sansThermomix ? { recipe_versions: sourcePersonnelle.ancetres.map(ancetre => ({ key: ancetre.id, fusion: c => {
+        if (JSON.stringify(c) !== JSON.stringify(ancetre)) throw new TransitionRefusee('recipe_versions', ancetre.id, null);
+        return null;
+      } })) } : base ? { recipe_versions: [{ key: base.id, fusion: c => {
         if (!c || c.recipe_id !== targetRecipe.id || projectionSourceTraduction(c) !== sourceOuverte) throw new TransitionRefusee('recipe_versions', base.id, null);
         return null; // contrôle seul : ne réécrit ni la version ni sa date
       } }] } : {}),

@@ -6,6 +6,7 @@
 // ait laissée à la personne. Le drapeau est relu ici, À L'EXÉCUTION, parce que c'est là que la course se joue : le
 // rendu peut avoir montré un conflit ordinaire, puis une passe de réception l'upgrader en « renvoyé » avant le
 // clic — et « Garder celle d'ailleurs » écrirait alors la version qui vient de PERDRE l'arbitrage I7.
+import { fermetureImportProtegee, importConcerne, gardeImportRelu } from './imports-clos.js';
 import { syncNow } from './clock.js';
 import { nettoyerChaines } from './lots.js';
 import { fusionnerFichier, memeRemote, HASH_FICHIER } from './fichiers.js';
@@ -13,6 +14,16 @@ import { CLE_CYCLE_CONFIRME, recettesDe } from './cycle.js';
 import { lireCycleRecette } from '../domain/cycle-recette.js';
 
 async function protectionContenu(db,conflit,copie) {
+  if (conflit.store === 'imports') {
+    const current = await db.get('imports', conflit.record_id);
+    if (fermetureImportProtegee(current, copie)) return null;
+    if (importConcerne(current) || importConcerne(copie)) {
+      const owner = (await db.get('sync_state', 'user_id'))?.value ?? null;
+      if (conflit.user_id != null && conflit.user_id !== owner) return null;
+      return { conditions: { imports: [{ key: conflit.record_id, fusion: gardeImportRelu(current) }],
+        sync_state: [{ key: 'user_id', fusion: row => { if ((row?.value ?? null) !== owner) throw Error('Compte du conflit changé'); return null; } }] }, recettes: [] };
+    }
+  }
   if(!['recipes','recipe_versions','recipe_translations','substitutions','dish_recipe_links'].includes(conflit.store)) return {conditions:{},recettes:[]};
   let id=conflit.store==='recipes'?conflit.record_id:copie?.recipe_id;
   let version=null;
@@ -32,7 +43,7 @@ async function protectionContenu(db,conflit,copie) {
 // la fiche en file, et c'est précisément le renvoi voulu. Le retrait du conflit voyage dans la même transaction et
 // reste interne (sync_conflicts n'est pas un magasin synchronisé : la capture ne le regarde pas).
 export async function garderIci(db, conflit) {
-  if(conflit?.kind==='cycle') return false;
+  if(['cycle','import_cloture'].includes(conflit?.kind)) return false;
   if (conflit?.store === 'assistant_config') return false; // K-5 : ce magasin n'a jamais de conflit à trancher
   if (conflit?.renvoye === true) return false; // R-L3-30 : la version d'ici part déjà, rien à trancher ici
   if (conflit?.store === 'files') return garderIciFichier(db, conflit);
@@ -63,7 +74,7 @@ export async function garderIci(db, conflit) {
 }
 
 export async function garderAilleurs(db, conflit) {
-  if(conflit?.kind==='cycle') return false; // la résolution doit conserver/réconcilier la commande explicite
+  if(['cycle','import_cloture'].includes(conflit?.kind)) return false; // la résolution doit conserver/réconcilier la commande explicite
   if (conflit?.store === 'assistant_config') return false; // K-5 : ce magasin n'a jamais de conflit à trancher
   const serveur = conflit.server;
   // R-L3-30 : refusé sur un conflit renvoyé — c'est ce geste-là qui écrasait la version d'ici par celle qui a
@@ -121,6 +132,7 @@ async function garderIciFichier(db, conflit) {
 // ordinaire, ce geste refuse, parce que celui-là attend vraiment une décision de la personne. Origine 'remote' :
 // un retrait de journal n'est pas un geste sur les données et ne repart jamais au serveur.
 export async function ignorerRenvoye(db, conflit) {
+  if (conflit?.kind === 'import_cloture') return false;
   if (conflit?.store === 'assistant_config') return false; // K-5 : ce magasin n'a jamais de conflit à trancher
   if (conflit?.renvoye !== true) return false;
   await db.mutate({ deletes: { sync_conflicts: [conflit.id] }, origin: 'remote' });
@@ -131,7 +143,7 @@ export async function purgerAnciens(db, maintenantMs = Date.now(), joursMax = 30
   const limite = maintenantMs - joursMax * 86400000;
   // Un `at` illisible ne se date pas : le conflit reste plutôt que d'être retiré par accident (la personne le voit
   // dans Réglages et peut trancher). Origine 'remote' : un retrait de journal n'est pas un geste sur les données.
-  const vieux = (await db.getAll('sync_conflicts')).filter((c) => c.kind!=='cycle' && Date.parse(c.at) < limite).map((c) => c.id);
+  const vieux = (await db.getAll('sync_conflicts')).filter((c) => !['cycle','import_cloture'].includes(c.kind) && Date.parse(c.at) < limite).map((c) => c.id);
   if (vieux.length) await db.mutate({ deletes: { sync_conflicts: vieux }, origin: 'remote' });
   return vieux.length;
 }

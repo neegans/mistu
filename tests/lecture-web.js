@@ -634,7 +634,9 @@ export async function runLectureWebTests({ eq, ok }) {
           if (!pendantRendu && store === 'imports') { pendantRendu = true; await repo.transitionner('imports', 'imp_r1', { attendus: ['a_verifier'], patch: { status: 'ignore' } }); window.dispatchEvent(new Event('online')); }
           return lus;
         } };
-        const avantMontage = await IC.renderImportCible({ id: 'rc_r1' }, {}, await ctxDe(), gestes({ repo: ignoreApresLecture }));
+        // La porte d'import vérifie désormais d'abord les propositions bloquantes. Pour provoquer la course
+        // pendant le rendu WEB lui-même, monter ce rendu directement ; son abonnement doit toujours rattraper.
+        const avantMontage = await W.renderImportWeb({ id: 'rc_r1' }, {}, await ctxDe(), gestes({ repo: ignoreApresLecture }));
         scene.append(avantMontage); // comme le routeur : au même tour que la fin de la route
         const figee = avantMontage.etatRouteWeb().status;
         eq([figee, await fini(() => avantMontage.etatRouteWeb().status === null), !!avantMontage.querySelector('[data-role="lire-web"]')], ['a_verifier', true, true], 'écran (ronde 1, rattrapage) : une transition notifiée pendant le rendu (ligne relue déjà périmée) est redessinée après le montage — l’écran offre la lecture, plus « Enregistrer »');

@@ -1,3 +1,5 @@
+import { panneauAbandonProposition } from './reprise-import.js';
+import { cibleReprise } from '../domain/import-cible.js';
 import { capturerRecette } from './recette-garde.js';
 import { memoireCycleImport, revoirLectureImport } from '../domain/contexte-import.js';
 import { recetteActive } from '../domain/cycle-recette.js';
@@ -413,6 +415,22 @@ export async function lireDansLeJournal({ kind, importId = null, pageIds = [], e
 export async function renderImportCible(params, query, ctx, deps = {}) {
   const { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch: fetchInjecte = undefined, pickFiles = pickDom, maintenant = horloge, battementMs = BATTEMENT_MS, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = deps;
   const recipe = ctx?.recipesById?.get(params?.id);
+  // Une proposition ouverte bloque la même recette : la rendre visible même si cet écran attendait des pages.
+  const propositions = recipe && repo.byIndex ? (await repo.byIndex('imports', 'recipe_id', recipe.id))
+    .filter(i => importOuvert(i) && ['thermomix','reperes'].includes(i.kind)) : [];
+  if (propositions.length) {
+    const blocage = el('div', {class:'card stack'}, el('p',{class:'status warn'},t('Un brouillon ou un import est déjà ouvert pour cette recette. Reprends-le ou termine-le explicitement.')));
+    const panneaux = [];
+    for (const ligne of propositions) {
+      const cible = cibleReprise(ligne);
+      if (cible) blocage.append(el('a',{class:'btn',href:'#'+cible},t('Reprendre le brouillon existant')));
+      const panneau = panneauAbandonProposition(ligne,{repo,ctx,confirmer:deps.confirmer,onAbandon:()=>navigate('/recipes/'+encodeURIComponent(recipe.id))});
+      panneaux.push(panneau);blocage.append(panneau);
+    }
+    blocage.attendreEcritures=()=>Promise.all(panneaux.map(p=>p.attendreEcritures()));
+    return blocage;
+  }
+
   // Lot B (§ 4.1, D-B13) : une fiche qui porte une adresse (signet, recette lue sur le web) s'ouvre dans la variante web de l'écran — mêmes gestes
   // injectés. Une fiche disponible à adresse y est admise (relecture, D-B18).
   if (typeof recipe?.source_url === 'string' && recipe.source_url) return renderImportWeb(params, query, ctx, deps);

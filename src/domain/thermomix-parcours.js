@@ -3,6 +3,8 @@
 import { ligneImportNeuve, IMPORTS_OUVERTS } from './import-cible.js';
 import { appelerAssistant, echecDomaine, sessionValide } from './passerelle.js';
 import { construireContexteThermomix, empreinteThermomix, validerReponseThermomix, fabriquerVersionThermomix, lireThermomix } from './thermomix.js';
+import { ignorerPropositionImport } from './reprise-import.js';
+import { extraireObjetJson } from './reponse-json.js';
 import { TransitionRefusee } from '../core/db.js';
 import { contexteRecetteImport, memoireCycleImport, verifierCycleImport, verifierCaptureImport } from './contexte-import.js';
 
@@ -61,8 +63,10 @@ function conditionsSource(row, source, recipe) {
 function memeBrouillon(current, attendu, repo) {
   verifierLigne(current); proprietaire(current, repo);
   if (current.source_version_id !== attendu.source_version_id || current.recipe_id !== attendu.recipe_id ||
-      revision(current) !== revision(attendu) || canon(current.contexte) !== canon(attendu.contexte)) throw erreur('brouillon_modifie');
+      revision(current) !== revision(attendu) || canon(current.contexte) !== canon(attendu.contexte) ||
+      tourQuestions(current) !== tourQuestions(attendu) || canon(questionsLues(current)) !== canon(questionsLues(attendu))) throw erreur('brouillon_modifie');
 }
+const tourQuestions = row => row.questions_tour_id || (questionsLues(row).length ? 'ancien:' + canon(questionsLues(row)) : null);
 function questionsLues(row) {
   const q = row?.resultat?.type === 'questions' ? row.resultat.questions : row.questions;
   if (q == null || (Array.isArray(q) && q.length === 0)) return [];
@@ -70,12 +74,54 @@ function questionsLues(row) {
   catch { throw erreur('questions_invalides'); }
 }
 
+function conserverProposition(row) {
+  return { contexte: structuredClone(row.contexte), source_version_id: row.source_version_id, resultat: structuredClone(row.resultat),
+    model: row.model ?? null, finished_at: row.finished_at ?? null, tentative_id: row.tentative_id ?? null,
+    expected_cycle_id: row.expected_cycle_id ?? null, owner_id: row.owner_id ?? null, tentative_suivante_id: null,
+    questions: questionsLues(row), questions_tour_id: tourQuestions(row), reponses_questions_id: row.reponses_questions_id ?? null };
+}
+function memeResultat(current, attendu) {
+  const vue = attendu?.journal_attendu || attendu;
+  if (canon(current.resultat) !== canon(vue.resultat) || canon(current.proposition_precedente) !== canon(vue.proposition_precedente)) throw erreur('brouillon_modifie');
+}
+export async function reprendrePropositionThermomix(importId, { repo, contexteRecette = null, attendu = null } = {}) {
+  const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo);
+  if (!MODIFIABLES.includes(row.status) || !row.proposition_precedente) throw erreur('proposition_precedente');
+  if (attendu) { memeBrouillon(row, attendu, repo); memeResultat(row, attendu); }
+  const precedente = row.proposition_precedente;
+  const aRelire = { ...row, ...precedente };
+  verifierCaptureImport(row, contexteRecette); verifierCaptureImport(aRelire, contexteRecette);
+  const {recipe,source} = await lireSources(aRelire,repo);
+  verifierCycleImport(recipe,aRelire);
+  const contexte = verifierContexte(aRelire,source,recipe), resultat = validerReponseThermomix(precedente.resultat,contexte);
+  const capture = await contexteRecetteImport(repo,recipe,aRelire,{contexte:contexteRecette});
+  await repo.transitionner('imports',importId,{attendus:MODIFIABLES,recettes:[capture],conditions:conditionsSource(aRelire,source,recipe),patch:current=>{
+    memeBrouillon(current,row,repo);memeResultat(current,row);
+    return {contexte,resultat,source_version_id:precedente.source_version_id,model:precedente.model,finished_at:precedente.finished_at,
+      questions:questionsLues(aRelire),questions_tour_id:tourQuestions(aRelire),reponses_questions_id:precedente.reponses_questions_id ?? null,
+      status:'a_verifier',phase:resultat.type,erreur:null,tentative_id:precedente.tentative_id,document_id_vol:null,
+      revision_brouillon:revision(row)+1,proposition_precedente:row.resultat?.type === 'proposition' ? conserverProposition(row) : null};
+  }});
+  return lireBrouillonThermomix(importId,{repo});
+}
+export async function ignorerPropositionPrecedenteThermomix(importId, {repo,contexteRecette = null,attendu = null} = {}) {
+  const row=verifierLigne(await repo.get('imports',importId));proprietaire(row,repo);verifierCaptureImport(row,contexteRecette);
+  if (!MODIFIABLES.includes(row.status) || !row.proposition_precedente) throw erreur('proposition_precedente');
+  if(attendu){memeBrouillon(row,attendu,repo);memeResultat(row,attendu);}
+  const recipe=await repo.get('recipes',row.recipe_id),capture=await contexteRecetteImport(repo,recipe,row,{contexte:contexteRecette});
+  await repo.transitionner('imports',importId,{attendus:MODIFIABLES,recettes:[capture],patch:current=>{
+    memeBrouillon(current,row,repo);memeResultat(current,row);
+    return {proposition_precedente:null,revision_brouillon:revision(row)+1};
+  }});
+  return lireBrouillonThermomix(importId,{repo});
+}
+
 export async function ouvrirThermomix({ recipeId, versionId, selection = [], demande = '', precisions = {}, langue = 'fr', contexteRecette = null } = {}, { repo, ...deps } = {}) {
   if (!propreId(recipeId) || !propreId(versionId)) throw erreur('source_absente');
   const moi = device(repo), id = repo.newId('imp');
   const refs = { recipe_id: recipeId, source_version_id: versionId };
   const { recipe, source } = await lireSources(refs, repo);
-  const contexte = construire(source, recipe, { selection, demande, precisions, langue });
+  const contexte = construire(source, recipe, { selection, demande, precisions: { ...precisions, reponses: [] }, langue });
   const row = { ...ligneImportNeuve({ id, kind: 'thermomix', recipe_id: recipeId, device_id: moi }), source_version_id: versionId,
     ...memoireCycleImport(contexteRecette || await contexteRecetteImport(repo, recipe)), contexte, phase: 'selection', revision_brouillon: 0, tentative_id: null, version_id: null, questions: [], copie_de: null };
   const conditions = { ...conditionsSource(row, source, recipe), imports: [{ key: id, absente: true }, { index: 'recipe_id', valeur: recipeId, exclus: IMPORTS_OUVERTS }] };
@@ -94,19 +140,22 @@ export async function lireBrouillonThermomix(importId, { repo } = {}) {
     if (row.resultat != null) resultat = validerReponseThermomix(row.resultat, contexte);
   } catch (e) { validation_erreur = convertir(e).code; }
   try { verifierCycleImport(recipe, row); } catch (e) { validation_erreur ||= convertir(e).code; }
-  return { ...row, contexte, resultat, questions, validation_erreur, lecture_seule: row.device_id !== device(repo) };
+  return { ...row, journal_attendu: structuredClone(row), questions_tour_id: tourQuestions(row), contexte, resultat, questions, validation_erreur, lecture_seule: row.device_id !== device(repo) };
 }
 
-export async function modifierThermomix(importId, patch = {}, { repo, contexteRecette = null } = {}) {
+export async function modifierThermomix(importId, patch = {}, { repo, contexteRecette = null, questionsAttendues = null } = {}) {
   const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo); verifierCaptureImport(row, contexteRecette);
   if (!MODIFIABLES.includes(row.status)) throw erreur(row.status === 'en_cours' ? 'appel_en_cours' : 'brouillon_ferme');
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).some(k => !['selection', 'demande', 'precisions', 'langue'].includes(k))) throw erreur('requete');
   const { recipe, source } = await lireSources(row, repo); verifierContexte(row, source, recipe);
   const contexte = construire(source, recipe, { ...row.contexte, ...patch });
-  const questions = questionsLues(row);
+  const questions = questionsLues(row), tour = tourQuestions(row);
+  if (row.resultat?.type === 'proposition' && row.proposition_precedente) throw erreur('proposition_precedente');
+  const precedente = row.proposition_precedente || (row.resultat?.type === 'proposition' ? conserverProposition(row) : null);
+  if (contexte.precisions.reponses.some(x => x.trim()) && (!tour || questionsAttendues !== tour)) throw erreur('questions_modifiees');
   await repo.transitionner('imports', importId, { attendus: MODIFIABLES, patch: current => {
-    memeBrouillon(current, row, repo);
-    return { contexte, questions, status: 'a_lancer', phase: 'selection', revision_brouillon: revision(row) + 1,
+    memeBrouillon(current, row, repo); memeResultat(current,row);
+    return { proposition_precedente: precedente, contexte, questions, questions_tour_id: tour, reponses_questions_id: contexte.precisions.reponses.some(x => x.trim()) ? tour : null, status: 'a_lancer', phase: 'selection', revision_brouillon: revision(row) + 1,
       resultat: null, reponse_brute: null, erreur: null, model: null, tentative_id: null, document_id_vol: null, version_id: null };
   }, recettes: [await contexteRecetteImport(repo, recipe, row, {contexte:contexteRecette})], conditions: conditionsSource(row, source, recipe) });
   return lireBrouillonThermomix(importId, { repo });
@@ -123,7 +172,7 @@ export function construireDemandeThermomix(contexte, questions = []) {
     'Mode manuel ou vapeur. Manuel : température null (sans chauffe) ou 100. Vapeur : température null, jamais Varoma comme température. Secondes : entier 1..1800. Vitesse : mijotage (chaîne) ou entier 1..10 ; chauffe ET vapeur au plus 2. Sens normal ou inverse ; inverse au plus 2.',
     'Accessoires : couteau, fouet, panier, varoma, panier_varoma. Fouet uniquement manuel, normal, vitesse au plus 4. Panier ou panier_varoma au plus vitesse 1. Varoma uniquement vapeur. Aucun Cutter, Sensor, couvre-lame, Turbo, Pétrin ni autre mode.',
     'Toute chauffe connue ou transfert thermique inconnu interdit ensuite vitesse >2. Pour vitesse >2 sans chauffe, l’étape doit figurer dans precisions.froid_confirme et ne pas contredire une chauffe connue. Sans chauffe ne signifie pas froid.',
-    'Vapeur : eau explicitement renseignée au moins 500 g, cumul vapeur de tout le plan au plus 1800 s. Cumul fouet au plus 7200 s. Ne découpe pas une cuisson pour contourner une borne. Bol maximum 2.2 L, panier 1.4 L ; ne convertis pas grammes en litres. Jamais chauffer de l’huile seule ni ajouter de graisse déjà chaude.',
+    'Vapeur : eau de service explicitement renseignée de 500 à 2200 g, distincte des ingrédients source placés par les actions. Cette quantité totale vaut pour toute la séquence, jamais un nouvel ajout à chaque réglage. Cumul vapeur de tout le plan au plus 1800 s. Cumul fouet au plus 7200 s. Ne découpe pas une cuisson pour contourner une borne. Cumule les volumes mesurés présents par contenant, eau comprise dans le bol : bol maximum 2.2 L, panier 1.4 L ; ne convertis pas la masse alimentaire en litres. Jamais chauffer de l’huile seule ni ajouter de graisse déjà chaude.',
     'Préparation exacte : {"type":"preparation","operation":"ajouter","ingredients":["i1"],"contenant":"bol"}. Opération ajouter, reserver, transvaser, racler, repartir_varoma ou verifier_texture. Contenant bol, panier, varoma ou recipient. Pour transvaser, racler et verifier_texture, ingredients vaut []. Racler impose contenant bol ; repartir_varoma impose contenant varoma. Aucune instruction opérationnelle en prose libre.',
     'Le début de la partie adaptée impose des contenants vides : bol, panier et Varoma. Décris les placements par les préparations structurées avant les réglages ; un réglage seul ne place aucun ingrédient.',
     'Les opérations ajouter, reserver et repartir_varoma placent ou déplacent la quantité source entière vers leur contenant. Ne place jamais deux fois une référence au même endroit. Transvaser déplace tout le contenu du bol vers le contenant choisi (jamais bol), puis laisse le bol vide. Racler et verifier_texture ne changent pas les ingrédients présents.',
@@ -156,7 +205,7 @@ async function ecrireEchec(row, code, extra, session, deps) {
     verifierTentative(current, row, deps.repo, session, deps);
     return { status: 'echec', phase: 'selection', erreur: { raison: code, extra: extra || {} }, resultat: null, reponse_brute: null,
       document_id_vol: null, finished_at: (deps.maintenant ?? maintenantParDefaut)() };
-  } }); }
+  }, recettes: deps.contexteRecette ? [{...deps.contexteRecette,historique:true}] : [] }); }
   catch (e) {
     if (e instanceof TransitionRefusee || ['brouillon_modifie', 'tentative_perimee'].includes(e.code)) return await deps.repo.get('imports', row.id);
     throw e;
@@ -164,30 +213,37 @@ async function ecrireEchec(row, code, extra, session, deps) {
 }
 
 export async function proposerThermomix({ importId, session, documentId } = {}, deps = {}) {
-  const { repo, contexteRecette = null } = deps;
+  const repo = deps.repo;
+  let contexteRecette = deps.contexteRecette || null;
   let row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo); verifierCaptureImport(row, contexteRecette);
   if (row.status === 'en_cours') throw erreur('appel_en_cours');
   if (!['a_lancer', 'echec'].includes(row.status)) throw erreur(TERMINES.includes(row.status) ? 'brouillon_ferme' : 'demande_a_modifier');
   const { recipe, source } = await lireSources(row, repo);
   const contexte = verifierContexte(row, source, recipe);
+  contexteRecette = await contexteRecetteImport(repo, recipe, row, {contexte:contexteRecette});
+  deps = {...deps,contexteRecette};
+  if (row.proposition_precedente?.tentative_suivante_id) throw erreur('proposition_precedente');
   if (!contexte.selection.length) throw erreur('selection_requise');
   if (!sessionValide(session)) throw erreur('non_connecte');
   if (!(deps.enLigne ?? (() => typeof navigator === 'undefined' || navigator.onLine !== false))()) throw erreur('hors_ligne');
   if (deps.signal?.aborted) throw erreur('annule');
   if (!propreId(documentId)) throw erreur('document_absent');
   if (!compteIdentique(session, deps)) throw erreur('compte_change');
+  if (contexte.precisions.reponses.some(x => x.trim()) && row.reponses_questions_id !== tourQuestions(row)) throw erreur('questions_modifiees');
   const demande = construireDemandeThermomix(contexte, questionsLues(row));
   const tentativeId = repo.newId('tm7'), quand = (deps.maintenant ?? maintenantParDefaut)();
   try {
     row = await repo.transitionner('imports', importId, { attendus: ['a_lancer', 'echec'], patch: current => {
       memeBrouillon(current, row, repo);
       if (!compteIdentique(session, deps)) throw erreur('compte_change');
-      return { status: 'en_cours', phase: 'appel', tentative_id: tentativeId, appels: (Number.isSafeInteger(current.appels) ? current.appels : 0) + 1,
+      memeResultat(current,row);
+      return { proposition_precedente: row.proposition_precedente ? {...row.proposition_precedente,tentative_suivante_id:tentativeId,contexte_tentative:structuredClone(contexte)} : null, status: 'en_cours', phase: 'appel', tentative_id: tentativeId, appels: (Number.isSafeInteger(current.appels) ? current.appels : 0) + 1,
         document_id_vol: documentId, started_at: quand, battement_at: quand, finished_at: null, resultat: null, reponse_brute: null, erreur: null, model: null };
     }, recettes: [await contexteRecetteImport(repo, recipe, row, {contexte:contexteRecette})], conditions: conditionsSource(row, source, recipe) });
   } catch (e) { if (e instanceof TransitionRefusee) throw erreur('appel_en_cours'); throw convertir(e); }
 
   try {
+    deps.surDepart?.(structuredClone(row));
     const r = await appelerAssistant('creation', { max_tokens: 16000, system: demande.system, messages: [{ role: 'user', content: demande.user }] },
       { fetch: deps.fetch, session, config: deps.config, signal: deps.signal, tentativeMs: deps.tentativeMs ?? 135000, corpsMax: 1024 * 1024 });
     if (!compteIdentique(session, deps)) throw erreur('compte_change');
@@ -196,7 +252,7 @@ export async function proposerThermomix({ importId, session, documentId } = {}, 
     if (json.stop_reason === 'max_tokens') return ecrireEchec(row, 'interrompu', {}, session, deps);
     if (json.stop_reason === 'refusal') return ecrireEchec(row, 'refus', {}, session, deps);
     if (!Array.isArray(json.content) || !json.content.length || json.content.some(b => !b || b.type !== 'text' || typeof b.text !== 'string')) throw erreur('reponse_illisible');
-    let raw; try { raw = JSON.parse(json.content.map(b => b.text).join('')); } catch { throw erreur('reponse_illisible'); }
+    let raw; try { raw = extraireObjetJson(json.content.map(b => b.text).join('')); } catch { throw erreur('reponse_illisible'); }
     let resultat; try { resultat = validerReponseThermomix(raw, contexte); } catch (e) { throw convertir(e); }
     const model = typeof json.model === 'string' && /^[\x20-\x7e]{1,120}$/u.test(json.model) ? json.model : null;
     const usage = Number.isSafeInteger(json.usage?.input_tokens) && json.usage.input_tokens >= 0 && Number.isSafeInteger(json.usage?.output_tokens) && json.usage.output_tokens >= 0
@@ -204,7 +260,7 @@ export async function proposerThermomix({ importId, session, documentId } = {}, 
     try { return await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: current => {
       verifierTentative(current, row, repo, session, deps);
       if (deps.signal?.aborted) throw erreur('annule');
-      return { status: 'a_verifier', phase: resultat.type, resultat, questions: resultat.type === 'questions' ? resultat.questions : questionsLues(row),
+      return { ...(resultat.type === 'questions' ? { tour_questions_precedent: questionsLues(row).length ? {id:tourQuestions(row),questions:questionsLues(row),reponses:[...contexte.precisions.reponses]} : null, contexte: { ...contexte, precisions: { ...contexte.precisions, reponses: [] } }, questions_tour_id: tentativeId, reponses_questions_id: null, revision_brouillon: revision(row) + 1 } : {}), status: 'a_verifier', phase: resultat.type, resultat, questions: resultat.type === 'questions' ? resultat.questions : questionsLues(row),
         erreur: null, reponse_brute: null, model, usage, document_id_vol: null, finished_at: (deps.maintenant ?? maintenantParDefaut)() };
     }, recettes: [await contexteRecetteImport(repo, recipe, row, { historique: true, contexte:contexteRecette })], conditions: conditionsSource(row, source, recipe) }); }
     catch (e) { if (e instanceof TransitionRefusee || ['brouillon_modifie', 'tentative_perimee'].includes(e.code)) return await repo.get('imports', importId); throw e; }
@@ -214,25 +270,21 @@ export async function proposerThermomix({ importId, session, documentId } = {}, 
   }
 }
 
-export async function annulerThermomix(importId, { repo, documentId, maintenant = maintenantParDefaut } = {}) {
+export async function annulerThermomix(importId, { repo, documentId, contexteRecette = null, maintenant = maintenantParDefaut } = {}) {
   const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo);
   if (row.status !== 'en_cours') return row;
   if (row.document_id_vol !== documentId) throw erreur('autre_onglet');
+  const capture=await contexteRecetteImport(repo,await repo.get('recipes',row.recipe_id),row,{historique:true,contexte:contexteRecette});
   return repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: current => {
     memeBrouillon(current, row, repo);
     if (current.tentative_id !== row.tentative_id || current.document_id_vol !== documentId) throw erreur('tentative_perimee');
     return { status: 'echec', phase: 'selection', resultat: null, reponse_brute: null, erreur: { raison: 'annule', extra: {} }, document_id_vol: null, finished_at: maintenant() };
-  } });
+  }, recettes:[capture] });
 }
 
-export async function ignorerThermomix(importId, { repo, maintenant = maintenantParDefaut } = {}) {
-  const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo);
-  if (row.status === 'ignore') return row;
-  if (!MODIFIABLES.includes(row.status)) throw erreur(row.status === 'en_cours' ? 'appel_en_cours' : 'brouillon_ferme');
-  return repo.transitionner('imports', importId, { attendus: MODIFIABLES, patch: current => {
-    memeBrouillon(current, row, repo);
-    return { status: 'ignore', phase: 'termine', document_id_vol: null, finished_at: maintenant() };
-  } });
+export async function ignorerThermomix(importId, deps = {}) {
+  verifierLigne(await deps.repo.get('imports', importId));
+  return ignorerPropositionImport(importId, deps);
 }
 
 export async function copierBrouillonThermomix(importId, deps = {}) {
@@ -246,9 +298,18 @@ export async function copierBrouillonThermomix(importId, deps = {}) {
   return lireBrouillonThermomix(copie.id, deps);
 }
 
-export async function garderThermomix({ importId, relu, contexteRecette = null } = {}, { repo, maintenant = maintenantParDefaut } = {}) {
+export async function garderThermomix({ importId, relu, contexteRecette = null, attendu = null } = {}, { repo, maintenant = maintenantParDefaut } = {}) {
   if (relu !== true) throw erreur('relecture_requise');
   const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo); verifierCaptureImport(row, contexteRecette);
+  const verifierRelecture = current => {
+    if (!attendu) return; // les appels de domaine historiques n'ont pas d'écran ; l'écran transmet toujours sa copie relue
+    const vue = attendu.journal_attendu || attendu;
+    memeBrouillon(current, vue, repo); memeResultat(current, vue);
+    if (current.id !== vue.id || current.kind !== vue.kind || current.tentative_id !== vue.tentative_id ||
+        current.model !== vue.model || (current.expected_cycle_id ?? null) !== (vue.expected_cycle_id ?? null) ||
+        (current.owner_id ?? null) !== (vue.owner_id ?? null)) throw erreur('brouillon_modifie');
+  };
+  verifierRelecture(row);
   const deja = async current => {
     if (current?.status !== 'enregistre' || !propreId(current.version_id)) return null;
     verifierLigne(current); proprietaire(current, repo);
@@ -276,6 +337,7 @@ export async function garderThermomix({ importId, relu, contexteRecette = null }
   conditions.recipe_versions.push({ key: version.id, absente: true });
   try {
     await repo.transitionner('imports', importId, { attendus: ['a_verifier'], patch: current => {
+      verifierRelecture(current);
       memeBrouillon(current, row, repo);
       if (current.tentative_id !== row.tentative_id || canon(current.resultat) !== canon(row.resultat)) throw erreur('tentative_perimee');
       return { status: 'enregistre', phase: 'termine', version_id: version.id, reponse_brute: null, finished_at: maintenant() };

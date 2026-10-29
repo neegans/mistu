@@ -163,12 +163,10 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
       const bundles = exportBundles(ctx, { includeReferences });
       const invalides = bundles.filter(b => !gardeThermomix(b.version).ok);
       if (invalides.length) {
-        etatExport.replaceChildren(el('p', { class: 'status warn' }, t('L’export est bloqué : ces recettes contiennent des réglages TM7 à revoir. Aucune recette n’a été exportée.')),
+        etatExport.replaceChildren(el('p', { class: 'status warn' }, t('Les recettes à revoir sont conservées comme documents. Leurs anciens réglages TM7 ne sont pas des instructions de cuisson validées.')),
           ...invalides.map(b => el('a', { class: 'btn link', href: `#/recipes/${encodeURIComponent(b.recipe.id)}?v=${encodeURIComponent(b.version.id)}` },
             t('Revoir la recette source'), ' — ', b.recipe.display_title || b.recipe.original_title)));
-        return;
-      }
-      etatExport.replaceChildren();
+      } else etatExport.replaceChildren();
       await exporter(bundles);
     } catch {
       etatExport.replaceChildren(el('p', { class: 'status warn' }, t('L’export n’a pas pu être préparé. Réessaie.')));
@@ -177,14 +175,14 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
   root.append(section(t('Exporter des recettes'),
     el('p', { class: 'muted' }, t('Formats d’échange : la version courante de chaque recette disponible, dans sa langue d’origine. Durées ou portions inconnues omises ; provenance et statut d’adaptation dans les champs source/notes.')),
     el('div', { class: 'row' },
-      el('button', { class: 'btn', onClick: () => preparerExport(false, bundles => telechargerRecettes(new Blob([JSON.stringify(bundles.map((b) => toJsonLd(b)), null, 2)], { type: 'application/ld+json' }), 'cuisine-os-recettes.jsonld')) }, t('Recipe / JSON-LD')),
-      el('button', { class: 'btn', onClick: () => preparerExport(false, bundles => telechargerRecettes(new Blob([toPaprikaYaml(bundles)], { type: 'text/yaml;charset=utf-8' }), 'cuisine-os-recettes.yml')) }, t('YAML compatible Paprika')),
+      el('button', { class: 'btn', onClick: () => preparerExport(false, bundles => telechargerRecettes(new Blob([JSON.stringify(bundles.map((b) => toJsonLd(b, { documentaire: true })), null, 2)], { type: 'application/ld+json' }), 'cuisine-os-recettes.jsonld')) }, t('Recipe / JSON-LD')),
+      el('button', { class: 'btn', onClick: () => preparerExport(false, bundles => telechargerRecettes(new Blob([toPaprikaYaml(bundles, { documentaire: true })], { type: 'text/yaml;charset=utf-8' }), 'cuisine-os-recettes.yml')) }, t('YAML compatible Paprika')),
       el('button', { class: 'btn', onClick: () => preparerExport(true, async disponibles => {
         const bundles = disponibles.map((b) => ({ ...b, pages: (b.recipe.source_page_ids || []).map((id) => ctx.pagesById.get(id)).filter(Boolean) }));
         const shas = new Set(bundles.flatMap((b) => b.pages.map((p) => p.sha256)));
         const filesBySha = new Map();
         for (const sha of shas) { const f = await repo.getFile(sha); if (f) filesBySha.set(sha, f); }
-        const site = toReadableSite(bundles, filesBySha, { locale: s.ui_locale });
+        const site = toReadableSite(bundles, filesBySha, { locale: s.ui_locale, documentaire: true });
         const entries = [...site.entries];
         for (const [path, f] of site.images) entries.push({ path, data: new Uint8Array(await f.blob.arrayBuffer()) });
         telechargerRecettes(new Blob([createZip(entries)], { type: 'application/zip' }), 'cuisine-os-copie-lisible.zip');
@@ -819,9 +817,19 @@ export function syncSectionL3(model, gestes = {}) {
   }
   const conflits = model.conflits || [];
   if (conflits.length) {
-    noeuds.push(el('h3', null, t('Conflits à trancher')),
+    if (conflits.some(c => c.kind !== 'import_cloture')) noeuds.push(el('h3', null, t('Conflits à trancher')),
       el('p', { class: 'muted' }, t('Choisis celle qui compte ; rien n’est fusionné.')));
+    if (conflits.some(c => c.kind === 'import_cloture')) noeuds.push(el('h3', null, t('Réponses conservées après clôture')));
     for (const c of conflits) {
+      if (c.kind === 'import_cloture') {
+        noeuds.push(el('div', { class: 'status stack', dataset: { conflit: String(c.id) } },
+          el('p', null, t('Ce brouillon est terminé. Une autre copie reste consultable sur cet appareil, sans être appliquée.')),
+          el('p', null, c.libelle),
+          el('details', null, el('summary', null, t('Consulter la copie conservée')),
+            el('pre', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '22rem', overflow: 'auto' } }, c.copieLocale)),
+          c.recipeId ? el('a', { class: 'btn', href: `#/recipes/${encodeURIComponent(c.recipeId)}` }, t('Consulter la recette')) : null));
+        continue;
+      }
       if (c.kind === 'cycle') {
         noeuds.push(el('div', {class:'status warn stack',dataset:{conflit:String(c.id)}},
           el('p', null, t('Cette modification a été faite avant un retrait ou une restauration. Ta copie est conservée.')),
@@ -1080,6 +1088,7 @@ export function syncSectionModel({ available = false, reason = null, user = null
         dateAilleurs: formatDate(c.server?.updated_at || c.at, { withTime: true }),
         kind: c.kind,
         ...(c.kind === 'cycle' ? {copieLocale:JSON.stringify(c.local ?? {},null,2),peutAbandonnerCycle:c.store === 'recipes',recipeId:c.store === 'recipes' ? c.record_id : c.local?.recipe_id || c.server?.data?.id || null} : {}),
+        ...(c.kind === 'import_cloture' ? { copieLocale: JSON.stringify(c.server?.data ?? {}, null, 2), recipeId: c.local?.recipe_id || null } : {}),
         // R-L3-29 : la version d'ici est DÉJÀ repartie — ce n'est pas une question posée à la personne. Jamais
         // deviné : seule la réception pose ce drapeau, et faux veut dire « il y a vraiment un choix à faire ».
         renvoye: c.renvoye === true,

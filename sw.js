@@ -1,7 +1,7 @@
 // Service worker : coquille applicative en cache pour consultation hors connexion des recettes déjà chargées.
 // Les nouvelles demandes IA et les recherches de métadonnées ne fonctionnent pas hors connexion (spec §15).
 importScripts('./sw-rules.js');
-const VERSION = 'cuisine-os-v0.23.1-1';
+const VERSION = 'cuisine-os-v0.23.2-1';
 // Tous les modules de production sont inclus ; tests/ reste chargé à la demande.
 // La complétude de cette liste est vérifiée par tests/sync.js (graphe d'imports depuis src/app.js) : un chemin
 // manquant ferait répondre 404 à cache.addAll et l'installation entière échouerait.
@@ -12,12 +12,14 @@ const SHELL = [
   './src/app.js',
   './src/domain/traductions.js', './src/domain/heure-locale.js',
   './src/domain/reperes.js', './src/domain/reperes-parcours.js', './src/ui/reperes.js', './src/ui/reperes-affichage.js', './src/ui/photos-visibles.js', './src/ui/photo-gestion.js',
-  './src/domain/thermomix.js', './src/domain/thermomix-parcours.js', './src/domain/thermomix-session.js',
+  './src/domain/thermomix.js',
+  './src/domain/reponse-json.js', './src/domain/reprise-import.js', './src/domain/version-personnelle.js', './src/domain/thermomix-parcours.js', './src/domain/thermomix-session.js',
+  './src/ui/reprise-import.js',
   './src/ui/thermomix.js', './src/ui/cookidoo.js', './src/ui/thermomix-garde.js',
   './src/vendor/supabase-2.117.3.umd.js',
   './src/core/blob-urls.js', './src/core/bornes.js', './src/core/bus.js', './src/core/db.js', './src/core/dom.js', './src/core/hash.js', './src/core/i18n.js', './src/core/ids.js', './src/core/image.js', './src/core/isbn.js', './src/core/lien.js', './src/core/log.js', './src/core/router.js', './src/core/zip.js',
   './src/sync/auth.js', './src/sync/backfill.js', './src/sync/clock.js', './src/sync/config.js', './src/sync/conflits.js', './src/sync/fichiers.js', './src/sync/lots.js', './src/sync/mime.js', './src/sync/moteur.js',
-  './src/sync/outbox.js', './src/sync/pull.js', './src/sync/push.js', './src/sync/reponses.js', './src/sync/tables.js', './src/sync/transport.js',
+  './src/sync/outbox.js', './src/sync/pull.js', './src/sync/push.js', './src/sync/reponses.js', './src/sync/imports-clos.js', './src/sync/tables.js', './src/sync/transport.js',
   './src/i18n/en.js',
   './src/model/repo.js', './src/model/schema.js', './src/model/seed.js',
   './src/domain/cuisine-personnelle.js', './src/domain/livre-bibliographie.js', './src/domain/livre-parcours.js', './src/domain/photo-page.js',
