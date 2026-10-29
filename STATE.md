@@ -1,5 +1,18 @@
 # STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — L0 CONSTRUIT LOCALEMENT EN 0.22.0 ; PUBLICATION PRÉCÉDENTE 0.21.1
 
+**29 octobre 2026 — SUITE DU PLAN : SPEC L1 PRÊTE POUR RELECTURE.**
+Sur « continu », préparation du lot suivant : [corbeille individuelle](docs/superpowers/specs/2026-10-29-l1-corbeille-individuelle-design.md).
+Branche `l1-corbeille-individuelle`, base `9c823b0` contenant L0. Périmètre proposé : recettes autonomes sans édition,
+retrait/restauration durables, historique lisible, gardes des résultats tardifs et compatibilité des anciens clients.
+L’audit montre qu’un simple marqueur JSON serait effaçable par la synchronisation actuelle ; proposition de commandes de cycle explicites,
+migration serveur additive, index de corbeille (DB5) et archives 2 lisibles par le nouveau client avec les archives 1.
+Deux preuves isolées lues : arbitrage actuel de réception incompatible avec ce seul marqueur, fermeture d’une connexion DB4 lors
+d’un passage témoin en 5 puis `VersionError` de l’ancien ouvreur. Ce ne sont pas des tests d’un L1 déjà construit.
+Revue technique croisée de la proposition : restauration d’archive refusée intégralement en cas de cycle divergent pour préserver tous les liens ;
+cycles mal formés retrouvables en consultation, éligibilité relue lors du geste.
+**Spec en attente de relecture de Neegan ; aucun code L1, aucune migration ni publication effectués.** Cible proposée 0.23.0 ; code local toujours 0.22.0.
+Le bilan L0 ci-dessous reste la dernière suite exécutée. Suite : relecture avant construction, selon la méthode d’`AGENTS.md`.
+
 **29 octobre 2026 — PLAN DIRECTEUR : LOT L0 APPROUVÉ ET CONSTRUIT LOCALEMENT.**
 Neegan fournit `Mistu_Plan_Directeur_Interface_et_Fonctions_0.21.1.md`, conservé à l’identique dans
 [`docs/lots/2026-10-29-plan-directeur-interface-fonctions.md`](docs/lots/2026-10-29-plan-directeur-interface-fonctions.md).

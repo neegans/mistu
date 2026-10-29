@@ -3331,6 +3331,17 @@ DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de
 R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
 404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
 
+### Plan directeur — L1 : corbeille individuelle (29 octobre 2026 — spec pour relecture)
+
+Sur « continu », préparation de la [spec L1](docs/superpowers/specs/2026-10-29-l1-corbeille-individuelle-design.md),
+branche `l1-corbeille-individuelle`, base `9c823b0` contenant L0. Aucune construction ni publication L1 à ce stade.
+Proposition : recettes autonomes, marqueur et jeton de cycle conservé après restauration, commandes durables distinctes des `put`,
+gardes métier communes et protection serveur contre les anciens écrivains ; historique et sessions existantes conservés.
+Index de corbeille réellement utilisé justifiant DB5, archive 2 refusée par les anciens clients et lecture 1/2 dans le nouveau,
+migration serveur additive nécessaire. Les numéros proposés ne sont pas encore appliqués.
+Audits en lecture seule et deux preuves isolées dans `.superpowers/sdd/2026-10-29-l1-spec/preuves.json` ; aucune suite complète relancée.
+Relecture de Neegan requise avant construction selon la méthode d’`AGENTS.md`. Dernier code local 0.22.0, dernière publication 0.21.1.
+
 ### Plan directeur — L0 : cohérence des données et des parcours (29 octobre 2026 — local 0.22.0)
 
 **Périmètre approuvé sur « go ».** [Plan fourni](docs/lots/2026-10-29-plan-directeur-interface-fonctions.md),
