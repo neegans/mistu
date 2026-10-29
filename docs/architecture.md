@@ -1655,7 +1655,8 @@ IA et invalide les réglages précédents. Les exports JSON-LD/Paprika/HTML cons
 durées globales. Les exports globaux des Réglages signalent les plans invalides avant toute génération, avec des liens vers les versions
 concernées. Les sauvegardes conservent le plan, qui reste revalidé à la lecture.
 
-Six modules ajoutés au cache, application `0.20.0`, DB 4. Les preuves finales et la distinction local/publié sont dans `STATE.md`.
+Six modules ajoutés au cache, application `0.20.0` publiée, DB 4. Suite publique **6820/6820** et cuisine hors ligne vérifiées ;
+preuves et limites matérielles dans `STATE.md`.
 
 ## Livre sans saisie, photos et notes (lot I2, 28 octobre 2026)
 

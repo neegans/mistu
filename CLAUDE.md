@@ -3331,12 +3331,14 @@ DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de
 R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
 404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
 
-### Chef Thermomix (28 octobre 2026, lot I3 — construit localement)
+### Chef Thermomix (28 octobre 2026, lot I3 — publié en 0.20.0)
 
 **Autorisation et état.** [Spec révision 1](docs/superpowers/specs/2026-10-28-chef-thermomix-design.md) approuvée par Neegan sur « go » ;
 [plan](docs/superpowers/plans/2026-10-28-chef-thermomix.md). Branche `chef-thermomix`, base `34105d2`, dépôt `~/projects/mistu`, serveur 8102.
-`APP_VERSION 0.20.0`, cache `cuisine-os-v0.20.0-1` (six modules neufs), DB 4. Publication autorisée par Neegan (« promote tout ») : commit, intégration dans `main`, push
-et contrôle Pages en cours ; le dernier public vérifié reste I2 `0.19.0`. Aucun magasin, outil assistant ou changement SQL ; transport par l’outil `creation` existant.
+`APP_VERSION 0.20.0`, cache `cuisine-os-v0.20.0-1` (six modules neufs), DB 4. Publication faite sur « promote tout » de Neegan : commit de code `9fb825d`, intégration en avance rapide dans `main`,
+push et build Pages réussis le 28 octobre à 20 h 42 HAE. Public vérifié en **0.20.0**, suite **6820/6820** sans erreur JavaScript
+ni requête hors origine ; neuf fichiers comparés identiques, six modules en cache, relecture/conservation/copie/rechargement et cuisine
+hors ligne réussis dans un profil jetable, assistant simulé. Aucun magasin, outil assistant ou changement SQL ; transport par l’outil `creation` existant.
 
 **Comportement.** Adaptation des étapes choisies d’une version précise, ingrédients et autres étapes conservés, nouvelle version IA non testée
 après comparaison et relecture. Profil TM7 NA 120 V fermé : manuel/vapeur, sans chauffe ou 100 °C ; les valeurs nouvelles restent estimées.
@@ -3364,7 +3366,7 @@ Registre local ignoré par Git : `.superpowers/sdd/2026-10-28-chef-thermomix/`.
 **Cookidoo et suite.** Copie assistée par champ ou texte complet avec repli sélectionnable. Aucun compte Cookidoo manipulé dans Mistu.
 La documentation confirme la synchronisation des Recettes créées vers TM7 et leur exclusion de Recipe Handover. Le balisage effectif des
 modes et du sens inverse reste à vérifier sur le compte canadien ; les consignes restent lisibles et à régler manuellement si nécessaire.
-Publication autorisée sur « promote tout », puis essai d’une recette sur son TM7. Rulings de construction : spec § 11.
+Publication terminée ; recharger les appareils en `0.20.0`, puis essayer une recette sur son TM7. Rulings de construction : spec § 11.
 
 ### Livre sans saisie, photos et notes (28 octobre 2026, lot I2)
 
@@ -3397,7 +3399,7 @@ Le réglage `sync_activity` continue de concerner l’historique de **consultati
 le contrat de synchronisation existant. La fidélité du modèle sur Trinity, Safari/iPhone physique et deux vrais appareils ne sont pas attestés.
 
 **Gestes de Neegan après publication autorisée.** Actualiser tous les appareils avant les
-essais réels (un ancien client peut perdre les champs nouveaux). Aucune migration ou fonction serveur à appliquer pour I2. I3 est construit localement (section précédente).
+essais réels (un ancien client peut perdre les champs nouveaux). Aucune migration ou fonction serveur à appliquer pour I2. I3 est publié en `0.20.0` (section précédente).
 
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 

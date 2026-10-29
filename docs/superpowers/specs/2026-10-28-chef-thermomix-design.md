@@ -315,7 +315,8 @@ Une sauvegarde ZIP conserve les données ; une restauration ne dispense pas de l
 
 Aucune migration SQL ni nouvel outil assistant. `DB_VERSION` reste 4. Construction locale en `APP_VERSION 0.20.0`,
 cache `cuisine-os-v0.20.0-1` et épingles de version mises à jour. Les résultats mesurés sont consignés dans `STATE.md`.
-La publication, distincte de cette construction, a été autorisée ensuite par Neegan (« promote tout ») ; son bilan est dans `STATE.md`.
+La publication, distincte de cette construction, a été autorisée ensuite par Neegan (« promote tout ») et réalisée en `0.20.0` ;
+son bilan public **6820/6820** et les preuves hors ligne sont dans `STATE.md`.
 
 ## 9. Preuves attendues
 
@@ -374,7 +375,7 @@ divergent sur les modes TM6 ; elles ne fondent pas une promesse TM7.
 
 Preuves automatisées : **6820/6820** dans le navigateur (épingle **6819**), **230/230** Node, migrations `--check` **0**.
 Navigation réelle, copie Cookidoo, rechargement et cuisine hors ligne vérifiés avec un assistant simulé. Aucun appel assistant réel,
-essai matériel. Publication I3 autorisée ensuite par « promote tout » ; son bilan est dans `STATE.md`.
+essai matériel. Publication I3 réalisée sur « promote tout » : **6820/6820** sur le site public ; son bilan est dans `STATE.md`.
 Les essais sur le compte Cookidoo et le TM7 de Neegan restent à faire.
 
 Relecture technique préparatoire : trois angles (TM7, intégration, Cookidoo). Corrections intégrées sur les bornes thermiques cumulées,

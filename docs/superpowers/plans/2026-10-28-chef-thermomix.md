@@ -33,5 +33,7 @@ hors ligne ; rechargement de fiche, cache actif, copie complète des étapes ada
 Les sauvegardes ZIP conservent un plan lisible même après purge de son journal. Node **230/230** en série, générateur de migrations **0**.
 Aucun changement serveur/SQL, aucun appel réel à l’assistant, aucun essai TM7/Cookidoo ou à deux appareils réels.
 
-Publication autorisée par Neegan sur « promote tout » : commit, intégration dans `main`, push et contrôle Pages en cours.
-Le dernier site public vérifié reste I2 `0.19.0` ; l’essai matériel reste à faire après publication.
+Publication réalisée sur « promote tout » de Neegan : commit `9fb825d`, intégration en avance rapide dans `main`, push et build Pages
+réussis. Site public **0.20.0**, suite **6820/6820**, neuf fichiers publics identiques, six modules en cache, adaptation conservée et copiée,
+fiche rechargée et cuisine hors ligne vérifiées. Zéro erreur JavaScript et zéro requête hors origine. Preuves :
+`suite-publique.resultat.json` et `publication.resultat.json` dans le registre ignoré. L’essai matériel reste à faire.
