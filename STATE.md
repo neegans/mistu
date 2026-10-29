@@ -1,16 +1,22 @@
-# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — PHOTOS ET REPÈRES EN LIGNE, 0.21.0, 7080/7080
+# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — CORRECTIFS FRANÇAIS MOBILE EN LIGNE, 0.21.1, 7118/7118
 
-**29 octobre 2026 — RETOUR MOBILE : CORRECTIFS 0.21.1 CONSTRUITS, PUBLICATION EN PRÉPARATION.**
+**29 octobre 2026 — RETOUR MOBILE : CORRECTIFS 0.21.1 PUBLIÉS ET VÉRIFIÉS.**
 Neegan confirme la réception des photos mobile → ordinateur. Il signale ensuite ne pas voir les changements de présentation
 et ne pas trouver le « français simple ». La réception du lot visuel est donc rouverte. Captures neuves : recette sans repères
 montrant « Description à compléter », accès indirect à l’assistant et motif de connexion sous le long formulaire ; sélecteur de
 langue ne reflétant pas FR choisi. Le lien Traduire perd aussi la langue cible. Correctifs bornés décrits au § 13 de la spec.
-Branche `correctifs-francais-mobile`, base `801b115` ; public encore 0.21.0. Accès principal à la description française, motif de
+Branche `correctifs-francais-mobile`, base `801b115`, commit de code `fe241e1` intégré en avance rapide dans `main`.
+Push et GitHub Pages réussis le 29 octobre à 8 h 26 HAE (12 h 26 UTC) ; public en 0.21.1. Accès principal à la description française, motif de
 connexion/hors ligne près du bouton, sélection FR/EN cohérente et langue cible transmise à l’éditeur corrigés. La traduction IA
 intégrale n’est pas construite ni annoncée comme livrée ; le parcours de traduction des ingrédients/étapes reste manuel.
-Version locale 0.21.1, cache `cuisine-os-v0.21.1-1`, DB 4. **7118/7118** tests (épingle 7117 ; +38 sans retrait), Node **230/230**,
+Version publiée 0.21.1, cache `cuisine-os-v0.21.1-1`, DB 4. **7118/7118** tests (épingle 7117 ; +38 sans retrait), Node **230/230**,
 migrations `--check` 0, syntaxe de 19 fichiers JS et diff propres. Ciblés : intégration 33, écran repères 49, Carnet 300.
-Preuves : `.superpowers/sdd/2026-10-29-mobile-francais/`. Captures locales vérifiées à 320/358/390/768/1280 : description conservée après rechargement, visible dans le livre, original anglais intact, FR actif, éditeur FR et saisie hors ligne. Cache 0.21.1-1 actif, six modules ; contrôles publics à finaliser.
+Preuves : `.superpowers/sdd/2026-10-29-mobile-francais/`. Captures locales vérifiées à 320/358/390/768/1280 : description conservée après rechargement, visible dans le livre, original anglais intact, FR actif, éditeur FR et saisie hors ligne. Cache 0.21.1-1 actif, six modules.
+**Public : 7118/7118**, zéro erreur JS/requête externe, sept fichiers modifiés identiques au disque ; parcours de description
+conservée dans fiche/livre, FR actif, éditeur FR, hors ligne et cinq largeurs vérifiés à nouveau sur GitHub Pages.
+Preuves `suite-publique.resultat.json`, `fichiers-publics.resultat.json`, `pages-build-code.json`, `apres-public/resultat.json`.
+Profil jetable, description saisie manuellement ; aucun appel réel assistant ni compte privé. Le sens exact de « français simple »
+(description courte ou traduction intégrale) reste demandé à Neegan, sans réponse supposée.
 
 **29 octobre 2026 — MISE À JOUR D’UNE INSTALLATION 0.20.0 VÉRIFIÉE.**
 Sur une même origine locale `/mistu/`, Chrome en profil jetable passe du commit publié `d832528` au commit `9faa1bf`.

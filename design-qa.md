@@ -1,6 +1,6 @@
 # Vérification visuelle — photos et repères
 
-**final result: passed — correctifs ciblés du 29 octobre vérifiés localement. La traduction IA intégrale reste hors du périmètre construit.**
+**final result: passed — correctifs ciblés du 29 octobre vérifiés localement et sur le site public 0.21.1. La traduction IA intégrale reste hors du périmètre construit.**
 
 Le compte rendu ci-dessous décrit les contrôles du 28 octobre sur données préparées. Il ne suffit pas à valider le parcours d’une recette existante sans description.
 
@@ -118,3 +118,9 @@ réel de l’assistant : la description du parcours est saisie manuellement ; l�
 Suite 7118/7118 (+38), Node 230/230, 19 JS syntaxiquement valides. Preuves `apres/resultat.json`, `suite.resultat.json`, `node.log`.
 Pas de prétention de conformité d’accessibilité complète, ni de validation sur le téléphone physique de Neegan. La recette intégrale
 reste traduite via l’éditeur manuel ; une demande d’automatisation complète doit être distinguée de la description française courte.
+
+
+**Publication contrôlée :** commit `fe241e1`, GitHub Pages 0.21.1 à 8 h 26 HAE. Les six étapes ci-dessus sont rejouées sur le site
+public avec un profil jetable ; captures correspondantes dans `apres-public/`, inspectées. Suite publique 7118/7118, sept fichiers
+modifiés identiques au disque, aucune erreur JS/requête externe. Les limites concernant l’assistant réel et l’attente exacte de Neegan
+restent explicites. Ce contrôle ne déclare pas la traduction IA intégrale terminée.

@@ -297,3 +297,8 @@ FR et EN sont admis comme langues cibles. Les ingrédients, étapes, quantités 
 
 Réception : capture mobile avant/après avec recette sans description, compte absent et état hors ligne, appel injecté unique puis
 relecture/conservation, réouverture fiche/livre, langues FR/EN et édition en bonne langue. Pas d’appel réel ni de données privées.
+
+
+Correctifs § 13 publiés en **0.21.1**, commit `fe241e1`, le 29 octobre à 8 h 26 HAE. Suite publique **7118/7118**, parcours et cache
+hors ligne vérifiés ; [revue mise à jour](../../../design-qa.md). La description reste préparée sur geste explicite ou saisie manuellement.
+La clarification « description courte » / « traduction intégrale en français simple » reste ouverte ; aucune réponse n’est supposée.

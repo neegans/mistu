@@ -3331,7 +3331,7 @@ DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de
 R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
 404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
 
-### Correctifs français sur mobile (29 octobre 2026 — 0.21.1, publication en préparation)
+### Correctifs français sur mobile (29 octobre 2026 — publié en 0.21.1)
 
 Après confirmation de la réception des photos, Neegan signale ne pas voir les changements attendus sur mobile ni le « français simple ».
 L’annonce précédente de conformité était trop large : les maquettes ont une description renseignée, alors que les anciennes recettes
@@ -3353,6 +3353,12 @@ Suites ciblées : intégration 33, écran repères 49, Carnet 300. Registre `.su
 Parcours local réel : description manuelle conservée après rechargement dans fiche et livre, original anglais intact, FR actif et
 éditeur FR ; cache 0.21.1-1 avec six modules, saisie hors ligne disponible. Captures sans débordement à 320/358/390/768/1280.
 Les données et images de démonstration restent dans un profil jetable ; aucun appel réel assistant ni accès aux données privées.
+Publication : code `fe241e1`, intégration en avance rapide dans `main`, push et build Pages réussis à 8 h 26 HAE.
+Suite publique **7118/7118**, sept fichiers modifiés identiques au disque, parcours public complet rejoué, zéro JS/externe.
+Description manuelle après recharge dans fiche et livre, original anglais intact, FR actif/éditeur FR, cache et rechargement hors ligne
+vérifiés ; cinq largeurs sans débordement. Preuves `suite-publique.resultat.json`, `fichiers-publics.resultat.json`,
+`pages-build-code.json` et `apres-public/resultat.json`. Le périmètre « français simple » reste à confirmer avec Neegan :
+la traduction intégrale assistée des ingrédients/étapes n’est pas livrée par ce correctif.
 
 ### Photos, descriptions et temps (28 octobre 2026 — publié en 0.21.0)
 
