@@ -3331,6 +3331,33 @@ DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de
 R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
 404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
 
+### Plan directeur — L0 : cohérence des données et des parcours (29 octobre 2026 — local 0.22.0)
+
+**Périmètre approuvé sur « go ».** [Plan fourni](docs/lots/2026-10-29-plan-directeur-interface-fonctions.md),
+[spec](docs/superpowers/specs/2026-10-29-l0-reference-correctifs-design.md),
+[exécution et preuves](docs/superpowers/plans/2026-10-29-l0-reference-correctifs.md).
+Branche `l0-reference-correctifs`, base `cd8c7f2`. Application 0.22.0, DB4, cache `cuisine-os-v0.22.0-1`.
+
+**Construit.** C01 : éditeur segmenté, positions vides et paragraphes conservés, `alignment_format: 1` validé par le lecteur partagé ;
+anciennes traductions conservées dans un panneau sans correspondance supposée. Bornes Unicode et UTF-8 avant édition/écriture.
+C02 : contrôles recette/version/source/traduction dans la transaction ; refus atomique avec formulaire conservé et données concurrentes préservées.
+C03 : restitution locale de l’instant ISO, rejet des heures inexistantes, choix de l’occurrence répétée et fusion séparée de l’heure.
+C05 : onglet, contenu, lien Fiche et sélection persistée concordent ; sélection/progression sérialisées avec gardes d’existence et d’appartenance.
+C06 : secondes conservées pour Siri, affichage et raccourci ; plages en heures reconnues, borne choisie explicitement dans fiche et cuisine.
+C08 : sortie unique Copier/Partager, restants par défaut, liste complète avec cases ; réconciliation des cases après fusion concurrente.
+L’agrandissement du texte adapte la navigation et les colonnes sans débordement horizontal sur les écrans contrôlés.
+
+**Preuves.** Navigateur **7397/7397** (épingle 7396 ; +279 depuis 7118, aucune assertion retirée). Ciblés 84/110/54/30,
+Toronto 13 séparé ; Node 230/230, migrations `--check` 0, syntaxe de 29 fichiers. Reproductions rouges puis vertes, revue croisée,
+synchronisation entre deux bases avec transport simulé et archive sur une troisième. Parcours de l’application avec rechargements,
+heure répétée, copie simulée et hors ligne ; largeurs 320/390/768/900/1280 et texte à 200 %.
+Zéro erreur JavaScript/requête externe dans les preuves. Dossier local ignoré : `.superpowers/sdd/2026-10-29-l0/`.
+
+**Limites et suite.** L0 non publié ; version publique précédemment validée 0.21.1. Aucun SQL, déploiement assistant, compte privé ou appel IA.
+Pas d’essai physique Safari/iPhone, Siri ni partage natif. La traduction automatique intégrale et son affichage commun fiche/cuisine/voix
+relèvent de L6/L7 ; minuteurs persistants, corbeille, navigation et révisions source restent des lots séparés.
+Deux traductions créées simultanément avec des identifiants distincts pour la même version/langue restent un cas à traiter par L6.
+
 ### Correctifs français sur mobile (29 octobre 2026 — publié en 0.21.1)
 
 Après confirmation de la réception des photos, Neegan signale ne pas voir les changements attendus sur mobile ni le « français simple ».

@@ -4,7 +4,7 @@ import { t, label } from '../core/i18n.js';
 import { lienSignet } from '../core/lien.js';
 import { urlDeBlob, revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { displayQuantity, REASON_LABELS } from '../domain/units.js';
-import { shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice } from '../domain/timers.js';
+import { shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice, normaliserDuree } from '../domain/timers.js';
 import { navigate } from '../core/router.js';
 import { displayUrl, typeAffichage } from '../sync/mime.js';
 import { etatFichier, lireErreursFichiers } from '../sync/fichiers.js';
@@ -412,17 +412,50 @@ export function ingredientLineEl(ri, ctx, ingredientsById) {
 }
 
 // Bloc minuterie (spec §33) : Siri par l'utilisateur, ou raccourci installé. Aucun compteur JS n'est présenté comme alarme.
-export function timerBlock(seconds, { onRequest = null, locale = 'fr', compact = false } = {}) {
+export function timerBlock(seconds, { seconds_max = null, onRequest = null, locale = 'fr', compact = false } = {}) {
   const apple = isAppleTouchDevice();
-  const dur = describeDuration(seconds, locale);
-  const box = el('div', { class: 'card flat stack' },
-    el('div', { class: 'row between' },
-      el('strong', null, `${t('Minuterie')} — ${dur}`),
-      apple ? el('a', { class: 'btn primary', href: shortcutUrl(seconds), onClick: () => onRequest && onRequest('shortcut') }, t('Lancer la minuterie système')) : null),
-    el('div', { class: 'muted', style: { fontSize: '.9rem' } }, `${t('Ou dis à Siri')} : « ${siriPhrase(seconds, locale)} »`, ' ',
-      el('button', { class: 'btn small', type: 'button', onClick: () => onRequest && onRequest('siri') }, t('J’ai demandé à Siri'))),
+  const min = normaliserDuree(seconds), max = seconds_max == null ? null : normaliserDuree(seconds_max);
+  if (min === null || (seconds_max != null && (max === null || max < min))) return el('div', { class: 'card flat', role: 'status' }, t('Durée de minuterie invalide.'));
+  const plage = max !== null && max > min;
+  let choisie = plage ? null : min, pending = false;
+  const titre = el('strong');
+  const phrase = el('span');
+  const erreur = el('div', { role: 'status', class: 'status warn', hidden: true });
+  const demander = async (channel, event) => {
+    if (choisie === null || pending) { event?.preventDefault(); return; }
+    const duration = choisie;
+    pending = true; erreur.hidden = true; actualiser();
+    try { await onRequest?.(channel, duration); }
+    catch { erreur.textContent = t('La demande de minuterie n’a pas été enregistrée. Réessaie.'); erreur.hidden = false; }
+    finally { pending = false; actualiser(); }
+  };
+  const raccourci = apple ? el('a', { class: 'btn primary', onClick: event => demander('shortcut', event) }, t('Lancer la minuterie système')) : null;
+  const siri = el('button', { class: 'btn small', type: 'button', onClick: event => demander('siri', event) }, t('J’ai demandé à Siri'));
+  const choix = plage ? el('select', { 'aria-label': t('Durée à demander'), onChange: event => {
+    const v = Number(event.target.value);
+    choisie = event.target.value !== '' && [min, max].includes(v) ? v : null;
+    actualiser();
+  } }, el('option', { value: '' }, t('Choisir une durée')),
+  el('option', { value: String(min) }, t('Minimum : {d}', { d: describeDuration(min, locale) })),
+  el('option', { value: String(max) }, t('Maximum : {d}', { d: describeDuration(max, locale) }))) : null;
+  const box = el('div', { class: 'card flat stack', dataset: { role: 'timer-block' } },
+    el('div', { class: 'row between' }, titre, raccourci),
+    choix ? el('label', { class: 'stack' }, t('Durée à demander'), choix) : null,
+    el('div', { class: 'muted', style: { fontSize: '.9rem' } }, phrase, ' ', siri), erreur,
     apple ? null : el('div', { class: 'muted', style: { fontSize: '.85rem' } }, t('Sur Mac, utilise Horloge ou Siri directement ; le raccourci s’exécute sur iPhone et iPad.')),
     compact ? null : el('small', { class: 'muted' }, t('Le raccourci « CuisineOS-Minuterie » doit être installé une fois (voir Réglages). L’app ne peut pas confirmer qu’Horloge a bien démarré.')));
+  function actualiser() {
+    titre.textContent = `${t('Minuterie')} — ${plage ? t('{min} à {max}', { min: describeDuration(min, locale), max: describeDuration(max, locale) }) : describeDuration(min, locale)}`;
+    phrase.textContent = choisie === null ? t('Choisis la durée avant de demander la minuterie.') : `${t('Ou dis à Siri')} : « ${siriPhrase(choisie, locale)} »`;
+    siri.disabled = choisie === null || pending;
+    if (choix) choix.disabled = pending;
+    if (raccourci) {
+      if (choisie !== null) raccourci.setAttribute('href', shortcutUrl(choisie));
+      else raccourci.removeAttribute('href');
+      raccourci.setAttribute('aria-disabled', String(choisie === null || pending));
+    }
+  }
+  actualiser();
   return box;
 }
 

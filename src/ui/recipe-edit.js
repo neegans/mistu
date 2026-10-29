@@ -20,6 +20,7 @@ import { demarrerConnexion } from './settings.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
 import { lireDansLeJournal, relireDuJournal, phraseEchec, cleLecture, tenirVol, libererVol } from './import-cible.js';
 import { blocApparierLecture } from './regroupement.js';
+import { lireTraduction, verifierSourceTraduction, validerContenuTraduction, projectionSourceTraduction } from '../domain/traductions.js';
 
 const SUBRECIPE_RE = /(?:voir|see|cf\.?)\s+(?:la\s+)?(?:page|p\.)\s*(\d{1,4})|\bp\.\s*(\d{1,4})\b/gi;
 
@@ -35,6 +36,9 @@ export async function renderRecipeEdit(params, query, ctx) {
   // `?v=` n'est suivi que pour une version de CETTE fiche (ronde 1) : jamais la base, ni l'héritage de lecture, d'une autre recette — retour à la courante.
   const demandee = recipe && query.v ? ctx.versionsById.get(query.v) : null;
   const base = recipe ? ((demandee?.recipe_id === recipe.id ? demandee : null) || currentVersion(recipe, versions)) : null;
+  const translationLocale = ['fr', 'en'].includes(query.locale) ? query.locale : f_defaultTranslation(recipe);
+  // La traduction vérifie ses bornes et sa structure AVANT les jointures des champs de l'éditeur culinaire.
+  if (kind === 'translation') return translationEditor({ recipe, base, ctx, f: { translationLocale } });
   // Import ciblé (spec § 4.3.7, N5) : une étape de la version de départ qui porte un saut de ligne a été lue ENTIÈRE par l'assistant ; l'éditeur
   // passe alors en « une étape par paragraphe » (zone jointe par une ligne vide, aide adaptée, aperçu et save() par parseStepsBlock parParagraphe) ;
   // sinon rien ne change (une étape par ligne ou par paragraphe, aide actuelle : une étape ajoutée sur une nouvelle ligne reste une étape).
@@ -75,17 +79,20 @@ export async function renderRecipeEdit(params, query, ctx) {
     printed_page: recipe?.printed_page ?? pages.find((p) => p.printed_page)?.printed_page ?? '', source_label: recipe?.source_label || '',
     servings: base?.servings ?? '', prep: base?.prep_minutes ?? '', cook: base?.cook_minutes ?? '', active: base?.active_minutes ?? '', total: base?.total_minutes ?? '',
     ingredientsText: (base?.ingredients || []).map((i) => i.source_text).join('\n'), stepsText: joindreEtapes(base?.steps || []),
-    notes: base?.notes || '', changes: '', status: 'proposed', translationLocale: ['fr', 'en'].includes(query.locale) ? query.locale : f_defaultTranslation(recipe), aiUsed: false, aiModel: null,
+    notes: base?.notes || '', changes: '', status: 'proposed', aiUsed: false, aiModel: null,
   };
   if (kind === 'adaptation') { f.changes = ''; }
   let parsedLines = (base?.ingredients || []).map((i) => ({ ...i, id: repo.newId('ri') }));
-  if (kind === 'translation') return translationEditor({ recipe, base, ctx, f });
 
   const root = el('div', null);
   root.append(pageHeader(recipe ? (kind === 'adaptation' ? t('Créer ma version') : t('Corriger la recette')) : t('Nouvelle recette'), {
     subtitle: [book ? book.title : t('Sans livre'), base ? `${t('à partir de')} : ${label('version_kind', base.kind)} ${base.created_at ? new Date(base.created_at).toLocaleDateString() : ''}` : null].filter(Boolean).join(' · '),
     back: recipe ? { href: `/recipes/${recipe.id}`, label: t('Fiche recette') } : { href: '/add', label: t('Ajouter') },
   }));
+  const erreurEnregistrement = el('div', { class: 'status warn', role: 'status', hidden: true, dataset: { role: 'erreur-enregistrement' } });
+  root.append(erreurEnregistrement);
+  let enregistrementEnCours = false;
+  const sourceOuverte = projectionSourceTraduction(base);
 
   // Colonne gauche : original (pages ou PDF)
   const left = el('div', { class: 'stack' });
@@ -279,6 +286,20 @@ export async function renderRecipeEdit(params, query, ctx) {
   return root;
 
   async function save() {
+    if (enregistrementEnCours) return;
+    enregistrementEnCours = true;
+    erreurEnregistrement.hidden = true; erreurEnregistrement.textContent = '';
+    try { await enregistrer(); }
+    catch (error) {
+      erreurEnregistrement.textContent = error instanceof TransitionRefusee
+        ? error.store === 'recipes' ? t('Cette recette n’est plus disponible. Tes modifications restent dans ce formulaire.')
+          : t('La version source a changé ou n’est plus disponible. Tes modifications restent dans ce formulaire.')
+        : t('L’enregistrement a échoué. Tes modifications restent dans ce formulaire.');
+      erreurEnregistrement.hidden = false;
+    } finally { enregistrementEnCours = false; }
+  }
+
+  async function enregistrer() {
     if (!f.title.trim()) { toast(t('Le titre original est requis')); return; }
     if (kind === 'adaptation' && !f.changes.trim()) { toast(t('Décris les changements de ta version')); return; }
     if (!f.ingredientsText.trim() && !f.stepsText.trim() && kind !== 'extraction') { toast(t('Rien à enregistrer')); return; }
@@ -342,11 +363,11 @@ export async function renderRecipeEdit(params, query, ctx) {
     // Lots F et I2 : les champs photo et Mes notes viennent de la fiche RELUE — l'éditeur ne les édite pas, la base fait foi. Une photo ou note
     // posée pendant l'édition survit ; une origine hors liste se lit null ; une clé absente en base reste absente (P-6).
     // Ronde 1 de la tâche 5 : relus DANS la transaction d'écriture (condition { key, fusion } de saveBatch, le motif de ★ Favori) — une écriture qui
-    // s'engage pendant les lectures de save() n'est plus écrasée. Une fiche supprimée pendant l'édition garde la règle d'avant (sa copie : dette C4 du
-    // lot UX, hors lot). D-12 : le vocabulaire fermé est vérifié sur la fiche qui s'écrit, avant l'écriture (dans la transaction pour une fiche relue).
+    // s'engage pendant les lectures de save() n'est plus écrasée. L0 : une fiche disparue annule TOUT le lot, jamais de repli sur l'ancienne copie.
+    // D-12 : le vocabulaire fermé est vérifié sur la fiche qui s'écrit, avant l'écriture (dans la transaction pour une fiche relue).
     const avecPhotoDe = (relue) => {
       const r = { ...rec };
-      for (const champ of ['photo_sha256', 'photo_origin', 'photo_source_url', 'photo_provenance', 'personal_notes', 'reperes']) {
+      for (const champ of ['photo_sha256', 'photo_origin', 'photo_source_url', 'photo_provenance', 'personal_notes', 'favorite', 'reperes']) {
         if (Object.hasOwn(relue, champ)) r[champ] = champ === 'photo_origin' ? originePhotoAdmise(relue[champ]) : relue[champ];
         else delete r[champ];
       }
@@ -355,7 +376,13 @@ export async function renderRecipeEdit(params, query, ctx) {
     };
     // Une fiche existante n'entre pas dans les puts : la condition l'écrit (fermer exige une recette neuve, donc le chemin de la clôture garde ses puts).
     const lot = { ...(targetRecipe ? {} : { recipes: [avecPhotoDe(rec)] }), recipe_versions: [version], source_pages: pageUpdates };
-    const conditionFiche = targetRecipe ? { recipes: [{ key: targetRecipe.id, fusion: (c) => avecPhotoDe(c ?? targetRecipe) }] } : null;
+    const conditionFiche = targetRecipe ? {
+      recipes: [{ key: targetRecipe.id, fusion: c => { if (!c) throw new TransitionRefusee('recipes', targetRecipe.id, null); return avecPhotoDe(c); } }],
+      ...(base ? { recipe_versions: [{ key: base.id, fusion: c => {
+        if (!c || c.recipe_id !== targetRecipe.id || projectionSourceTraduction(c) !== sourceOuverte) throw new TransitionRefusee('recipe_versions', base.id, null);
+        return null; // contrôle seul : ne réécrit ni la version ni sa date
+      } }] } : {}),
+    } : null;
     // La séance (recipe_ids) s'écrit dans la MÊME transaction que la recette (I-10, ronde 1), relue juste avant (leçon C4).
     const seance = sessionId && !seanceRefusee ? await repo.get('scan_sessions', sessionId) : null;
     // Lot D (§ 4.8.2 point 5, N-1) : quand « Enregistrer » ferme une lecture du journal, la séance entre dans LA transaction par le sac `conditions` (relue
@@ -396,18 +423,100 @@ function f_defaultTranslation(recipe) { return recipe?.original_language === 'en
 function translationEditor({ recipe, base, ctx, f }) {
   if (!base) return el('div', { class: 'card' }, t('Aucune version à traduire.'));
   const existing = ctx.recipe_translations.find((tr) => tr.recipe_version_id === base.id && tr.locale === f.translationLocale);
-  const tr = { title: existing?.translated_content?.title || '', ingredients: (existing?.translated_content?.ingredients || []).join('\n'), steps: (existing?.translated_content?.steps || []).join('\n') };
+  const lecture = lireTraduction(existing, base);
+  const sourceValide = verifierSourceTraduction(base, recipe.original_title || '');
+  const ancien = existing?.translated_content;
+  const contenuAncien = ancien && typeof ancien === 'object' && !Array.isArray(ancien)
+    ? { title: ancien.title ?? '', ingredients: ancien.ingredients, steps: ancien.steps } : null;
+  // Les tableaux de longueur différente ne sont pas associés : la personne retrouve les textes dans le panneau de revue.
+  const ancienValide = contenuAncien ? validerContenuTraduction(contenuAncien, base) : null;
+  const sourceOuverte = projectionSourceTraduction(base), traductionOuverte = JSON.stringify(existing ?? null);
+  const sourceTitre = recipe.original_title;
   const root = el('div', null, pageHeader(t('Traduire — {l}', { l: f.translationLocale.toUpperCase() }), { back: { href: `/recipes/${recipe.id}`, label: t('Fiche recette') } }));
-  root.append(el('div', { class: 'two-col' },
-    section(t('Original'), el('h3', null, recipe.original_title), el('ul', { class: 'list plain' }, ...(base.ingredients || []).map((i) => el('li', null, i.source_text))), el('ol', null, ...(base.steps || []).map((s) => el('li', null, s.text)))),
-    el('div', { class: 'stack' },
-      field(t('Titre traduit'), el('input', { type: 'text', value: tr.title, onInput: (e) => { tr.title = e.target.value; } })),
-      field(t('Ingrédients traduits (même ordre, une ligne par ingrédient)'), el('textarea', { rows: 10, value: tr.ingredients, onInput: (e) => { tr.ingredients = e.target.value; } })),
-      field(t('Étapes traduites (même ordre)'), el('textarea', { rows: 10, value: tr.steps, onInput: (e) => { tr.steps = e.target.value; } })),
-      el('button', { class: 'btn primary', onClick: async () => {
-        const row = { id: existing?.id || repo.newId('tr'), recipe_version_id: base.id, locale: f.translationLocale, translated_content: { title: tr.title.trim(), ingredients: tr.ingredients.split('\n').map((s) => s.trim()).filter(Boolean), steps: tr.steps.split('\n').map((s) => s.trim()).filter(Boolean) }, origin: 'manual', verification_state: 'unverified' };
-        await repo.save('recipe_translations', row); toast(t('Traduction enregistrée')); navigate(`/recipes/${recipe.id}?v=${base.id}&lang=${f.translationLocale}`);
-      } }, t('Enregistrer la traduction')))));
+  const montrerBrut = (titre, contenu) => {
+    const panneau = el('details', { class: 'card', dataset: { role: 'ancienne-traduction' } }, el('summary', null, titre));
+    // La consultation est explicite : une source hors bornes ne fabrique pas des milliers de contrôles au chargement.
+    let ouvert = false;
+    panneau.addEventListener('toggle', () => {
+      if (!panneau.open || ouvert) return;
+      ouvert = true;
+      const textes = valeur => typeof valeur === 'string' ? valeur : Array.isArray(valeur) ? valeur.map(textes).join('\n\n') : valeur && typeof valeur === 'object' ? Object.values(valeur).map(textes).filter(Boolean).join('\n\n') : '';
+      const ajouter = (label, valeur) => panneau.append(field(label, el('textarea', { rows: 6, readOnly: true, value: textes(valeur), style: { whiteSpace: 'pre-wrap' } })));
+      if (contenu && typeof contenu === 'object' && !Array.isArray(contenu) && ['title', 'ingredients', 'steps'].some(k => Object.hasOwn(contenu, k))) {
+        ajouter(t('Titre'), contenu.title); ajouter(t('Ingrédients'), contenu.ingredients); ajouter(t('Étapes'), contenu.steps);
+      } else ajouter(t('Texte conservé'), contenu);
+    });
+    root.append(panneau);
+  };
+  if (existing && lecture.etat !== 'courante') {
+    root.append(el('p', { class: 'status warn' }, t('Ancienne traduction à vérifier : les correspondances ne sont pas garanties.')));
+    montrerBrut(t('Consulter les textes conservés'), existing.translated_content ?? existing);
+  }
+  const horsLimites = !sourceValide.ok || (existing && (!ancienValide || (!ancienValide.ok && ancienValide.raison !== 'alignement')));
+  if (horsLimites) {
+    root.append(el('p', { class: 'status warn', role: 'status', dataset: { role: 'etat-traduction' } }, t('Ce contenu dépasse les limites de l’éditeur de traduction ou sa structure est invalide. Les textes sont conservés, sans modification.')));
+    montrerBrut(t('Consulter la source conservée'), { title: recipe.original_title,
+      ingredients: Array.isArray(base.ingredients) ? base.ingredients.map(i => i?.source_text ?? i?.name_text ?? '') : base.ingredients,
+      steps: Array.isArray(base.steps) ? base.steps.map(s => s?.text ?? '') : base.steps });
+    if (existing && lecture.etat === 'courante') montrerBrut(t('Consulter les textes conservés'), existing.translated_content);
+    return root;
+  }
+  // Une ancienne correspondance complète est seulement proposée à la relecture ; un format inconnu n'est jamais prérempli.
+  const contenu = lecture.contenu || (lecture.etat === 'ancienne' && ancienValide?.ok ? contenuAncien : null);
+  const tr = { title: contenu?.title ?? (typeof ancien?.title === 'string' ? ancien.title : ''),
+    ingredients: base.ingredients.map((_, i) => contenu?.ingredients[i] ?? ''), steps: base.steps.map((_, i) => contenu?.steps[i] ?? '') };
+  const etat = el('p', { class: 'status warn', role: 'status', hidden: true, dataset: { role: 'etat-traduction' } });
+  const ecrireEtat = texte => { etat.textContent = texte; etat.hidden = !texte; };
+  const champs = el('div', { class: 'stack' });
+  champs.append(field(t('Titre traduit'), el('input', { type: 'text', value: tr.title, dataset: { role: 'traduction-titre' }, onInput: e => { tr.title = e.target.value; } }), recipe.original_title || ''));
+  const segments = (liste, cle, role, texte) => {
+    const bloc = el('section', { class: 'stack' }, el('h2', null, texte));
+    liste.forEach((item, i) => {
+      const original = cle === 'ingredients' ? item.source_text ?? item.name_text ?? '' : item.text ?? '';
+      const entree = el('textarea', { rows: cle === 'ingredients' ? 2 : 4, value: tr[cle][i], dataset: { role, index: i }, onInput: e => { tr[cle][i] = e.target.value; } });
+      bloc.append(el('div', { class: 'card stack' },
+        el('div', { class: 'muted', style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, original),
+        field(cle === 'ingredients' ? t('Traduction de l’ingrédient {n}', { n: i + 1 }) : t('Traduction de l’étape {n}', { n: i + 1 }), entree)));
+    });
+    champs.append(bloc);
+  };
+  segments(base.ingredients, 'ingredients', 'traduction-ingredient', t('Ingrédients'));
+  segments(base.steps, 'steps', 'traduction-etape', t('Étapes'));
+  let enCours = false;
+  const enregistrer = el('button', { class: 'btn primary', onClick: async () => {
+    if (enCours) return;
+    ecrireEtat('');
+    const content = { title: tr.title.trim(), ingredients: tr.ingredients.map(s => s.trim()), steps: tr.steps.map(s => s.trim()) };
+    const valide = validerContenuTraduction(content, base);
+    if (!valide.ok) { ecrireEtat(t('La traduction dépasse les limites autorisées ou contient des segments invalides. Ta saisie reste dans ce formulaire.')); return; }
+    enCours = true; enregistrer.disabled = true;
+    try {
+      const row = { id: existing?.id || repo.newId('tr'), recipe_version_id: base.id, locale: f.translationLocale, alignment_format: 1, translated_content: content, origin: 'manual', verification_state: 'unverified' };
+      await repo.saveBatch({ recipe_translations: [row] }, { conditions: {
+        recipes: [{ key: recipe.id, fusion: courante => {
+          if (!courante) throw new TransitionRefusee('recipes', recipe.id, null);
+          if (courante.original_title !== sourceTitre) throw new TransitionRefusee('recipe_versions', base.id, null);
+          return null;
+        } }],
+        recipe_versions: [{ key: base.id, fusion: courante => {
+          if (!courante || courante.recipe_id !== recipe.id || projectionSourceTraduction(courante) !== sourceOuverte) throw new TransitionRefusee('recipe_versions', base.id, null);
+          return null;
+        } }],
+        recipe_translations: [existing ? { key: existing.id, fusion: courante => {
+          if (JSON.stringify(courante) !== traductionOuverte) throw new TransitionRefusee('recipe_translations', existing.id, null);
+          return null;
+        } } : { key: row.id, absente: true }],
+      } });
+      toast(t('Traduction enregistrée')); navigate(`/recipes/${recipe.id}?v=${base.id}&lang=${f.translationLocale}`);
+    } catch (error) {
+      ecrireEtat(error instanceof TransitionRefusee
+        ? error.store === 'recipes' ? t('Cette recette n’est plus disponible. Tes modifications restent dans ce formulaire.')
+          : error.store === 'recipe_translations' ? t('Cette traduction a changé ailleurs. Ta saisie est conservée ; recharge la traduction pour comparer.')
+            : t('La version source a changé ou n’est plus disponible. Tes modifications restent dans ce formulaire.')
+        : t('L’enregistrement a échoué. Tes modifications restent dans ce formulaire.'));
+    } finally { enCours = false; enregistrer.disabled = false; }
+  } }, t('Enregistrer la traduction'));
+  root.append(champs, etat, enregistrer);
   return root;
 }
 

@@ -1,4 +1,29 @@
-# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — CORRECTIFS FRANÇAIS MOBILE EN LIGNE, 0.21.1, 7118/7118
+# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — L0 CONSTRUIT LOCALEMENT EN 0.22.0 ; PUBLICATION PRÉCÉDENTE 0.21.1
+
+**29 octobre 2026 — PLAN DIRECTEUR : LOT L0 APPROUVÉ ET CONSTRUIT LOCALEMENT.**
+Neegan fournit `Mistu_Plan_Directeur_Interface_et_Fonctions_0.21.1.md`, conservé à l’identique dans
+[`docs/lots/2026-10-29-plan-directeur-interface-fonctions.md`](docs/lots/2026-10-29-plan-directeur-interface-fonctions.md).
+La base du plan correspond à `main` `cd8c7f2`. Le plan donne pour cible du « français simple » la recette entière traduite fidèlement,
+distincte de la description courte. [Spec L0](docs/superpowers/specs/2026-10-29-l0-reference-correctifs-design.md) approuvée sur « go ».
+Branche `l0-reference-correctifs`, base `cd8c7f2`. [Rapport et preuves](docs/superpowers/plans/2026-10-29-l0-reference-correctifs.md).
+
+Traductions manuelles par segment, trous et paragraphes conservés, anciennes traductions consultables sans association présumée.
+Gardes atomiques contre recette/version disparue et source/traduction concurrente ; aucun original réécrit.
+Heure locale et choix du décalage au changement d’heure ; les portions ne rétablissent plus une ancienne heure.
+Recette active, lien Fiche et progression cohérents, sélection conditionnée ; durées exactes et choix explicite des bornes d’une plage.
+Copier/Partager utilisent la même sortie de courses, avec mode restants/complet ; cases concurrentes réconciliées à l’écran.
+
+Version locale **0.22.0**, cache `cuisine-os-v0.22.0-1`, DB **4**. Deux modules de domaine neufs dans le cache ; aucun magasin, SQL ou outil assistant.
+Navigateur **7397/7397** (épingle **7396**, +279 assertions depuis 7118, aucune retirée). Ciblés : traductions **84**, cuisine **110**, repas/courses **54**, intégration **30** ;
+Toronto **13** séparés. Node **230/230**, migrations `--check` **0**, syntaxe de **29** fichiers JS et diff propres.
+Parcours réels sur profil jetable : traduction enregistrée au clavier et relue, heure répétée choisie/rechargée, recette active persistée,
+cases et copie des courses, fiche rechargée hors ligne. Cache actif avec les deux modules. Largeurs 320/390/768/900/1280 et texte à 200 %
+sans débordement horizontal. Zéro erreur JavaScript ou requête externe. Synchronisation entre deux bases avec moteurs réels/transport simulé,
+puis archive et restauration sur une troisième base. Preuves : `.superpowers/sdd/2026-10-29-l0/`.
+
+**Non publié : la dernière version publiée reste 0.21.1.** Aucun push ni déploiement de L0. Aucun vrai appel assistant, compte privé,
+Safari/iPhone physique, déclenchement Siri ou partage natif vérifié. La traduction automatique complète et sa lecture fiche/cuisine/voix
+restent L6/L7 ; la refonte visuelle, la corbeille et les révisions de source ne sont pas livrées par L0. Le plan directeur entier reste à réaliser.
 
 **29 octobre 2026 — RETOUR MOBILE : CORRECTIFS 0.21.1 PUBLIÉS ET VÉRIFIÉS.**
 Neegan confirme la réception des photos mobile → ordinateur. Il signale ensuite ne pas voir les changements de présentation

@@ -5,9 +5,9 @@ import { t } from '../core/i18n.js';
 import { navigate, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { scaleVersion } from '../domain/scaling.js';
-import { createTimerLaunch, shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice, TIMER_STATE_HELP } from '../domain/timers.js';
+import { createTimerLaunch, describeDuration, TIMER_STATE_HELP } from '../domain/timers.js';
 import { label } from '../core/i18n.js';
-import { qtyEl, section, field, etiquetteIA, estExtractionNonRelue, contexteFichiers, empreintesPhotos, fichierPhoto } from './components.js';
+import { qtyEl, section, field, etiquetteIA, estExtractionNonRelue, contexteFichiers, empreintesPhotos, fichierPhoto, timerBlock } from './components.js';
 import { estCreationIA, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
 import { deviceId } from './import.js';
 import { estThermomix } from '../domain/thermomix.js';
@@ -16,8 +16,11 @@ import { panneauGardeThermomix, rappelThermomix } from './thermomix-garde.js';
 import { photosPersonnellesParRecette, photoPrincipale } from '../domain/cuisine-personnelle.js';
 import { photoVisible } from './photos-visibles.js';
 import { ouvrirCuissons, noteEnCuisine } from './cuisson.js';
+import { getSyncGeneration } from './state.js';
 
 export async function renderCook(params, query, ctx, deps = {}) {
+  const depot = deps.repo ?? repo;
+  const generation = getSyncGeneration();
   const session = ctx.cook_sessions.find((s) => s.id === params.id);
   if (!session) return el('div', { class: 'card' }, t('Session introuvable.'));
   const items = session.selected_version_ids.map((vid) => {
@@ -30,7 +33,8 @@ export async function renderCook(params, query, ctx, deps = {}) {
   const blocageThermomix = panneauGardeThermomix(items);
   if (blocageThermomix) return blocageThermomix;
   let activeIdx = Math.max(0, items.findIndex((it) => it.version.id === (session.active_version_id || session.selected_version_ids[0])));
-  const progress = session.progress || {};
+  let selectionConfirmee = activeIdx, selectionNumero = 0, selections = Promise.resolve(), dispose = false;
+  let progress = session.progress || {};
   progress.done_step_ids = progress.done_step_ids || [];
   progress.by_version = progress.by_version || {};
   const root = el('div', { class: 'mode-cuisine' });
@@ -39,14 +43,17 @@ export async function renderCook(params, query, ctx, deps = {}) {
   const fichiers = await (deps.repo ?? repo).getFiles(empreintesPhotos(items.map(it => it.recipe), photos));
   const nettoyages = [];
   const nettoyer = () => { for (const photo of area.querySelectorAll('[data-role="photo-visible"]')) photo.dispose?.(); for (const fn of nettoyages.splice(0)) fn(); };
-  root.dispose = () => nettoyer();
+  root.dispose = () => { dispose = true; nettoyer(); };
   const title = items.length === 1 ? (items[0].recipe.original_title || items[0].recipe.display_title) : t('Repas — {n} recettes', { n: items.length });
+  const titre = el('h1', null, title);
+  const fiche = el('a', { class: 'btn' }, t('Fiche'));
+  const etatSelection = el('div', { role: 'status', class: 'status warn', hidden: true });
   root.append(el('div', { class: 'row between', style: { marginBottom: '.6rem' } },
-    el('h1', null, title),
+    titre,
     el('div', { class: 'row' },
       el('span', { class: 'muted', style: { fontSize: '.85rem' } }, t('Progression conservée sur cet appareil')),
       el('button', { class: 'btn', onClick: finish }, t('Terminer')),
-      el('a', { class: 'btn', href: `#/recipes/${items[activeIdx].recipe.id}?v=${items[activeIdx].version.id}` }, t('Fiche')))));
+      fiche)), etatSelection);
   // C-2 / R-CRE-10 : toute fiche origine 'ia' (et toute création) dit sa lignée EN TÊTE, sous la rangée du titre (cook.js n'a pas de
   // pageHeader — P16) — une correction dit « Corrigée par toi — d’après une création IA » ; dans un repas, chacune est nommée par son
   // titre. L'avertissement C-9 (« n'a pas cuisiné cette recette ») reste réservé aux versions estCreationIA.
@@ -70,7 +77,9 @@ export async function renderCook(params, query, ctx, deps = {}) {
   }
   if (warnings.length && !progress.done_step_ids.length) root.append(el('div', { class: 'card warn' }, el('strong', null, t('Avant de commencer')), el('ul', null, ...warnings.map((w) => el('li', null, w)))));
 
-  const tabs = items.length > 1 ? el('div', { class: 'row', style: { marginBottom: '.6rem' } }, ...items.map((it, i) => el('button', { class: `btn small ${i === activeIdx ? 'active' : ''}`, onClick: () => { activeIdx = i; session.active_version_id = it.version.id; draw(); } }, it.recipe.display_title || it.recipe.original_title)), el('button', { class: 'btn small', onClick: () => { planOpen = !planOpen; draw(); } }, t('Plan commun'))) : null;
+  const boutonsRecettes = items.map((it, i) => el('button', { class: 'btn small', type: 'button', onClick: () => choisirRecette(i) }, it.recipe.display_title || it.recipe.original_title));
+  const boutonPlan = el('button', { class: 'btn small', type: 'button', onClick: () => { planOpen = !planOpen; draw(); } }, t('Plan commun'));
+  const tabs = items.length > 1 ? el('div', { class: 'row', style: { marginBottom: '.6rem' } }, ...boutonsRecettes, boutonPlan) : null;
   let planOpen = false;
   if (tabs) root.append(tabs);
   const area = el('div', null);
@@ -80,19 +89,67 @@ export async function renderCook(params, query, ctx, deps = {}) {
   return root;
 
   function stepsOf(it) { return it.version.steps || []; }
+  function modifierSession(it, fusion) {
+    const refuser = () => { throw new Error('Recette de la session devenue indisponible'); };
+    const contexteValide = () => { if (getSyncGeneration() !== generation) refuser(); };
+    return depot.saveBatch({}, { conditions: {
+      recipes: [{ key: it.recipe.id, fusion: courant => { contexteValide(); if (!courant) refuser(); return null; } }],
+      recipe_versions: [{ key: it.version.id, fusion: courant => { contexteValide(); if (!courant || courant.recipe_id !== it.recipe.id) refuser(); return null; } }],
+      cook_sessions: [{ key: session.id, fusion: courant => {
+        contexteValide();
+        if (!courant || courant.status !== 'active' || !Array.isArray(courant.selected_version_ids) || !courant.selected_version_ids.includes(it.version.id)) refuser();
+        return fusion(courant);
+      } }],
+    } });
+  }
+  function choisirRecette(index) {
+    activeIdx = index;
+    const it = items[index], numero = ++selectionNumero;
+    session.active_version_id = it.version.id;
+    planOpen = false; etatSelection.hidden = true; draw();
+    // Sérialiser les gestes, mais ne fusionner que le choix : la progression d'un autre onglet reste intacte.
+    selections = selections.then(async () => {
+      await modifierSession(it, courant => ({ ...courant, active_version_id: it.version.id }));
+      selectionConfirmee = index;
+    }).catch(() => {
+      if (dispose || numero !== selectionNumero) return;
+      activeIdx = selectionConfirmee;
+      session.active_version_id = items[activeIdx].version.id;
+      etatSelection.textContent = t('La sélection n’a pas été enregistrée. La session ou la recette a changé ; réessaie après rechargement.');
+      etatSelection.hidden = false;
+      draw();
+    });
+    return selections;
+  }
   function currentStepIndex(it) {
     const st = progress.by_version[it.version.id] || {};
     const steps = stepsOf(it);
     const idx = steps.findIndex((s) => s.id === st.current_step_id);
     return idx >= 0 ? idx : 0;
   }
-  async function persist() {
-    progress.total_steps = items.reduce((n, it) => n + stepsOf(it).length, 0);
+  async function persist(it, newIdx, doneStep) {
+    let ecrite;
+    await modifierSession(it, courant => {
+      const avant = courant.progress || {};
+      ecrite = {
+        ...avant,
+        total_steps: items.filter(item => courant.selected_version_ids.includes(item.version.id)).reduce((n, item) => n + stepsOf(item).length, 0),
+        by_version: { ...(avant.by_version || {}), [it.version.id]: { ...(avant.by_version?.[it.version.id] || {}), current_step_id: stepsOf(it)[newIdx]?.id || null } },
+        done_step_ids: [...new Set([...(Array.isArray(avant.done_step_ids) ? avant.done_step_ids : []), ...(doneStep ? [doneStep.id] : [])])],
+      };
+      return { ...courant, progress: ecrite, active_version_id: it.version.id };
+    });
+    // L'état visible n'avance qu'après l'écriture ; une transaction refusée conserve l'étape affichée.
+    progress = ecrite;
     session.progress = progress;
-    await repo.saveBatch({}, { conditions: { cook_sessions: [{ key: session.id, fusion: c => c?.status === 'active' ? { ...c, progress, active_version_id: session.active_version_id } : null }] } });
   }
 
   function draw() {
+    const courant = items[activeIdx];
+    fiche.setAttribute('href', `#/recipes/${courant.recipe.id}?v=${courant.version.id}`);
+    titre.textContent = items.length === 1 ? title : `${title} · ${courant.recipe.display_title || courant.recipe.original_title}`;
+    boutonsRecettes.forEach((bouton, i) => { bouton.classList.toggle('active', i === activeIdx); bouton.setAttribute('aria-pressed', String(i === activeIdx)); });
+    boutonPlan.classList.toggle('active', planOpen); boutonPlan.setAttribute('aria-pressed', String(planOpen));
     nettoyer();
     area.replaceChildren();
     if (planOpen) { area.append(commonPlan()); return; }
@@ -134,31 +191,43 @@ export async function renderCook(params, query, ctx, deps = {}) {
   }
 
   function markDone(step) { if (!progress.done_step_ids.includes(step.id)) progress.done_step_ids.push(step.id); }
-  async function go(it, newIdx, doneStep = null) {
-    if (doneStep) markDone(doneStep);
-    const steps = stepsOf(it);
-    progress.by_version[it.version.id] = { current_step_id: steps[newIdx]?.id || null };
-    await persist();
-    draw();
+  function go(it, newIdx, doneStep = null) {
+    if (it.version.id !== items[activeIdx].version.id) return Promise.resolve();
+    const numero = ++selectionNumero;
+    etatSelection.hidden = true;
+    // Même file et même garde que les onglets : une progression tardive ne réactive pas une version retirée.
+    selections = selections.then(async () => {
+      await persist(it, newIdx, doneStep);
+      if (!dispose) draw();
+    }).catch(() => {
+      if (dispose || numero !== selectionNumero) return;
+      etatSelection.textContent = t('La progression n’a pas été enregistrée. La session ou la recette a changé ; réessaie après rechargement.');
+      etatSelection.hidden = false;
+    });
+    return selections;
   }
 
   // Bloc minuterie avec états : requested → opening → unconfirmed | failed. Compte à rebours miroir indicatif.
   function timerCard(tm, it, step) {
-    const seconds = tm.seconds;
     let launch = null;
     const stateEl = el('div', { class: 'muted', style: { fontSize: '.9rem' } });
     const mirror = el('div', { class: 'mirror', style: { display: 'none' } });
-    let mirrorTimer = null;
-    nettoyages.push(() => clearInterval(mirrorTimer));
-    const setState = async (state) => { if (!launch) return; launch.handoff_state = state; launch = await repo.save('timer_launches', launch); stateEl.textContent = `${label('timer_state', state)} — ${TIMER_STATE_HELP[state]}`; };
-    const request = async (channel) => {
+    let mirrorTimer = null, handoffTimeout = null, carteActive = true;
+    nettoyages.push(() => { carteActive = false; clearInterval(mirrorTimer); clearTimeout(handoffTimeout); });
+    const setState = async (state) => { if (!launch) return; launch.handoff_state = state; launch = await depot.save('timer_launches', launch); stateEl.textContent = `${label('timer_state', state)} — ${TIMER_STATE_HELP[state]}`; };
+    const request = async (channel, seconds) => {
       launch = createTimerLaunch({ cook_session_id: session.id, recipe_version_id: it.version.id, step_id: step.id, device_id: deviceId(), duration_seconds: seconds, channel });
-      launch = await repo.save('timer_launches', launch);
-      if (channel === 'shortcut') { await setState('opening'); setTimeout(() => { if (launch.handoff_state === 'opening') setState('unconfirmed'); }, 2500); }
+      launch = await depot.save('timer_launches', launch);
+      if (!carteActive) return;
+      if (channel === 'shortcut') {
+        await setState('opening');
+        if (!carteActive) return;
+        handoffTimeout = setTimeout(() => { if (launch.handoff_state === 'opening') setState('unconfirmed').catch(() => {}); }, 2500);
+      }
       else stateEl.textContent = `${label('timer_state', 'siri')} — ${TIMER_STATE_HELP.siri}`;
-      startMirror();
+      if (carteActive) startMirror(seconds);
     };
-    const startMirror = () => {
+    const startMirror = (seconds) => {
       const end = Date.now() + seconds * 1000;
       mirror.style.display = 'block';
       clearInterval(mirrorTimer);
@@ -168,15 +237,12 @@ export async function renderCook(params, query, ctx, deps = {}) {
         if (left <= 0) { clearInterval(mirrorTimer); mirror.textContent = t('Indicatif : temps écoulé — fie-toi à l’alarme d’Horloge.'); }
       }, 500);
     };
-    const apple = isAppleTouchDevice();
     return el('div', { class: 'card flat stack' },
-      el('div', { class: 'row between' }, el('strong', null, `⏱ ${tm.label}${tm.seconds_max ? ` (${t('jusqu’à')} ${describeDuration(tm.seconds_max)})` : ''}`),
-        apple ? el('a', { class: 'btn primary', href: shortcutUrl(seconds), onClick: () => request('shortcut') }, t('Lancer la minuterie système')) : null),
-      el('div', null, `${t('Dis à Siri')} : « ${siriPhrase(seconds)} » `, el('button', { class: 'btn small', onClick: () => request('siri') }, t('Fait'))),
+      timerBlock(tm.seconds, { seconds_max: tm.seconds_max, locale: ctx.settings?.ui_locale || 'fr', onRequest: request, compact: true }),
       estThermomix(it.version) ? el('small', { class: 'muted' }, t('Durée proposée par l’assistant, à vérifier pendant la cuisson.')) : null,
       stateEl, mirror,
       el('div', { class: 'row' },
-        el('button', { class: 'btn small', onClick: () => launch && setState('failed') }, t('Ça n’a pas démarré')),
+        el('button', { class: 'btn small', onClick: () => { if (launch) setState('failed').catch(() => { stateEl.textContent = t('La demande de minuterie n’a pas été enregistrée. Réessaie.'); }); } }, t('Ça n’a pas démarré')),
         el('small', { class: 'muted' }, t('Le compte à rebours ci-dessus n’est pas une alarme : l’alarme vit dans Horloge et continue quand l’app est fermée.'))));
   }
 

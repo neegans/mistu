@@ -5,7 +5,7 @@ import { SYNC_STORES_0001 } from '../src/sync/tables.js';
 
 export async function runAssistantCompteTests({ eq, ok }) {
   // --- T1 : schéma (K-9, § 4.1)
-  eq([DB_VERSION, APP_VERSION], [4, '0.21.1'], 'T1 (lot UI-1, carnet) : DB_VERSION 4 inchangée, APP_VERSION 0.21.1');
+  eq([DB_VERSION, APP_VERSION], [4, '0.22.0'], 'T1 (lot UI-1, carnet) : DB_VERSION 4 inchangée, APP_VERSION 0.22.0');
   eq(STORES.assistant_config, { keyPath: 'id', indexes: [], noDelete: true }, 'T1 : magasin assistant_config, clé id, noDelete');
   eq([SYNC_STORES.length, SYNC_STORES.slice(-2)], [27, ['assistant_config', 'imports']], 'K-9 (lot A) : 27 magasins synchronisés, assistant_config puis imports DERNIER');
   eq(SYNC_STORES.slice(0, 25), [...SYNC_STORES_0001], 'K-9 : les 25 premiers = la liste figée de 0001, dans l’ordre');

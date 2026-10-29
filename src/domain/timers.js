@@ -3,28 +3,38 @@ import { newId, nowIso } from '../core/ids.js';
 
 export const SHORTCUT_NAME = 'CuisineOS-Minuterie';
 
+// Même contrat pour le texte, Raccourcis et l'enregistrement : aucune durée invalide transformée en une seconde.
+export function normaliserDuree(seconds) {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0 || seconds > 86400) return null;
+  const s = Math.round(seconds);
+  return s > 0 ? s : null;
+}
+
 export function shortcutUrl(seconds) {
-  const s = Math.max(1, Math.round(seconds));
+  const s = normaliserDuree(seconds);
+  if (s === null) return null;
   return `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}&input=text&text=${s}`;
 }
 
 export function describeDuration(seconds, locale = 'fr') {
+  if (seconds !== 0 && normaliserDuree(seconds) === null) return '—';
   const s = Math.round(seconds);
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   const parts = [];
   if (h) parts.push(locale === 'en' ? `${h} hour${h > 1 ? 's' : ''}` : `${h} heure${h > 1 ? 's' : ''}`);
   if (m) parts.push(`${m} min`);
-  if (sec && !h) parts.push(locale === 'en' ? `${sec} s` : `${sec} s`);
+  if (sec) parts.push(`${sec} s`);
   return parts.join(' ') || (locale === 'en' ? '0 s' : '0 s');
 }
 
 export function siriPhrase(seconds, locale = 'fr') {
-  const s = Math.round(seconds);
-  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  const s = normaliserDuree(seconds);
+  if (s === null) return '';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   const dur = locale === 'en'
-    ? [h ? `${h} hour${h > 1 ? 's' : ''}` : '', m ? `${m} minute${m > 1 ? 's' : ''}` : ''].filter(Boolean).join(' and ')
-    : [h ? `${h} heure${h > 1 ? 's' : ''}` : '', m ? `${m} minute${m > 1 ? 's' : ''}` : ''].filter(Boolean).join(' et ');
-  return locale === 'en' ? `Hey Siri, set a timer for ${dur || `${s} seconds`}` : `Dis Siri, mets une minuterie de ${dur || `${s} secondes`}`;
+    ? [h ? `${h} hour${h > 1 ? 's' : ''}` : '', m ? `${m} minute${m > 1 ? 's' : ''}` : '', sec ? `${sec} second${sec > 1 ? 's' : ''}` : ''].filter(Boolean).join(' and ')
+    : [h ? `${h} heure${h > 1 ? 's' : ''}` : '', m ? `${m} minute${m > 1 ? 's' : ''}` : '', sec ? `${sec} seconde${sec > 1 ? 's' : ''}` : ''].filter(Boolean).join(' et ');
+  return locale === 'en' ? `Hey Siri, set a timer for ${dur}` : `Dis Siri, mets une minuterie de ${dur}`;
 }
 
 export function isAppleTouchDevice() {
@@ -38,8 +48,10 @@ export function isStandalone() {
 
 // Crée l'enregistrement de demande. handoff_state : requested → opening → unconfirmed | failed ; « siri » = demande vocale par l'utilisateur.
 export function createTimerLaunch({ cook_session_id = null, recipe_version_id, step_id = null, device_id, duration_seconds, channel }) {
+  const duration = normaliserDuree(duration_seconds);
+  if (duration === null) throw new RangeError('Durée de minuterie invalide');
   return {
-    id: newId('tl'), cook_session_id, recipe_version_id, step_id, device_id, duration_seconds: Math.round(duration_seconds),
+    id: newId('tl'), cook_session_id, recipe_version_id, step_id, device_id, duration_seconds: duration,
     channel, // 'shortcut' | 'siri'
     requested_at: nowIso(), handoff_state: channel === 'siri' ? 'siri' : 'requested', updated_at: nowIso(),
   };

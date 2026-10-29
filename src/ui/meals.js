@@ -14,6 +14,8 @@ import { estThermomix, gardeThermomix } from '../domain/thermomix.js';
 import { portionsRepas, enregistrerSessionCuisine } from '../domain/thermomix-session.js';
 import { BLOCAGE_THERMOMIX, rappelThermomix } from './thermomix-garde.js';
 import { photosPersonnellesParRecette, photoPrincipale } from '../domain/cuisine-personnelle.js';
+import { formaterHeureLocale, analyserHeureLocale, decalageUTC } from '../domain/heure-locale.js';
+import { TransitionRefusee } from '../core/db.js';
 
 export async function renderMeals(params, query, ctx) {
   const root = el('div', null, pageHeader(t('Ma semaine'), { actions: [el('button', { class: 'btn primary', onClick: () => newMeal(ctx) }, t('Nouveau repas'))] }));
@@ -68,15 +70,24 @@ export async function renderMeal(params, query, ctx, deps = {}) {
   const items = meal.items.map((it) => ({ ...it, recipe: ctx.recipesById.get(it.recipe_id), version: it.recipe_version_id ? ctx.versionsById.get(it.recipe_version_id) : null })).filter((it) => it.recipe);
   const main = items.find((it) => it.role === 'plat_principal') || items[0];
   const root = el('div', null);
-  const save = async () => { await repo.save('meals', meal); refresh(); };
+  const save = async champs => {
+    const changements = Object.fromEntries(champs.map(champ => [champ, structuredClone(meal[champ])]));
+    try {
+      await (deps.repo ?? repo).saveBatch({}, { conditions: { meals: [{ key: meal.id, fusion: courant => {
+        if (!courant) throw new TransitionRefusee('meals', meal.id, undefined);
+        return { ...courant, ...changements };
+      } }] } });
+      (deps.refresh ?? refresh)(); return true;
+    } catch { (deps.toast ?? toast)(t('Les modifications du repas n’ont pas pu être enregistrées. Réessaie après rechargement.')); return false; }
+  };
   root.append(pageHeader(meal.title, { back: { href: '/meals', label: t('Ma semaine') }, actions: [
-    el('button', { class: 'btn', onClick: async () => { const v = await promptDialog(t('Titre'), { value: meal.title }); if (v) { meal.title = v.trim(); save(); } } }, t('Renommer')),
+    el('button', { class: 'btn', onClick: async () => { const v = await promptDialog(t('Titre'), { value: meal.title }); if (v) { meal.title = v.trim(); save(['title']); } } }, t('Renommer')),
     el('button', { class: 'btn', onClick: redo }, t('Refaire ce repas')),
   ] }));
   root.append(el('div', { class: 'card sage row' },
-    field(t('Portions du repas'), el('input', { type: 'number', min: 1, value: meal.servings, onChange: async (e) => { meal.servings = Number(e.target.value) || 1; for (const it of meal.items) if (!it.servings_custom) it.servings = meal.servings; save(); } })),
-    field(t('Servi le'), el('input', { type: 'datetime-local', value: meal.serve_at ? meal.serve_at.slice(0, 16) : '', onChange: (e) => { meal.serve_at = e.target.value ? new Date(e.target.value).toISOString() : null; save(); } })),
-    field(t('Contraintes de ce repas (invités inclus)'), el('div', { class: 'chips' }, ...DIET_TAGS.map((d) => el('span', { class: `chip clickable ${meal.constraints_snapshot.diets.includes(d) ? 'warn' : 'outline'}`, onClick: () => { const s = meal.constraints_snapshot.diets; meal.constraints_snapshot.diets = s.includes(d) ? s.filter((x) => x !== d) : [...s, d]; save(); } }, label('diet', d)))),
+    field(t('Portions du repas'), el('input', { type: 'number', min: 1, value: meal.servings, onChange: async (e) => { meal.servings = Number(e.target.value) || 1; for (const it of meal.items) if (!it.servings_custom) it.servings = meal.servings; save(['servings', 'items']); } })),
+    champHeureRepas(meal, deps),
+    field(t('Contraintes de ce repas (invités inclus)'), el('div', { class: 'chips' }, ...DIET_TAGS.map((d) => el('span', { class: `chip clickable ${meal.constraints_snapshot.diets.includes(d) ? 'warn' : 'outline'}`, onClick: () => { const s = meal.constraints_snapshot.diets; meal.constraints_snapshot.diets = s.includes(d) ? s.filter((x) => x !== d) : [...s, d]; save(['constraints_snapshot']); } }, label('diet', d)))),
       t('Liées à ce repas seulement ; le profil personnel n’est pas modifié.'))));
 
   // Éléments
@@ -97,14 +108,14 @@ export async function renderMeal(params, query, ctx, deps = {}) {
       el('div', { class: 'row between top' },
         vignette ? el('div', { class: 'row top', style: { flex: '1', minWidth: '0' } }, vignette, bloc) : bloc,
         el('div', { class: 'row' },
-          select(MEAL_ROLES.map((r) => ({ value: r, label: label('meal_role', r) })), it.role, (v) => { meal.items.find((x) => x.id === it.id).role = v; save(); }),
-          el('input', { type: 'number', min: 1, value: portionsRepas(it, meal) ?? '', placeholder: t('inconnues'), style: { width: '80px' }, title: t('Portions de cet élément'), onChange: (e) => { const x = meal.items.find((y) => y.id === it.id); x.servings = Number(e.target.value) || meal.servings; x.servings_custom = true; save(); } }),
-          el('button', { class: `btn small ${it.locked ? 'active' : ''}`, title: t('Verrouiller ce plat : jamais remplacé automatiquement'), onClick: () => { meal.items.find((x) => x.id === it.id).locked = !it.locked; save(); } }, it.locked ? '🔒' : '🔓'),
+          select(MEAL_ROLES.map((r) => ({ value: r, label: label('meal_role', r) })), it.role, (v) => { meal.items.find((x) => x.id === it.id).role = v; save(['items']); }),
+          el('input', { type: 'number', min: 1, value: portionsRepas(it, meal) ?? '', placeholder: t('inconnues'), style: { width: '80px' }, title: t('Portions de cet élément'), onChange: (e) => { const x = meal.items.find((y) => y.id === it.id); x.servings = Number(e.target.value) || meal.servings; x.servings_custom = true; save(['items']); } }),
+          el('button', { class: `btn small ${it.locked ? 'active' : ''}`, title: t('Verrouiller ce plat : jamais remplacé automatiquement'), onClick: () => { meal.items.find((x) => x.id === it.id).locked = !it.locked; save(['items']); } }, it.locked ? '🔒' : '🔓'),
           el('button', { class: 'btn small', disabled: it.locked, onClick: () => replaceItem(it) }, t('Remplacer')),
-          el('button', { class: 'btn small danger', disabled: it.locked, onClick: async () => { if (await confirmDialog(t('Retirer « {r} » du repas ? Les autres éléments restent.', { r: it.recipe.original_title }), { okLabel: t('Retirer') })) { meal.items = meal.items.filter((x) => x.id !== it.id); save(); } } }, t('Retirer')))),
+          el('button', { class: 'btn small danger', disabled: it.locked, onClick: async () => { if (await confirmDialog(t('Retirer « {r} » du repas ? Les autres éléments restent.', { r: it.recipe.original_title }), { okLabel: t('Retirer') })) { meal.items = meal.items.filter((x) => x.id !== it.id); save(['items']); } } }, t('Retirer')))),
       !it.version ? el('div', { class: 'status warn' }, t('Référence d’index seulement : ingrédients et durées inconnus.')) : null);
     const rappelTM = rappelThermomix(it.version); if (rappelTM) card.append(rappelTM);
-    if (!gardeThermomix(it.version, portionsRepas(it, meal)).ok) card.append(el('div', { class: 'status warn', dataset: { role: 'thermomix-portions' } }, t(BLOCAGE_THERMOMIX), el('button', { class: 'btn small', onClick: async () => { const cible = meal.items.find(x => x.id === it.id); cible.servings = it.version.servings ?? null; cible.servings_custom = true; await save(); } }, t('Revenir aux quantités adaptées'))));
+    if (!gardeThermomix(it.version, portionsRepas(it, meal)).ok) card.append(el('div', { class: 'status warn', dataset: { role: 'thermomix-portions' } }, t(BLOCAGE_THERMOMIX), el('button', { class: 'btn small', onClick: async () => { const cible = meal.items.find(x => x.id === it.id); cible.servings = it.version.servings ?? null; cible.servings_custom = true; await save(['items']); } }, t('Revenir aux quantités adaptées'))));
     list.append(card);
   }
   root.append(section(t('Mon repas — {n} élément(s)', { n: items.length }), list,
@@ -140,7 +151,7 @@ export async function renderMeal(params, query, ctx, deps = {}) {
     const d = ctx.docsByRecipe.get(id);
     const x = meal.items.find((y) => y.id === it.id);
     x.recipe_id = d.recipe.id; x.recipe_version_id = d.version.id;
-    await save();
+    if (!(await save(['items']))) return;
     toast(t('Élément remplacé ; portions, courses et contraintes recalculées.'));
   }
   async function makeList() {
@@ -181,3 +192,70 @@ export async function renderMeal(params, query, ctx, deps = {}) {
 }
 
 export { RECIPE_TYPES };
+
+// Une heure ambiguë doit pouvoir être choisie AVANT l’écriture. Seule cette donnée est fusionnée dans le repas relu.
+function champHeureRepas(meal, deps) {
+  const R = deps.repo ?? repo;
+  const initial = meal.serve_at ?? null;
+  const initialLocal = formaterHeureLocale(initial);
+  const saisie = el('input', { type: 'datetime-local', value: initialLocal, step: 60, onInput: actualiser, onChange: actualiser });
+  const choix = el('div', { class: 'stack' });
+  const statut = el('p', { class: 'muted', role: 'status', style: { margin: '0' } });
+  let occurrences = [], selection = null, enregistrement = false;
+  const enregistrer = el('button', { type: 'button', class: 'btn small', onClick: conserver }, t('Enregistrer l’heure'));
+  const racine = el('div', { class: 'stack', dataset: { role: 'heure-repas' }, style: { minWidth: '0' } }, field(t('Servi le'), saisie), choix, statut, enregistrer);
+  actualiser();
+  return racine;
+
+  function actualiser() {
+    const resultat = analyserHeureLocale(saisie.value);
+    occurrences = resultat.occurrences;
+    const invalide = saisie.validity.badInput || !['vide', 'valide'].includes(resultat.etat);
+    saisie.setAttribute('aria-invalid', String(invalide));
+    enregistrer.disabled = invalide || enregistrement;
+    choix.replaceChildren();
+    if (invalide) {
+      selection = null;
+      statut.textContent = resultat.etat === 'inexistante' ? t('Cette heure n’existe pas dans le fuseau de cet appareil. Choisis une autre heure.') : t('Saisis une date et une heure valides.');
+      return;
+    }
+    const gardeInitial = initial && saisie.value === initialLocal && Number.isFinite(Date.parse(initial));
+    const correspondance = gardeInitial ? occurrences.find(x => new Date(x.iso).getTimezoneOffset() === new Date(initial).getTimezoneOffset()) : null;
+    selection = correspondance?.iso ?? occurrences[0]?.iso ?? null;
+    statut.textContent = occurrences.length > 1 ? t('Cette heure se produit deux fois. Choisis le décalage avant d’enregistrer.') : t('Heure locale de cet appareil.');
+    if (occurrences.length > 1) {
+      // Le select natif peut tronquer son option sur un téléphone : le décalage choisi reste lisible en dehors du contrôle.
+      const retenu = el('small', { dataset: { role: 'decalage-repas' } });
+      const afficherDecalage = () => { const x = occurrences.find(o => o.iso === selection); retenu.textContent = x ? t('Décalage choisi : {decalage}', { decalage: decalageUTC(x.offset_minutes) }) : ''; };
+      const menu = select(occurrences.map((x, i) => ({ value: x.iso, label: i === 0 ? t('Première occurrence ({decalage})', { decalage: decalageUTC(x.offset_minutes) }) : t('Seconde occurrence ({decalage})', { decalage: decalageUTC(x.offset_minutes) }) })), selection, value => { selection = value; afficherDecalage(); });
+      afficherDecalage();
+      choix.append(field(t('Occurrence de l’heure'), menu), retenu);
+    }
+  }
+
+  async function conserver() {
+    if (enregistrement || enregistrer.disabled) return;
+    const resultat = analyserHeureLocale(saisie.value);
+    if (saisie.validity.badInput || !['vide', 'valide'].includes(resultat.etat)) { actualiser(); return; }
+    let instant = resultat.etat === 'vide' ? null : resultat.occurrences.find(x => x.iso === selection)?.iso;
+    if (instant === undefined) { actualiser(); return; }
+    // Un formulaire à la minute ne doit pas effacer des secondes existantes ni changer l’occurrence choisie auparavant.
+    if (initial && saisie.value === initialLocal && instant && new Date(instant).getTimezoneOffset() === new Date(initial).getTimezoneOffset()) instant = initial;
+    enregistrement = true; enregistrer.disabled = true; saisie.disabled = true;
+    for (const menu of choix.querySelectorAll('select')) menu.disabled = true;
+    try {
+      await R.saveBatch({}, { conditions: { meals: [{ key: meal.id, fusion: courant => {
+        if (!courant || (courant.serve_at ?? null) !== initial) throw new TransitionRefusee('meals', meal.id, courant?.status);
+        return { ...courant, serve_at: instant };
+      } }] } });
+      meal.serve_at = instant;
+      statut.textContent = t('Heure du repas enregistrée.');
+      (deps.refresh ?? refresh)();
+    } catch (e) {
+      statut.textContent = e instanceof TransitionRefusee ? t('Ce repas a changé ou n’est plus disponible. Recharge sa fiche avant de réessayer.') : t('L’heure n’a pas pu être enregistrée. Ta saisie est conservée.');
+    } finally {
+      enregistrement = false; enregistrer.disabled = false; saisie.disabled = false;
+      for (const menu of choix.querySelectorAll('select')) menu.disabled = false;
+    }
+  }
+}

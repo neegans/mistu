@@ -30,7 +30,7 @@
   --radius-btn: 8px;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --topbar-h: 64px;
-  --nav-h: 64px;
+  --nav-h: max(64px, 4.5rem);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
   /* Anciens noms (T-2) : alias des jetons ci-dessus, pour les règles qui les portent encore. */
@@ -129,9 +129,10 @@ nav.tabs {
   padding-bottom: var(--safe-b); height: calc(var(--nav-h) + var(--safe-b));
 }
 nav.tabs a {
-  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 2px; text-decoration: none; color: var(--muted); font-size: .72rem; padding: .3rem 0; min-height: 48px;
 }
+nav.tabs a > span:not(.ico) { max-width: 100%; overflow-wrap: anywhere; text-align: center; }
 nav.tabs a .ico { font-size: 1.3rem; line-height: 1; }
 nav.tabs a.active { color: var(--action); font-weight: 600; box-shadow: inset 0 2px 0 var(--action); }
 /* T-5 : l'onglet est collé au bas de l'écran (--safe-b vaut 0 sans barre d'accueil) : l'anneau rentre, sinon son bas sort de l'écran. */
@@ -423,6 +424,12 @@ details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
 /* Le corps de la fiche : sans filet sous les titres ; un filet au-dessus des deux colonnes et un filet vertical entre elles (maquette). */
 .recipe-body section.plain > h2 { border-bottom: 0; padding-bottom: 0; font-size: 2rem; }
 .recipe-body > [data-role="colonnes-corps"] { border-top: 1px solid var(--line); padding-top: 1.4rem; }
+/* L0 : le sélecteur et les textes agrandis ne fixent pas la largeur minimale de la fiche. */
+.recipe-body > [data-role="colonnes-corps"] { grid-template-columns: minmax(0, 1fr); }
+.recipe-body > [data-role="colonnes-corps"] > * { min-width: 0; }
+.recipe-body .steps > li > div { min-width: 0; overflow-wrap: anywhere; }
+.recipe-body select { min-width: 0; }
+@media (min-width: 760px) { .recipe-body > [data-role="colonnes-corps"] { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* Une case à cocher par ingrédient (rien n'est écrit) ; « Remplacer » devient un lien discret en bout de ligne. */
 .coches > li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; column-gap: .35rem; align-items: center; }
 .coches > li > :not(.coche-cible):not(.remplacer) { grid-column: 2; }
@@ -522,7 +529,7 @@ details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
 .ingredients-cuisine, .photo-cuisine { border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem 1rem; background: var(--card); }
 .ingredients-cuisine > summary, .photo-cuisine > summary { min-height: 44px; align-content: center; }
 .photo-cuisine-image { max-width: 320px; aspect-ratio: 1; margin-top: .6rem; }
-.navigation-cuisine { position: sticky; bottom: calc(68px + var(--safe-b)); z-index: 15; display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; padding: .7rem 0; margin: 1rem auto 0; max-width: 850px; background: var(--paper); }
+.navigation-cuisine { position: sticky; bottom: calc(var(--nav-h) + 4px + var(--safe-b)); z-index: 15; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); gap: .6rem; padding: .7rem 0; margin: 1rem auto 0; max-width: 850px; background: var(--paper); }
 .navigation-cuisine .btn { min-height: 56px; font-size: 1.05rem; justify-content: center; }
 .reperes-formulaire { display: grid; gap: 1rem; }
 .reperes-plage { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }

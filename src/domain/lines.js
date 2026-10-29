@@ -96,19 +96,33 @@ export function parseStepsBlock(text, { parParagraphe = false } = {}) {
 // Détection prudente de durées dans une étape (pour proposer une minuterie) : « 8 min », « 1 h 30 », « 10 minutes ».
 export function detectTimers(text) {
   const timers = [];
-  const re = /(\d+(?:[.,]\d+)?)\s*(?:h(?:eures?|ours?)?|hr)\s*(?:(\d{1,2})\s*(?:min(?:utes?)?)?)?|(\d+(?:[.,]\d+)?)\s*(?:à|-|–|to)?\s*(\d+)?\s*(min(?:utes?)?|minutes?|s(?:ec(?:ondes?)?)?\b)/gi;
+  const nombre = '\\d+(?:[.,]\\d+)?';
+  const heure = '(?:heures?|hours?|hrs?|h)(?![a-z])';
+  const minute = '(?:minutes?|mins?)(?![a-z])';
+  const courte = `(?:${minute}|(?:secondes?|seconds?|secs?|s)(?![a-z]))`;
+  // Un nombre après les heures est une minute seulement si l'unité est explicite, ou si l'abréviation s'arrête
+  // ici (fin, ponctuation ou liaison de clauses). « 1 h 30 secondes » et « 1 h 30 g » ne valent jamais 90 minutes.
+  const finAbregee = '(?=\\s*(?:$|[.,;:!?)\n]|(?:puis|then|et|and)\\b))';
+  const minutesApresHeure = `(?:(\\d{1,2})(?!\\d|[.,]\\d)(?:\\s*${minute}|${finAbregee}))?`;
+  // Les plages sont reconnues EN PREMIER pour ne pas extraire seulement « 6 heures » de « 4–6 heures ».
+  const re = new RegExp(`(${nombre})\\s*(?:à|-|–|to)\\s*(${nombre})\\s*(${heure}|${courte})|(${nombre})\\s*${heure}\\s*${minutesApresHeure}|(${nombre})\\s*(${courte})`, 'gi');
+  const valeur = s => parseFloat(s.replace(',', '.'));
   let m;
   while ((m = re.exec(text))) {
     if (m[1] !== undefined) {
-      const h = parseFloat(m[1].replace(',', '.'));
-      const mins = m[2] ? parseInt(m[2], 10) : 0;
+      const a = valeur(m[1]), b = valeur(m[2]), unit = m[3].toLowerCase();
+      if (b < a || Number.isNaN(b)) continue;
+      const mult = unit.startsWith('h') ? 3600 : unit.startsWith('s') ? 1 : 60;
+      timers.push({ label: m[0].trim(), seconds: Math.round(a * mult), seconds_max: Math.round(b * mult) });
+    } else if (m[4] !== undefined) {
+      const h = valeur(m[4]);
+      const mins = m[5] ? parseInt(m[5], 10) : 0;
       timers.push({ label: m[0].trim(), seconds: Math.round(h * 3600 + mins * 60) });
-    } else if (m[3] !== undefined) {
-      const a = parseFloat(m[3].replace(',', '.'));
-      const b = m[4] ? parseFloat(m[4]) : null;
-      const unit = m[5].toLowerCase();
+    } else if (m[6] !== undefined) {
+      const a = valeur(m[6]);
+      const unit = m[7].toLowerCase();
       const mult = unit.startsWith('s') ? 1 : 60;
-      timers.push({ label: m[0].trim(), seconds: Math.round(a * mult), seconds_max: b ? Math.round(b * mult) : null });
+      timers.push({ label: m[0].trim(), seconds: Math.round(a * mult), seconds_max: null });
     }
   }
   // Bornes (S13, R-CRE-8) : une durée absurde n'est jamais « corrigée » : un nombre qui déborde (Infinity), nul ou de plus de 24 h

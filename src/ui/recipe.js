@@ -32,6 +32,7 @@ import { BLOCAGE_THERMOMIX, rappelThermomix } from './thermomix-garde.js';
 import { resumeReperes, lienGestionPhoto } from './reperes-affichage.js';
 import { photoPrincipale } from '../domain/cuisine-personnelle.js';
 import { panneauPhotoPage } from './photo-page.js';
+import { lireTraduction } from '../domain/traductions.js';
 
 // S7 : une adresse refusée s'affiche INERTE (jamais un <a>), et BORNÉE — une fiche venue d'une archive ou du
 // serveur peut en porter 100 000 caractères, qui pousseraient la fiche entière hors de l'écran.
@@ -75,6 +76,16 @@ function cochesDe(id) { if (!COCHES.has(id)) COCHES.set(id, new Set()); return C
 function rangeeEtat(...enfants) {
   const utiles = enfants.filter((b) => b && !(b.classList?.contains('available') || b.classList?.contains('original')));
   return utiles.length ? el('div', { class: 'row' }, ...utiles) : null;
+}
+
+// Les textes historiques restent consultables sans attribuer leurs positions à la source.
+function textesTraductionConserves(contenu) {
+  const texte = value => typeof value === 'string' ? value : Array.isArray(value)
+    ? value.map(part => typeof part === 'string' ? part : t('Ce contenu ne peut pas être affiché.')).join('\n\n')
+    : t('Ce contenu ne peut pas être affiché.');
+  return el('details', { dataset: { role: 'ancienne-traduction' } }, el('summary', null, t('Consulter les textes conservés')),
+    ...[['Titre traduit', contenu?.title], ['Ingrédients traduits', contenu?.ingredients], ['Étapes traduites', contenu?.steps]].map(([nom, valeur]) =>
+      el('section', null, el('h4', null, t(nom)), el('div', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, texte(valeur)))));
 }
 
 export async function renderRecipe(params, query, ctx, deps = {}) {
@@ -324,6 +335,8 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     }
     const scaled = scaleVersion(version, state.servings);
     const translation = state.lang !== 'original' ? ctx.recipe_translations.find((tr) => tr.recipe_version_id === version.id && tr.locale === state.lang) : null;
+    const lectureTraduction = lireTraduction(translation, version);
+    const contenuTraduction = lectureTraduction.etat === 'courante' ? lectureTraduction.contenu : null;
     const wantsTranslation = state.lang !== 'original' && state.lang !== recipe.original_language;
     const ctxQty = { system: state.units, locale: state.lang === 'original' ? (recipe.original_language || 'fr') : state.lang, convention_id: conventionId, readingLocale: state.lang, originalLocale: recipe.original_language || 'fr', showSource: true };
     const ingList = el('ul', { class: 'list plain coches' });
@@ -337,7 +350,8 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
       const caseL = el('input', { type: 'checkbox', class: 'coche', 'aria-labelledby': idLigne, onChange: (e) => { if (e.target.checked) cles.add(cle); else cles.delete(cle); } });
       caseL.checked = cles.has(cle);
       li.prepend(el('label', { class: 'coche-cible' }, caseL));
-      if (translation?.translated_content?.ingredients?.[i]) li.append(el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `${t('Traduction')} : ${translation.translated_content.ingredients[i]}`));
+      if (contenuTraduction) li.append(el('div', { class: 'muted', style: { fontSize: '.85rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }, dataset: { role: 'traduction-ingredient' } },
+        contenuTraduction.ingredients[i] ? `${t('Traduction')} : ${contenuTraduction.ingredients[i]}` : t('Traduction à compléter')));
       li.append(el('button', { class: 'btn link small remplacer', onClick: () => replaceIngredient(ri) }, t('Remplacer')));
       ingList.append(li);
     });
@@ -357,7 +371,11 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
       el('div', { class: 'row between' }, el('span', { class: 'muted' }, timeText(version, recipe)), dietSel),
       assessment ? el('div', { style: { margin: '.4rem 0' } }, dietChip(assessment), assessment.unknown.length ? el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `${t('Inconnus')} : ${assessment.unknown.join(', ')}`) : null) : null,
       wantsTranslation && !translation ? el('div', { class: 'status warn' }, t('Aucune traduction {l} pour cette version.', { l: state.lang.toUpperCase() }), el('a', { class: 'btn small', href: lienEdition('translation', version.id, state.lang) }, t('Traduire'))) : null,
-      translation ? el('div', { class: 'row' }, el('span', { class: 'badge' }, t('Traduction')), el('span', { class: 'muted' }, translation.translated_content.title || '')) : null,
+      translation && !contenuTraduction ? el('div', { class: 'status warn' },
+        t('Les correspondances de cette traduction sont à vérifier. Le texte original reste affiché.'),
+        el('a', { class: 'btn small', href: lienEdition('translation', version.id, state.lang) }, t('Vérifier l’ancienne traduction')),
+        textesTraductionConserves(translation.translated_content)) : null,
+      contenuTraduction ? el('div', { class: 'row' }, el('span', { class: 'badge' }, t('Traduction')), el('span', { class: 'muted' }, contenuTraduction.title || '')) : null,
       ingList, ...scaled.notes.map((n) => el('small', { class: 'muted', style: { display: 'block' } }, n)),
       !conventionId && scaled.ingredients.some((i) => ['cup', 'tbsp', 'tsp', 'fl_oz'].includes(i.unit_id)) ? el('div', { class: 'status warn', style: { marginTop: '.5rem' } }, t('Tasses/cuillères : convention non confirmée pour cette édition — quantités d’origine affichées.'), edition ? el('a', { class: 'btn small', href: `#/books/${edition.id}` }, t('Préciser')) : null) : null);
     ingredients.dataset.role = 'section-ingredients';
@@ -365,8 +383,8 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     (version.steps || []).forEach((s, i) => {
       const li = el('li', null, el('span', { class: 'step-num' }, String(i + 1)), el('div', { style: { flex: 1 } },
         el('div', { style: { whiteSpace: 'pre-line' }, dataset: { role: 'texte-etape' } }, s.text), // m10 : une étape lue entière garde ses sauts de ligne
-        translation?.translated_content?.steps?.[i] ? el('div', { class: 'muted', style: { fontSize: '.9rem' } }, translation.translated_content.steps[i]) : null,
-        ...(gardeThermomix(version, state.servings).ok ? s.timers || [] : []).slice(0, 2).map((tm) => timerBlock(tm.seconds, { compact: true, onRequest: (channel) => repo.save('timer_launches', createTimerLaunch({ recipe_version_id: version.id, step_id: s.id, device_id: deviceId(), duration_seconds: tm.seconds, channel })) }))));
+        contenuTraduction ? el('div', { class: 'muted', style: { fontSize: '.9rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }, dataset: { role: 'traduction-etape' } }, contenuTraduction.steps[i] || t('Traduction à compléter')) : null,
+        ...(gardeThermomix(version, state.servings).ok ? s.timers || [] : []).slice(0, 2).map((tm) => timerBlock(tm.seconds, { seconds_max: tm.seconds_max, locale: ctx.settings?.ui_locale || 'fr', compact: true, onRequest: (channel, seconds) => repo.save('timer_launches', createTimerLaunch({ recipe_version_id: version.id, step_id: s.id, device_id: deviceId(), duration_seconds: seconds, channel })) }))));
       steps.append(li);
     });
     const preparation = sectionPlain(t('Préparation'), estThermomix(version) ? el('small', { class: 'muted' }, t('Durée proposée par l’assistant, à vérifier pendant la cuisson.')) : null, (version.steps || []).length ? steps : el('p', { class: 'muted' }, t('Étapes non numérisées.')), version.notes ? el('p', { class: 'muted' }, version.notes) : null);

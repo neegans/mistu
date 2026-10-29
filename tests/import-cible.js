@@ -1789,12 +1789,14 @@ export async function runImportCibleTests({ eq, ok }) {
         const changementsH = champ(editeurH, 'Résumé des changements, raisons et compromis *')?.querySelector('textarea');
         changementsH.value = 'Moins de sucre'; changementsH.dispatchEvent(new Event('input', { bubbles: true }));
         const rejets = []; const surRejet = (e) => { rejets.push(e.reason?.name ?? String(e.reason)); e.preventDefault(); };
+        const fileAvantRefus = await db.getAll('outbox');
         window.addEventListener('unhandledrejection', surRejet);
         try {
           bouton(editeurH, 'Enregistrer une nouvelle version').click();
-          await attendre(() => rejets.length === 1, 'save refusé');
+          await attendre(() => editeurH.querySelector('[data-role="erreur-enregistrement"]')?.textContent, 'save refusé et expliqué');
         } finally { window.removeEventListener('unhandledrejection', surRejet); history.replaceState(null, '', adresseAvant); }
-        eq([rejets, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_hostile')).length, (await db.get('recipes', 'rc_hostile')).availability], [['ErreurVocabulaire'], 1, 'dispo'], 'éditeur (vague finale, m14) : une adaptation d’une fiche au vocabulaire hostile (availability « dispo ») → ErreurVocabulaire, AUCUNE version ni fiche écrite');
+        eq([rejets, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_hostile')).length, (await db.get('recipes', 'rc_hostile')).availability, texte(editeurH.querySelector('[data-role="erreur-enregistrement"]')), changementsH.value], [[], 1, 'dispo', 'L’enregistrement a échoué. Tes modifications restent dans ce formulaire.', 'Moins de sucre'], 'éditeur (m14, L0) : une adaptation d’une fiche au vocabulaire hostile est refusée sans rejet non traité, sans version ni fiche écrite, avec motif et saisie conservée');
+        eq(await db.getAll('outbox'), fileAvantRefus, 'éditeur (m14, L0) : le refus de vocabulaire n’ajoute aucune écriture à envoyer');
 
         // Ronde 1 : cocher « Vérifié » sur chaque ligne SANS rien retaper, puis enregistrer — le cas joué PAR l'éditeur (plus par une fixture posée à
         // la main) : une ligne vérifiée n'est plus incertaine (une seule règle, au save()) ; la fiche dit « Vérifiée », sans « ligne(s) incertaine(s) ».

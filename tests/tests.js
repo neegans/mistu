@@ -1,3 +1,7 @@
+import { runL0TraductionsTests } from './l0-traductions.js';
+import { runL0CuisineTests } from './l0-cuisine.js';
+import { runL0RepasCoursesTests } from './l0-repas-courses.js';
+import { runL0IntegrationTests } from './l0-integration.js';
 import { runVisuelReperesTests } from './visuel-reperes.js';
 import { runVisuelPhotosTests } from './visuel-photos.js';
 import { runVisuelParcoursTests } from './visuel-parcours.js';
@@ -289,11 +293,17 @@ for (const suite of [runVisuelReperesTests, runVisuelPhotosTests, runVisuelParco
   catch (error) { ok(false, `Suite photos et repères interrompue : ${error?.message || String(error)}`); }
 }
 
+// L0 : cohérence des traductions, repas, cuisine et sorties de courses.
+for (const suite of [runL0TraductionsTests, runL0CuisineTests, runL0RepasCoursesTests, runL0IntegrationTests]) {
+  try { await suite({ eq, ok, close }); }
+  catch (error) { ok(false, `Suite L0 interrompue : ${error?.message || String(error)}`); }
+}
+
 // --- Compte total épinglé (F2). Une assertion qui DISPARAÎT — un bloc supprimé, une boucle qui ne tourne plus, une
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 7117,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 7396,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

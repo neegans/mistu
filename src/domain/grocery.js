@@ -73,4 +73,11 @@ export function shoppingListToText(list, locale = 'fr') {
   return lines.join('\n');
 }
 
+// Copier et Partager utilisent les mêmes cases et le même choix, sans modifier la liste métier.
+export function preparerSortieCourses(rows, checked = {}, mode = 'restants') {
+  const toutes = rows.map(row => ({ ...row, checked: !!checked?.[row.key] }));
+  const retenues = mode === 'complet' ? toutes : toutes.filter(row => !row.checked);
+  return { nombre: retenues.length, texte: shoppingListToText(retenues) };
+}
+
 export { getUnit };

@@ -1,13 +1,14 @@
 // Service worker : coquille applicative en cache pour consultation hors connexion des recettes déjà chargées.
 // Les nouvelles demandes IA et les recherches de métadonnées ne fonctionnent pas hors connexion (spec §15).
 importScripts('./sw-rules.js');
-const VERSION = 'cuisine-os-v0.21.1-1';
+const VERSION = 'cuisine-os-v0.22.0-1';
 // Tous les modules de production sont inclus ; tests/ reste chargé à la demande.
 // La complétude de cette liste est vérifiée par tests/sync.js (graphe d'imports depuis src/app.js) : un chemin
 // manquant ferait répondre 404 à cache.addAll et l'installation entière échouerait.
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icons/icon.svg', './icons/apple-touch-icon.png', './sw-rules.js',
   './src/app.js',
+  './src/domain/traductions.js', './src/domain/heure-locale.js',
   './src/domain/reperes.js', './src/domain/reperes-parcours.js', './src/ui/reperes.js', './src/ui/reperes-affichage.js', './src/ui/photos-visibles.js', './src/ui/photo-gestion.js',
   './src/domain/thermomix.js', './src/domain/thermomix-parcours.js', './src/domain/thermomix-session.js',
   './src/ui/thermomix.js', './src/ui/cookidoo.js', './src/ui/thermomix-garde.js',
