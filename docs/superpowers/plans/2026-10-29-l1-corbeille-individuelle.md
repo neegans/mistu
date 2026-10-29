@@ -73,13 +73,18 @@ partielle, heure répétée Toronto, courses, note/photo ajoutées par l’inter
 refusé, huit modules en cache et hors ligne. **26 mesures** sans débordement ; zéro erreur JS/requête externe.
 
 La relecture visuelle a révélé un texte littéral `null` dans courses/cuisine pour les recettes actives.
-Le correctif **0.23.1** filtre les mentions absentes sans retirer celles des recettes dans la corbeille.
-Huit assertions supplémentaires : **7664/7664**, épingle 7663, Node **231/231**. Répétition locale : **31 mesures**,
-zéro texte parasite, débordement, erreur JS ou requête externe. Le harnais de suite utilise 1280 px comme le runner
+Le correctif **0.23.1**, commit `d6b4488`, est publié à 20:18 UTC (16 h 18 HAE), avec 59 fichiers identiques.
+Il filtre les mentions absentes sans retirer celles des recettes dans la corbeille. Huit assertions supplémentaires :
+**7664/7664** local, épingle 7663, Node **231/231**. Parcours local puis public : **31 mesures**,
+zéro texte parasite, débordement, erreur JS ou requête externe ; cache unique `cuisine-os-v0.23.1-1`, huit modules,
+notes/photos et restauration hors ligne intactes. Le harnais de suite utilise 1280 px comme le runner
 historique : le test de comparaison attend sa variante tableau, la variante en cartes à 390 px n’est pas un défaut.
 
 Traces : `.superpowers/sdd/2026-10-29-l1-publication/`, dont `migration-0008.log`, `postflight-0008-resultat.json`,
 `postgrest-anonyme.json`, `pages-build-code.json`, `fichiers-publics.resultat.json`, `public/suite.json`, `public/parcours.json`.
+Pour le correctif : `pages-build-0.23.1.json`, `fichiers-publics-0.23.1.resultat.json`, `public-0.23.1/parcours.json`.
+Suite publique 0.23.1 : **7664/7664** à 20:19:59 UTC, zéro erreur JavaScript ou requête externe ;
+preuve `public-0.23.1/suite.json`, relecture visuelle `public-0.23.1/relecture-captures.json`.
 
 ## Contrôles de publication et essais physiques
 

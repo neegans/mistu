@@ -1,4 +1,4 @@
-# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — L0 ET L1 PUBLIÉS EN 0.23.0 ; CORRECTIF 0.23.1 PRÊT
+# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — L0 ET L1 PUBLIÉS, CORRECTIF 0.23.1 EN LIGNE
 
 **29 octobre 2026 — PUBLICATION L0 + L1 SUR « deploy avant », PUIS POURSUITE DU PLAN AUTORISÉE.**
 Neegan demande ensuite « et enchaine sur le restant des lots ». La suite se prépare lot par lot,
@@ -15,9 +15,12 @@ traduction partielle, heure répétée Toronto, courses, note/photo ajoutées, c
 cache des huit modules L0+L1 et hors ligne ; **26 mesures** sans débordement. Essais physiques toujours à faire.
 
 La relecture des captures a trouvé un texte littéral `null` dans les courses et la cuisine actives : les mentions
-absentes sont désormais filtrées avant insertion DOM. **Correctif 0.23.1 prêt**, cache `cuisine-os-v0.23.1-1`, DB inchangée.
-Huit assertions nouvelles, **7664/7664** navigateur (épingle 7663), Node **231/231**, générateur `--check` 0.
-Répétition de parcours 0.23.1 : **31 mesures**, aucun débordement ni texte parasite, zéro erreur JS/requête externe.
+absentes sont désormais filtrées avant insertion DOM. **Correctif 0.23.1 publié**, commit `d6b4488`, GitHub Pages
+construit à **16 h 18 HAE (20:18 UTC)** ; cache `cuisine-os-v0.23.1-1`, DB inchangée, 59 fichiers publics identiques.
+Huit assertions nouvelles, **7664/7664** navigateur local (épingle 7663), Node **231/231**, générateur `--check` 0.
+Parcours local puis public 0.23.1 : **31 mesures**, aucun débordement ni texte parasite, zéro erreur JS/requête externe.
+Cache unique actif avec huit modules L0+L1 ; notes/photos et restauration hors ligne préservées.
+**Suite publique 0.23.1 : 7664/7664**, terminée à 20:19:59 UTC, zéro erreur JavaScript ou requête externe.
 Le premier essai de suite publique à 390 px cherchait une table remplacée normalement par des cartes ;
 le harnais de suite reprend les 1280 px de référence. Aucun défaut de comparaison applicatif constaté.
 Preuves : `.superpowers/sdd/2026-10-29-l1-publication/`. [Bilan serveur](supabase/proofs/RESULTATS-mitsu.md).

@@ -3331,7 +3331,7 @@ DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de
 R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
 404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
 
-### Plan directeur — L1 : corbeille individuelle (29 octobre 2026 — publié 0.23.0, correctif 0.23.1 prêt)
+### Plan directeur — L1 : corbeille individuelle (29 octobre 2026 — publié, correctif 0.23.1 en ligne)
 
 [Spec](docs/superpowers/specs/2026-10-29-l1-corbeille-individuelle-design.md) approuvée par Neegan sur « ok ».
 Branche `l1-corbeille-individuelle`, base `cf539fb`, contenant L0 `9c823b0` ; publication commune sur « deploy avant ».
@@ -3361,8 +3361,10 @@ Preuves dans `.superpowers/sdd/2026-10-29-l1/` ; zéro erreur JavaScript ou requ
 capacité 1 sous rôle authenticated autorisé et refus HTTP anonymes 401/42501. Aucun contenu métier modifié.
 `52338ec` poussé dans `main`, GitHub Pages construit à 20:09 UTC. Public 0.23.0 : **7656/7656**,
 59 fichiers identiques, parcours L0+L1, 26 mesures, cache huit modules et hors ligne vérifiés.
-Correctif local 0.23.1 : filtrer les mentions absentes avant `append` dans courses/cuisine supprime le texte `null`.
-**7664/7664**, épingle 7663, +8 assertions ; Node 231/231, répétition avec 31 mesures verte.
+Correctif 0.23.1 publié (`d6b4488`, GitHub Pages à 20:18 UTC) : filtrer les mentions absentes avant `append`
+dans courses/cuisine supprime le texte `null`. **7664/7664** local, épingle 7663, +8 assertions ; Node 231/231.
+59 fichiers publics identiques ; parcours local puis public avec 31 mesures verts, huit modules en cache, hors ligne.
+Suite publique 0.23.1 **7664/7664**, zéro erreur JavaScript ou requête externe, terminée à 20:19:59 UTC.
 Preuves : `.superpowers/sdd/2026-10-29-l1-publication/`.
 
 **Limites.** Aucun JWT utilisateur, contenu de compte privé, vrai appel assistant, lecteur d’écran ou appareil iPhone/Safari physique testé.
