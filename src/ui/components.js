@@ -20,6 +20,8 @@ import { photoVisible } from './photos-visibles.js';
 import { resumeReperes, lienGestionPhoto } from './reperes-affichage.js';
 import { lireTemps, formaterDureeReperes } from '../domain/reperes.js';
 import { icone } from './icones.js';
+import { actionsRecette, menuActions, boutonsActions } from './actions-contenu.js';
+import { lienAvecOrigine } from './navigation-contexte.js';
 
 // classeTitre (lot UI-1, D-UI-3, H-20) : une classe posée sur le h1 — 'titre-fiche' pour une fiche recette ou livre (tâches 3 et 4) ; sans elle, le
 // titre de PAGE. `back` reste un objet { href, label } (H-1). Rien d'autre ne change.
@@ -192,7 +194,7 @@ export function provenanceText(recipe, book, edition) {
   // C10 : un signet rattaché à un livre portait le livre et PERDAIT son hôte (alors que la spec, F22, demande les
   // deux : c'est une page web rangée dans un livre, pas une page du livre). Les deux s'affichent, dans cet ordre.
   if (book) {
-    const duLivre = `${book.title}${book.author ? ` — ${book.author}` : ''}${recipe.printed_page ? ` · ${t('page')} ${recipe.printed_page}` : ''}${lireCycleEdition(edition).etat === 'retiree' ? ` · ${t('Livre dans la corbeille')}` : ''}`;
+    const duLivre = `${book.title}${book.author ? ` — ${book.author}` : ''}${pageAffichable(recipe.printed_page) ? ` · ${t('page')} ${recipe.printed_page}` : ''}${lireCycleEdition(edition).etat === 'retiree' ? ` · ${t('Livre dans la corbeille')}` : ''}`;
     return lien ? `${duLivre} · ${lien.ok ? lien.hote : t('Adresse non reconnue')}` : duLivre;
   }
   if (lien) return lien.ok ? lien.hote : t('Adresse non reconnue');
@@ -242,24 +244,29 @@ export function suivreLargeurAuMontage(cle, racine, mq, appliquer) {
 // doc : { recipe, version, book, edition, cooked }
 // Lot UI-1 (D-UI-5) : `photoEnTete: true` rend la carte-plat VERTICALE (cartePlat, ci-dessous) à partir de `fichier`, la ligne files que l'appelant a lue
 // en une fois ; sans l'option, la carte horizontale d'avant, inchangée (épinglée par tests/photo-plat.js, « référence construite »).
-export function recipeCard(doc, { extra = null, href = null, reasons = null, photoEnTete = false, fichier = null, ctxF = {} } = {}) {
-  if (photoEnTete) return cartePlat(doc, { fichier, href, extra, ctxF });
+export function recipeCard(doc, { extra = null, href = null, reasons = null, photoEnTete = false, fichier = null, ctxF = {}, ctx = null, origine = null, onResultat } = {}) {
+  if (photoEnTete) return cartePlat(doc, { fichier, href, extra, ctxF, ctx, origine, onResultat });
   const { recipe, version, book, edition } = doc;
   const etiquette = etiquetteIA(version, recipe); // C-2 : depuis doc.version ou recipe.origine
-  return el('article', { class: 'item-link card' }, // vague finale UI-1 : l'identifiant reçu est encodé
+  return el('article', { class: 'item-link card', dataset:{navId:recipe.id} }, // vague finale UI-1 : l'identifiant reçu est encodé
     el('div', { class: 'row between top' },
       el('div', { style: { flex: '1', minWidth: '0' } },
-        el('h3', null, el('a', { href: href || `#/recipes/${encodeURIComponent(recipe.id)}` }, recipe.original_title || recipe.display_title)),
+        el('h3', null, el('a', { href: href || lienAvecOrigine(`/recipes/${encodeURIComponent(recipe.id)}`,origine||{}) }, recipe.original_title || recipe.display_title)),
         el('div', { class: 'muted', style: { fontSize: '.85rem' } }, provenanceText(recipe, book, edition)),
         etiquette ? el('div', null, etiquette) : null,
-        resumeReperes(recipe, version),
+        resumeReperes(recipe, version, {compact:true}),
         reasons?.length ? el('div', { class: 'muted', style: { fontSize: '.8rem' } }, `${t('Correspond à')} : ${reasons.slice(0, 4).join(', ')}`) : null),
       el('div', { class: 'col', style: { alignItems: 'flex-end', gap: '.3rem' } },
         vignettePlat(recipe, { photo: doc.photo_principale, fichier, ctxF }),
         availabilityBadge(recipe),
         recipe.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null,
         doc.cooked ? el('span', { class: 'badge' }, t('Cuisinée {n}×', { n: doc.cooked })) : null)),
-    extra);
+    ctx ? actionsCarte(recipe,version,ctx,origine,onResultat) : null, extra);
+}
+
+function actionsCarte(recipe,version,ctx,origine,onResultat){
+  const actions=actionsRecette({recipe,version,ctx,origine});
+  return el('div',{class:'carte-plat-actions row'},boutonsActions(actions,['modifier'],{onResultat}),menuActions(actions,{titre:recipe.display_title||recipe.original_title,onResultat}));
 }
 
 // I2 : les listes lisent en une passe la photo personnelle et son repli du livre. La sélection ne modifie jamais la recette.
@@ -295,12 +302,12 @@ export function ligneSource(doc) {
 }
 
 // Les liens et boutons photo sont frères : aucun contrôle imbriqué dans un lien de carte.
-function cartePlat(doc, { fichier = null, href = null, extra = null, ctxF = {} } = {}) {
+function cartePlat(doc, { fichier = null, href = null, extra = null, ctxF = {}, ctx = null, origine = null, onResultat } = {}) {
   const { recipe, version } = doc;
   const sha = doc.photo_principale?.sha256 ?? recipe.photo_sha256;
   const image = photoVisible(sha, { fichier, ctxF, classe: 'carte-photo', personnelle: !!doc.photo_principale?.personnelle });
-  const destination = href || `#/recipes/${encodeURIComponent(recipe.id)}`;
-  const carte = el('article', { class: `item-link carte-plat${image ? '' : ' sans-photo'}` }, image);
+  const destination = href || lienAvecOrigine(`/recipes/${encodeURIComponent(recipe.id)}`,origine||{});
+  const carte = el('article', { class: `item-link carte-plat${image ? '' : ' sans-photo'}`, dataset:{navId:recipe.id} }, image);
   const dispo = availabilityBadge(recipe);
   const badges = [dispo.classList.contains('available') ? null : dispo, etiquetteIA(version, recipe), recipe.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null,
     doc.cooked ? el('span', { class: 'badge' }, t('Cuisinée {n}×', { n: doc.cooked })) : null].filter(Boolean);
@@ -308,9 +315,9 @@ function cartePlat(doc, { fichier = null, href = null, extra = null, ctxF = {} }
     el('h3', null, el('a', { href: destination }, recipe.original_title || recipe.display_title)),
     recipe.display_title && recipe.display_title !== recipe.original_title ? el('small', { class: 'muted' }, recipe.display_title) : null,
     el('div', { class: 'muted carte-plat-source' }, provenanceText(recipe, doc.book, doc.edition)),
-    resumeReperes(recipe, version),
+    resumeReperes(recipe, version, {compact:true}),
     badges.length ? el('div', { class: 'row carte-plat-badges' }, ...badges) : null,
-    el('div', { class: 'carte-plat-actions' }, lienGestionPhoto(recipe, { connue: !!sha }))));
+    ctx ? actionsCarte(recipe,version,ctx,origine,onResultat) : el('div', { class: 'carte-plat-actions' },lienGestionPhoto(recipe, { connue: !!sha }))));
   if (extra) carte.append(extra);
   return carte;
 }

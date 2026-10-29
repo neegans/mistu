@@ -1,3 +1,5 @@
+import { retourConnu, porteeNavigation, lienAvecOrigine } from './navigation-contexte.js';
+import { destinationApresRecette } from './actions-contenu.js';
 import { panneauAbandonProposition } from './reprise-import.js';
 import { cibleReprise } from '../domain/import-cible.js';
 import { capturerRecette, capturerEdition, capturerProprietaire, conditionProprietaire } from './recette-garde.js';
@@ -736,8 +738,10 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     const proposition = await panneauPhotoPage(relue || fab.recipe, ctx, { ...deps, repo, toast });
     etat.bilan = el('div', { class: 'stack', dataset: { role: 'bilan-import' } },
       el('p', { role: 'status' }, t('Recette importée')), proposition,
-      el('a', { class: 'btn primary', href: `#/recipes/${encodeURIComponent(recipe.id)}?v=${encodeURIComponent(fab.version.id)}`,
-        onClick: (e) => { e.preventDefault(); navigate(`/recipes/${encodeURIComponent(recipe.id)}?v=${encodeURIComponent(fab.version.id)}`); } }, t('Voir la recette')));
+      el('a', { class: 'btn primary', href: '#'+destinationApresRecette(recipe.id,query,ctx,{v:fab.version.id}),onClick:e=>{
+        if(e.ctrlKey||e.metaKey||e.shiftKey||e.altKey||e.button>0)return;
+        e.preventDefault();navigate(destinationApresRecette(recipe.id,query,ctx,{v:fab.version.id}));
+      } }, t('Voir la recette')));
     dessiner();
   }
 
@@ -811,7 +815,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     return section(t('Photo du plat'), el('p', { class: 'muted', style: { margin: 0 } }, `${t('Facultatif')} · ${t('Ajoute la photo du livre, s’il y en a une.')}`), zone);
   }
 
-  const retour = () => el('a', { class: 'btn', href: `#/recipes/${encodeURIComponent(recipe.id)}` }, t('Retour à la fiche'));
+  const retour = () => el('a', { class: 'btn', href: '#'+retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli:`/recipes/${encodeURIComponent(recipe.id)}`}).href }, t('Retour à la fiche'));
   // Lot D (§ 4.8.1 point 3, D-D9, R-D-3) : sur TOUT panneau de discordance, la lecture devient une recette neuve, SANS appel — la ligne perd sa référence
   // (recipe_id null), gardée dans la transaction par la clé de LA lecture questionnée et par la sorte ; puis l'éditeur prérempli (?import=) si l'écran est
   // encore monté. Refusé (une autre lecture est arrivée) → reposer() : rien n'est détaché, la question est reposée pour la lecture courante.

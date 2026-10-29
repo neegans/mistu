@@ -88,7 +88,7 @@ export async function runVisuelIntegrationTests({ eq, ok }) {
     eq(resumeReperes({ ...r, availability: 'partial' }, v).querySelector('[data-role=badge-rapide]'), null, 'Visuel : recette partielle ne porte jamais le badge Rapide');
     const carte = recipeCard({ recipe: r, version: v });
     eq(carte.querySelector('[data-role=badge-rapide]')?.textContent, 'Rapide', 'Visuel : les résultats de recherche affichent le même badge Rapide');
-    ok(!!carte.querySelector('.description-recette'), 'Visuel : la carte horizontale affiche aussi la description ou son état inconnu');
+    ok(!carte.querySelector('.description-recette') && !/Description à compléter|Niveau à estimer|Temps à estimer/.test(carte.textContent), 'Visuel L3 : la carte compacte omet les repères absents sans inventer de description');
   });
   await run('durée effacée sur tous les emplacements', () => withRepo(async repo => {
     const { construireContexteReperes, fabriquerCorrectionsReperes, fusionnerReperes } = await import('../src/domain/reperes.js');

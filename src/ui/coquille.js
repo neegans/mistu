@@ -4,19 +4,20 @@
 import { el } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { pastille } from './components.js';
+import { lienBibliotheque } from './navigation-contexte.js';
 import { icone } from './icones.js';
 
 // D-UI-4 : « Bibliothèque » (l'écran s'ouvre sur les plats, tâche 2) ; D-UI-9 : ico = un nom d'icones.js, plus un émoji (les émojis ne prennent pas la couleur de l'onglet actif).
 export const NAV = [
   { href: '/', label: 'Aujourd’hui', ico: 'soleil', match: (p) => p === '/' || p.startsWith('/search') },
-  { href: '/library', label: 'Bibliothèque', ico: 'bibliotheque', match: (p) => p.startsWith('/library') || p.startsWith('/books') || p.startsWith('/dishes') || p.startsWith('/recipes') },
+  { href: '/library', label: 'Bibliothèque', ico: 'bibliotheque', match: (p) => p.startsWith('/corbeille') || p.startsWith('/library') || p.startsWith('/books') || p.startsWith('/dishes') || p.startsWith('/recipes') },
   { href: '/meals', label: 'Ma semaine', ico: 'calendrier', match: (p) => p.startsWith('/meals') || p.startsWith('/lists') },
   { href: '/kitchen', label: 'Ma cuisine', ico: 'toque', match: (p) => p.startsWith('/kitchen') },
   { href: '/add', label: 'Ajouter', ico: 'plus', add: true, match: (p) => p.startsWith('/add') || p.startsWith('/import') },
 ];
 
 export function navLinks(path, cls) {
-  return NAV.map((n) => el('a', { href: `#${n.href}`, class: `${cls} ${n.add ? 'add' : ''} ${n.match(path) ? 'active' : ''}` }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone(n.ico)), el('span', null, t(n.label))));
+  return NAV.map((n) => el('a', { href: n.href === '/library' ? lienBibliotheque() : `#${n.href}`, 'data-nav-destination': n.href, 'aria-current': n.match(path) ? 'page' : null, class: `${cls} ${n.add ? 'add' : ''} ${n.match(path) ? 'active' : ''}` }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone(n.ico)), el('span', null, t(n.label))));
 }
 
 export function coquille(path) {

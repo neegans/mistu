@@ -1,4 +1,8 @@
 // Fiche d'un livre (édition possédée) : en-tête (titre, sous-titre, deux menus d'ajout), couverture et sommaire à gauche, les recettes à droite, pages sources en bas.
+import { renderListeBibliotheque, texteCompteurs } from './bibliotheque-liste.js';
+import { projeterBibliotheque } from '../domain/bibliotheque.js';
+import { actionsLivre, boutonsActions, menuActions } from './actions-contenu.js';
+import { lireContexteListe, porteeNavigation, retourConnu, memoriserListe, capturerVue, restaurerVue } from './navigation-contexte.js';
 import { el, toast, pickFiles, confirmDialog, promptDialog } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate, refresh, remplacerAdresse } from '../core/router.js';
@@ -163,7 +167,9 @@ export async function renderBook(params, query, ctx, deps = {}) {
   const matchMedia = deps.matchMedia || ((q) => window.matchMedia(q));
   const large = matchMedia(LARGEUR_DEUX_COLONNES);
   const root = el('div', { class: 'fiche-livre' });
-  root.append(await panneauCycleLivre(edition,ctx,deps));
+  const route=`/books/${encodeURIComponent(edition.id)}`,portee=porteeNavigation(ctx);
+  const etat=lireContexteListe({route,query,portee}),origine={cleEntree:etat.cleEntree};
+  const actions=actionsLivre({edition,ctx,origine},deps);
   // I-F : un scan parti d'ici porte le livre ET l'intention (index ou recette) ; le menu ne décide que de la SOURCE.
   const lancer = (intention) => async (accept, capture) => {
     try {
@@ -178,18 +184,17 @@ export async function renderBook(params, query, ctx, deps = {}) {
   // vient la fiche et où un livre neuf se voit ; #/library (Recettes) reste celui de la NAV et de la fiche recette.
   root.append(pageHeader(book.title, {
     subtitle: [book.author, edition.publisher, edition.year].filter(Boolean).join(' · '),
-    back: { href: '/library?tab=books', label: t('Bibliothèque') },
+    back: { href: retourConnu({query,portee,repli:'/library?tab=books'}).href, label: t('Bibliothèque') },
     classeTitre: 'titre-fiche',
-    actions: [menuSource(t('Ajouter'),
-      menuSource(t('Ajouter des pages de sommaire'),
-        el('button', { type: 'button', class: 'btn', onClick: () => lancer('index')(ACCEPT_PHOTOS, 'environment') }, t('Photographier')),
-        el('button', { type: 'button', class: 'btn', onClick: () => lancer('index')(ACCEPT_FICHIERS, null) }, t('Choisir des photos ou un PDF'))),
-      menuSource(t('Ajouter des recettes'),
-        el('button', { type: 'button', class: 'btn', onClick: () => lancer('recette')(ACCEPT_PHOTOS, 'environment') }, t('Photographier')),
-        el('button', { type: 'button', class: 'btn', onClick: () => lancer('recette')(ACCEPT_FICHIERS, null) }, t('Choisir des photos ou un PDF')),
-        el('a', { class: 'btn', href: `#/recipes/new?edition=${encodeURIComponent(edition.id)}` }, t('Saisir à la main')))),
-    ],
+    actions:[boutonsActions(actions,['modifier-livre','ajouter-index','ajouter-recette']),menuActions(actions,{titre:book.title})],
   }));
+  if(['index','recette'].includes(query.panel)){
+    const intention=query.panel;
+    root.append(el('section',{class:'card stack',dataset:{role:'ajout-livre'}},el('h2',null,intention==='index'?t('Ajouter des pages d’index'):t('Ajouter une recette')),
+      el('div',{class:'row'},el('button',{type:'button',class:'btn',onClick:()=>lancer(intention)(ACCEPT_PHOTOS,'environment')},t('Photographier')),
+        el('button',{type:'button',class:'btn',onClick:()=>lancer(intention)(ACCEPT_FICHIERS,null)},t('Choisir des photos ou un PDF')),
+        intention==='recette'?el('a',{class:'btn',href:`#/recipes/new?edition=${encodeURIComponent(edition.id)}`},t('Saisir à la main')):null)));
+  }
   root.append(renderAccueilLivre(accueil, {
     photographier: (intention) => lancer(intention)(ACCEPT_PHOTOS, 'environment'),
     choisir: (intention) => lancer(intention)(ACCEPT_FICHIERS, null),
@@ -244,41 +249,10 @@ export async function renderBook(params, query, ctx, deps = {}) {
       }))));
   }
 
-  // Les recettes de ce livre (D-UI-7, D-UI-10) : « disponibles » = tout ce qui n'est pas une simple référence (la partielle comprise, comme le compteur d'avant) ;
-  // « à importer » = les références SANS adresse (un signet rangé dans le livre est un lien web, pas une page à importer) — estAImporter de library.js, la même
-  // définition que l'onglet « À importer » de la bibliothèque (T4-R1). Les trois chips d'état ont disparu : la phrase sous le titre les remplace.
-  const disponibles = recipes.filter((r) => r.availability !== 'reference_only');
-  const aImporter = recipes.filter(estAImporter);
-  // I-UI-5 : les octets des photos de plat sont lus UNE fois, en une transaction (comme les couvertures de la bibliothèque, library.js) ; la ligne décide au rendu.
-  const photosPersonnelles = photosPersonnellesParRecette(ctx.cook_history);
-  const photos = await repo.getFiles(empreintesPhotos(recipes, photosPersonnelles));
-  const filterState = { mode: 'all', q: '', tout: false };
-  const list = el('div', { dataset: { role: 'liste-recettes' } });
-  let largeDessinee = null; // la largeur que la liste montre (relue au montage et à chaque change : on ne redessine que si elle a changé)
-  const drawList = () => {
-    largeDessinee = !!large.matches;
-    let rows = recipes;
-    if (filterState.mode === 'available') rows = disponibles; if (filterState.mode === 'refs') rows = aImporter; if (filterState.mode === 'fav') rows = recipes.filter((r) => r.favorite);
-    if (filterState.q) rows = rows.filter((r) => (r.original_title + ' ' + (r.display_title || '')).toLowerCase().includes(filterState.q.toLowerCase()));
-    rows = [...rows].sort((a, b) => (a.printed_page ?? 99999) - (b.printed_page ?? 99999) || a.original_title.localeCompare(b.original_title));
-    // Lot F (§ 4.2, D-T9) : le filtre redessine à chaque touche ; les URL des vignettes précédentes sont révoquées APRÈS le remplacement, elles seules.
-    if (!rows.length) { remplacerEnRevoquant(list, emptyState('livre-ouvert', t('Aucune recette dans cette vue. Photographie l’index ou une recette pour commencer.'))); return; }
-    // Sous 900 px : LIGNES_REPLIEES lignes, puis « Voir les {n} recettes » déplie l'instance pour de bon (un filtre changé ensuite reste déplié) ; ≥ 900 px : tout.
-    const repliee = !large.matches && !filterState.tout && rows.length > LIGNES_REPLIEES;
-    const visibles = repliee ? rows.slice(0, LIGNES_REPLIEES) : rows;
-    const noeuds = [el('ul', { class: 'liste-compacte' }, ...visibles.map((r) => ligneCompacte(r, { edition, fichier: fichierPhoto(r, photosPersonnelles, photos), version: currentVersion(r, (ctx.versionsByRecipe?.get(r.id) || [])), photo: photoPrincipale(r, photosPersonnelles), ctxF })))];
-    // T4-R1 (I-UI-4) : le bouton se retire en dépliant — le focus passe au titre de la première ligne montrée par le dépli, jamais à body.
-    if (repliee) noeuds.push(el('button', { type: 'button', class: 'btn', dataset: { role: 'voir-tout' }, onClick: () => { filterState.tout = true; drawList(); list.querySelectorAll('ul.liste-compacte > li')[LIGNES_REPLIEES]?.querySelector('a.titre')?.focus(); } }, t('Voir les {n} recettes', { n: rows.length })));
-    remplacerEnRevoquant(list, ...noeuds);
-  };
-  const q = el('input', { type: 'search', placeholder: t('Filtrer les recettes de ce livre'), onInput: (e) => { filterState.q = e.target.value; drawList(); } });
-  droite.append(sectionPlain(null,
-    el('p', { class: 'muted', dataset: { role: 'compte-recettes' } }, t('{n} disponible(s) · {m} à importer', { n: disponibles.length, m: aImporter.length })),
-    q,
-    el('div', { class: 'row filtres-livre', style: { margin: '.8rem 0' } },
-      ...[['all', t('Toutes')], ['available', t('Disponibles')], ['refs', t('À importer')], ['fav', t('Favoris')]].map(([v, l]) => el('button', { type: 'button', class: `btn small${v === 'all' ? ' active' : ''}`, onClick: (e) => { filterState.mode = v; for (const b of e.target.parentNode.children) b.classList.remove('active'); e.target.classList.add('active'); drawList(); } }, l))),
-    list));
-  drawList();
+  const projection=projeterBibliotheque(ctx,{editionId:edition.id});
+  const etatRecettes=etat.onglet==='sources'?lireContexteListe({route,query:{onglet:'recettes'},portee}):etat;
+  const listeRecettes=await renderListeBibliotheque(ctx,{etat:etatRecettes,route,editionId:edition.id,origine,placeholder:t('Filtrer les recettes de ce livre'),deps});
+  droite.append(sectionPlain(null,el('p',{class:'muted',dataset:{role:'compte-recettes'}},texteCompteurs(projection.compteurs)),listeRecettes));
 
   // Couverture (spec § 6) : visible, hors du <details> replié ; « Retirer » ne touche que le pointeur.
   const etatCouv = { sha256: edition.cover_sha256 || null, apercu: fichierCouverture?.blob ? urlDeBlob(fichierCouverture.blob) : null, enCours: false,
@@ -348,8 +322,8 @@ export async function renderBook(params, query, ctx, deps = {}) {
     convention: meta.convention || null, cuisines: [...meta.cuisines], tags: [...meta.tags] });
   const metaInitiale = valeursMeta();
   const captureMeta = capturerEdition(repo,edition,{ctx}).then(contexte=>({contexte}),erreur=>({erreur}));
-  const inp = (k, type = 'text') => el('input', { type, value: meta[k], onInput: (e) => { meta[k] = e.target.value; } });
-  gauche.append(el('details', { class: 'card' }, el('summary', null, el('strong', null, t('Métadonnées et convention'))),
+  const inp = (k, type = 'text') => el('input', { type, value: meta[k], ...(k==='title'&&query.panel==='modifier'?{dataset:{navOuverture:'focus'}}:{}), onInput: (e) => { meta[k] = e.target.value; } });
+  const metadonnees=el('details', { class: 'card',open:query.panel==='modifier',dataset:{role:'modifier-livre'} }, el('summary', null, el('strong', null, t('Métadonnées et convention'))),
     el('div', { class: 'two-col', style: { marginTop: '.8rem' } },
       field(t('Titre'), inp('title')), field(t('Auteur / chef'), inp('author')), field(t('ISBN'), inp('isbn')), field(t('Éditeur'), inp('publisher')), field(t('Année'), inp('year', 'number')),
       field(t('Langue'), select([{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }, { value: 'other', label: t('Autre') }], meta.language, (v) => { meta.language = v; })),
@@ -403,7 +377,8 @@ export async function renderBook(params, query, ctx, deps = {}) {
         }
         catch { toast(t('Le livre n’a pas pu être enregistré. Réessaie.')); }
       } }, t('Enregistrer')),
-      pref?.hidden ? el('button', { class: 'btn', onClick: async () => { const contexte=await capturerEdition(repo,edition,{ctx}); await repo.save('rediscovery_prefs', { ...pref, hidden: false }, {editions:[contexte]}); toast(t('Livre de nouveau proposé dans Redécouvrir')); refresh(); } }, t('Réafficher dans Redécouvrir')) : null)));
+      pref?.hidden ? el('button', { class: 'btn', onClick: async () => { const contexte=await capturerEdition(repo,edition,{ctx}); await repo.save('rediscovery_prefs', { ...pref, hidden: false }, {editions:[contexte]}); toast(t('Livre de nouveau proposé dans Redécouvrir')); refresh(); } }, t('Réafficher dans Redécouvrir')) : null));
+  gauche.append(metadonnees);
 
 
   // D-UI-7 : UNE lecture des octets des pages (vignettesDePages, le motif du lot G) ; les pages d'index font le « Sommaire » (gauche, numérotées séance par
@@ -416,7 +391,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
   // T4-R1 : chaque page est montrée par l'un des deux groupes (le Sommaire pour une page d'index, les sources pour les autres) — une lecture dès qu'il y a une page.
   const vignettes = triees.length ? await vignettesDePages(triees, ctxF) : { places: new Map(), distantes: [], telecharger: null };
   const distantesDe = (liste) => { const shas = new Set(liste.map((p) => p.sha256)); return vignettes.distantes.filter((s) => shas.has(s)); };
-  const vignettesDe = (liste, numerotees) => el('div', { class: 'thumbs' }, ...liste.map((p, i) => el('figure', null,
+  const vignettesDe = (liste, numerotees) => el('div', { class: 'thumbs' }, ...liste.map((p, i) => el('figure', {dataset:{navId:p.id,rechercheSource:[p.printed_page,p.kind,p.original_filename].filter(Boolean).join(' ')}},
     numerotees ? el('span', { class: 'num' }, String(i + 1)) : null,
     vignettes.places.get(p.id),
     el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : t('page non numérotée'), p.kind ? ` · ${p.kind === 'index' ? t('index') : t('recette')}` : ''))));
@@ -455,22 +430,35 @@ export async function renderBook(params, query, ctx, deps = {}) {
       pagesAutres.length ? vignettesDe(pagesAutres, false) : null,
       ...docsNonPhoto.map((d) => el('div', { class: 'row between card flat' }, el('span', null, `${d.original_filename} (${d.source_type.toUpperCase()})`), el('a', { class: 'btn small', href: `#/recipes/new?doc=${encodeURIComponent(d.id)}&edition=${encodeURIComponent(edition.id)}` }, t('Créer une recette depuis ce fichier'))))));
   }
+  const etatSources=lireContexteListe({route,query:{onglet:'sources'},portee});
+  const sourceRecherche=el('input',{type:'search',name:'qSources',value:etatSources.q||'','aria-label':t('Filtrer les pages source'),placeholder:t('Filtrer les pages source'),dataset:{navFocus:'recherche'}});
+  const sourceSuite=el('div',{class:'row'}),sourceCompte=el('p',{class:'muted'});
+  const dessinerSources=()=>{
+    const toutes=[...sources.querySelectorAll('figure[data-nav-id]')],q=sourceRecherche.value.trim().toLowerCase();
+    const retenues=toutes.filter(n=>!q||n.dataset.rechercheSource.toLowerCase().includes(q));
+    for(const n of toutes)n.hidden=!retenues.slice(0,etatSources.limite).includes(n);
+    sourceCompte.textContent=t('{n} page(s) photographiée(s)',{n:retenues.length});
+    sourceSuite.replaceChildren(...(retenues.length>etatSources.limite?[el('button',{type:'button',class:'btn',onClick:()=>{etatSources.limite+=60;memoriserListe({...etatSources,route,onglet:'sources'});dessinerSources();}},t('Voir plus'))]:[]));
+  };
+  sourceRecherche.addEventListener('input',()=>{etatSources.q=sourceRecherche.value;etatSources.limite=60;memoriserListe({...etatSources,route,onglet:'sources'});dessinerSources();});
+  sources.prepend(el('div',{class:'bibliotheque-commandes'},sourceRecherche,sourceCompte));sources.append(sourceSuite);dessinerSources();
   // EI-T4-1, T4-R1 : une rotation ou un redimensionnement redessine la liste — seulement si la largeur a changé depuis le dernier dessin. L'abonnement est posé au
   // MONTAGE, APRÈS le dernier await du rendu (suivreLargeurAuMontage, l'aide partagée avec la bibliothèque et la fiche recette) : la largeur y est relue (un
   // change reçu entre le rendu et le montage n'est pas perdu), un rendu jamais inséré ne prend pas l'abonnement de la fiche affichée, et une fiche quittée se
   // retire au premier change sans rien redessiner — au plus UNE fiche livre retenue par la MediaQueryList de la fenêtre.
   const contenu = root.querySelector('.two-col.livre');
   const onglets = el('div', { class: 'onglets-livre', role: 'tablist', 'aria-label': t('Contenu du livre') });
-  const afficher = source => {
-    if (contenu) contenu.hidden = source;
-    sources.hidden = !source;
-    [...onglets.children].forEach((bouton, i) => { bouton.setAttribute('aria-selected', String(source === (i === 1))); bouton.classList.toggle('active', source === (i === 1)); });
+  let ongletCourant=etat.onglet;
+  const afficher = (source,initial=false) => {
+    if(!initial)capturerVue(root);
+    ongletCourant=source?'sources':'recettes';
+    if(contenu)contenu.hidden=source; sources.hidden=!source;
+    [...onglets.children].forEach((bouton,i)=>{bouton.setAttribute('aria-selected',String(source===(i===1)));bouton.classList.toggle('active',source===(i===1));});
+    if(!initial){const sousEtat=lireContexteListe({route,query:{onglet:ongletCourant},portee});memoriserListe({...sousEtat,route,portee,onglet:ongletCourant});restaurerVue({racine:root,cleEntree:etat.cleEntree,portee,estCourante:()=>root.isConnected});}
   };
-  onglets.append(el('button', { class: 'active', role: 'tab', 'aria-selected': 'true', onClick: () => afficher(false) }, t('Recettes')),
-    el('button', { role: 'tab', 'aria-selected': 'false', onClick: () => afficher(true), dataset: { role: 'ouvrir-pages-source' } }, t('Pages source ({n})', { n: pages.length })));
-  if (contenu) contenu.before(onglets); else root.append(onglets);
-  root.append(sources);
-  suivreLargeurAuMontage('fiche-livre', root, large, () => { if (!!large.matches !== largeDessinee) drawList(); });
+  onglets.append(el('button',{role:'tab','aria-selected':'true',dataset:{role:'ouvrir-recettes'},onClick:()=>afficher(false)},t('Recettes')),
+    el('button',{role:'tab','aria-selected':'false',onClick:()=>afficher(true),dataset:{role:'ouvrir-pages-source'}},t('Pages source ({n})',{n:pages.length})));
+  if(contenu)contenu.before(onglets);else root.append(onglets);root.append(sources);afficher(etat.onglet==='sources',true);
   return root;
 }
 

@@ -1,3 +1,4 @@
+import { invaliderNavigation } from './navigation-contexte.js';
 import { documentsActifs } from './state.js';
 // Réglages : préférences (langue de l'interface, langue de lecture, unités), sauvegarde complète et restauration vérifiée,
 // exports d'échange, assistant IA, minuterie système, données locales (spec §29.1, §31, §33).
@@ -291,6 +292,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
         const reHorodatage = !!getSyncState().user;
         const bilanRestauration = await applyArchive(repo.db, insp, { mode, horodater: reHorodatage ? syncNow : null });
         committed = true;
+        if (mode === 'replace') invaliderNavigation({ motif: 'bibliotheque_remplacee' });
         appliedOnce = true;
         controls.remove();
         // L’archive réécrit le magasin « settings » sans passer par setSetting : la porte de confidentialité
@@ -460,6 +462,7 @@ export async function effacerDonnees({ user = null, pending, enQuarantaine = asy
   if (transfertEnCours()) dire(t('Envoi en cours…'));
   await arreterSync();
   await clearDevice({ signOut });
+  invaliderNavigation({ motif: 'bibliotheque_effacee' });
   dire(t('Données effacées'));
   reload();
   return true;
@@ -499,6 +502,7 @@ export async function changerDeCompte({ confirm, toast: dire, pending, archiveCr
   if (transfertEnCours()) dire(t('Envoi en cours…'));
   await arreterSync();
   await clearDevice({ signOut });
+  invaliderNavigation({ motif: 'bibliotheque_effacee' });
   reload();
   return true;
 }

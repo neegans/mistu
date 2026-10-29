@@ -1,3 +1,5 @@
+import { retourConnu, porteeNavigation } from './navigation-contexte.js';
+import { destinationApresRecette } from './actions-contenu.js';
 import { revoirLectureImport, memeCaptureImport } from '../domain/contexte-import.js';
 import { recetteActiveDansContexte } from './state.js';
 import { mentionCycleRecette } from './corbeille.js';
@@ -97,7 +99,7 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   let importId = row?.id || null, opening = null, queue = Promise.resolve(), busy = false, saving = false, closed = false, accountChanged = false, mounted = false, conflitBrouillon = false;
   let controller = null, tenue = null, heartbeat = null, relecture = false, sessionLive = await sessionDe();
   const compteInitial = ctx.sync?.user?.id ?? sessionLive?.user?.id ?? null, operations = new Set();
-  const lien = `/recipes/${encodeURIComponent(recipe.id)}`, retour = lien + buildQuery(versionId ? { v: versionId } : {});
+  const lien = `/recipes/${encodeURIComponent(recipe.id)}`, retour = destinationApresRecette(recipe.id,query,ctx,versionId ? { v: versionId } : {});
   const root = el('div', { class: 'stack', dataset: { role: 'reperes' } }), proteger = protegerSaisie(root);
   const status = el('p', { class: 'status', role: 'status', 'aria-live': 'polite', dataset: { role: 'etat-reperes' } }), feedback = el('div', { class: 'stack' });
   const disponibilite = el('p', { class: 'status', role: 'status', 'aria-live': 'polite', dataset: { role: 'disponibilite-assistant' } });
@@ -125,7 +127,7 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   root.attendreEcritures = async () => { await queue.catch(() => {}); while (operations.size) await Promise.all([...operations]); await queue.catch(() => {}); };
   async function ensure() {
     if (importId) return importId;
-    if (!opening) opening = P.ouvrirReperes({ recipeId: recipe.id, versionId, contexteRecette }, d()).then(r => { row = r; importId = r.id; if (vivant()) adresse(`#${lien}/reperes${buildQuery({ import: importId, ...(versionId ? { v: versionId } : {}) })}`); return r.id; }).catch(async e => {
+    if (!opening) opening = P.ouvrirReperes({ recipeId: recipe.id, versionId, contexteRecette }, d()).then(r => { row = r; importId = r.id; if (vivant()) adresse(`#${lien}/reperes${buildQuery({ ...query, import: importId, ...(versionId ? { v: versionId } : {}) })}`); return r.id; }).catch(async e => {
       opening = null;
       if (e.code === 'import_ouvert' && vivant()) { const existant = (await repo.all('imports')).find(i => i.recipe_id === recipe.id && !TERMINES.includes(i.status)); const cible = existant && cibleReprise(existant);
         feedback.replaceChildren(el('p', { class: 'status warn' }, t('Un brouillon ou un import est déjà ouvert pour cette recette. Reprends-le ou termine-le explicitement.')), ...(cible ? [el('a', { class: 'btn', href: '#' + cible }, t('Reprendre le brouillon existant'))] : [])); }
@@ -280,7 +282,7 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
       resultatPrecedent.append(el('div', { class: 'actions' }, reprendrePrecedent, ecarterPrecedent));
     }
   }
-  root.append(pageHeader(t('Description en français'), { subtitle: recipe.original_title, back: { href: retour, label: t('Recette') } }),
+  root.append(pageHeader(t('Description en français'), { subtitle: recipe.original_title, back: {...retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli:retour}),label:t('Retour')} }),
     el('p', { class: 'muted' }, t('Une courte description en français pour comprendre le plat, avec son niveau et ses temps.')),
     el('p', { class: 'muted' }, t('Demande une proposition à relire ou saisis tes informations. Tes corrections sont conservées lors des prochaines propositions.')),
     !version ? el('p', { class: 'status' }, t('Cette référence peut recevoir une description. Importe les étapes pour renseigner la difficulté et les durées.')) : el('details', null, el('summary', null, t('Version affichée utilisée pour ces informations')), el('ul', null, ...contexte.source.ingredients.map(s => el('li', null, s))), el('ol', null, ...contexte.source.etapes.map(s => el('li', null, s)))),

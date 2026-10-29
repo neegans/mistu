@@ -3660,3 +3660,17 @@ Publication L2 vérifiée : migration0009 appliquée une fois ;17 fonctions/50tr
 Code9ec738c intégréfc407df, Pages construit29oct22:18:18UTC. Public8366/8366 ;82 fichiers identiques ;24 mesures publiques,
 cache0.24.0/DB6 et deux rechargements hors ligne avec photos/notes intactes. Pas d’essai HTTP authentifié ou appareil physique.
 La suite L3 reprend ; le plan directeur complet n’est pas encore terminé.
+
+
+## L3 — gestion visible — réception locale du 29 octobre 2026
+
+Suite autorisée du plan : application0.25.0, cache `cuisine-os-v0.25.0-1`, DB6/archive3 inchangées, aucun SQL.
+Modifier/Actions visibles sur cartes, lignes et fiches ; collections communes, filtres et sélection conditionnée.
+Recherche, pagination, ancre et focus conservés dans une mémoire bornée par onglet/propriétaire ; contextes Sources distincts.
+Maquettes fournies relues, présentation mobile et clavier, texte200 %, focus explicite du formulaire de livre.
+Revue croisée : export documentaire TM invalidé autorisé sans cuisson/Cookidoo, réessai d’écriture après quota réellement rejoué.
+Navigateur8547/8547 (épingle8546, +181 sans retrait), Node232/232, générateur0, syntaxe43/diff propres.
+Parcours locaux25+16 mesures, deux contrôles du formulaire de livre, deux onglets, quatre modules en cache,
+photo et note conservées après rechargement hors ligne. Aucun compte privé, appel assistant réel ou appareil physique.
+Publication en préparation ; L4–L10 etE1 restent à construire.
+[Rapport](docs/superpowers/plans/2026-10-29-l3-gestion-visible.md).

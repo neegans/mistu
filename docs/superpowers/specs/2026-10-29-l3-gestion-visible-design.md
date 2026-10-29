@@ -280,6 +280,7 @@ Le responsable d'intégration possède `styles.css`, `src/i18n/en.js`, `MODULES_
 - `lienAvecOrigine(cibleInterne, {cleEntree, repli})` conserve un vrai `href` et ajoute un identifiant opaque d'origine. Aucun URL libre de retour ; paramètres métier existants (`v`, `servings`, `locale`, `import`, `session`) conservés et validés par leurs lecteurs.
 - `retourConnu({query, portee, repli})` rend un descripteur `{href, cleEntree?, libelle}` vers une entrée admissible, sinon le repli interne. La protection de saisie reste propriétaire de la décision de quitter.
 - `restaurerVue({racine, cleEntree, portee, estCourante})` ne s'exécute qu'après insertion du rendu ; `estCourante` inclut `renderSeq`, génération de session et identité de base. Ajustement d'ancre borné, annulé dès qu'une nouvelle navigation ou un geste de défilement utilisateur survient.
+- Une ouverture explicite de panneau peut déclarer un champ `data-nav-ouverture="focus"`. Cette cible prend la priorité sur l'ancre de liste : après montage, elle est amenée dans le viewport puis focalisée sous les mêmes gardes. Le marqueur est consommé après réussite. Le formulaire ne programme pas un focus concurrent avant la restauration de navigation.
 - `invaliderNavigation({motif})` détruit origines, ancrages et sélection locale à l'événement autorisé : changement réel de propriétaire, bibliothèque effacée/remplacée, garde de compte refusée. Un simple favori ne le déclenche pas.
 
 Les noms proposés sont à figer avant implémentation, leur sémantique est obligatoire. La coquille consomme l'API A ; les écrans B/C ne manipulent pas directement `history.state` ou `sessionStorage`.
@@ -336,6 +337,7 @@ Les commandes de retrait sont `mettreALaCorbeille`/`restaurerRecette` ou les com
 | L3-22 | Déconnexion avec données encore sous u1, rechargement, remplacement d'archive et nouvelle connexion u2 : portée correcte, aucune fuite d'origine et aucun filtre effacé sur simple réception du même compte |
 | L3-23 | Retour/avance produit un seul rendu malgré popstate+hashchange ; replace garde les clés étrangères ; Ctrl/Cmd-clic et lien nouvel onglet fonctionnent avec repli sûr |
 | L3-24 | Sélection de 60 éléments parmi 120+, filtre changé ou retrait parent reçu pendant dialogue : pas de membres invisibles réutilisés ; bilan partiel unique et exact |
+| L3-25 | Sur un livre long, Modifier le livre ouvre le formulaire et montre réellement son premier champ focalisé sur mobile et ordinateur ; aucun retour en haut ultérieur ne le masque |
 
 Tests comportementaux ciblés rouges puis verts, bases jetables et requêtes injectées ; suite navigateur complète avec épingle
 mesurée, outils Node, générateur inchangé, syntaxe/diff/cache. Pour les retours et le défilement, utiliser un vrai navigateur avec

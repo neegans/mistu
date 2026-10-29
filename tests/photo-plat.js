@@ -337,7 +337,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
         const pP = await monter('rc_p', { pagesById: new Map([['pg1', { id: 'pg1', sha256: H('1'), printed_page: 12 }]]) });
         const avant = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
         const zoneP = zoneDe(pP)?.closest('section');
-        const original = [...pP.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Original');
+        const original = [...pP.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Sources');
         eq([avant(pP.querySelector('[data-role="emplacement-photo-plat"]'), pP.querySelector('[data-role="autres-gestes"]')), avant(pP.querySelector('.recipe-body'), zoneP), avant(zoneP, original), zoneP?.querySelector('h2')?.textContent],
           [true, true, true, 'Photo du plat'], 'places (UI-1, D-UI-6) : l’emplacement de tête (dans .fiche-tete) avant « Portions, versions et autres gestes » ; la section « Photo du plat » (.card) après .recipe-body et avant « Original » (plain)');
         eq([zoneP.querySelectorAll('img').length, !!original?.contains(zoneP), textesDirects(pP)], [0, false, []], 'deux zones distinctes (I-6) : aucune img dans la zone, la zone hors d’« Original » ; aucun nœud texte direct sous la racine');
@@ -1291,7 +1291,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
           const edition = { id: 'ed_v', book_id: 'b_v', language: 'fr', cover_sha256: sha1, updated_at: DATE }; const livre = { id: 'b_v', title: 'Livre', updated_at: DATE };
           const recLivre = [fiche('rc_l1', { edition_id: 'ed_v', original_title: 'Tarte', photo_sha256: sha1, ...WEB }), fiche('rc_l2', { edition_id: 'ed_v', original_title: 'Tourte', photo_sha256: sha2, ...WEB })];
           await db.mutate({ puts: { books: [livre], book_editions: [edition], recipes: recLivre, recipe_versions: recLivre.map((r) => version(r.id)) }, origin: 'device' });
-          const rb = await renderBook({ id: 'ed_v' }, {}, await ctxPour(repo, db, { editionsById: new Map([['ed_v', edition]]), booksById: new Map([['b_v', livre]]), books: [livre], book_editions: [edition] }));
+          const rb = await renderBook({ id: 'ed_v' }, {presentation:'liste'}, await ctxPour(repo, db, { editionsById: new Map([['ed_v', edition]]), booksById: new Map([['b_v', livre]]), books: [livre], book_editions: [edition] }));
           scene.append(rb);
           await attendre(() => toutesPretes(rb, 2), 'chaque vignette du livre a son src');
           eq([rb.querySelectorAll('ul.liste-compacte > li .photo-visible img').length, srcs(rb).length], [2, 2],

@@ -1,3 +1,4 @@
+import { retourConnu, porteeNavigation } from './navigation-contexte.js';
 // Une seule cible : l’image réellement montrée. Les notes, les autres photos et la version restent intactes.
 import { el, pickFiles as pickDom, confirmDialog as confirmDom } from '../core/dom.js';
 import { t } from '../core/i18n.js';
@@ -65,7 +66,7 @@ export async function renderPhotoGestion({ id }, query = {}, ctx = {}, deps = {}
   if (!vue.recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
   const contenu = el('div', { class: 'stack' });
   const message = el('p', { role: 'status', class: 'status', hidden: true });
-  const retour = `#/recipes/${encodeURIComponent(id)}`;
+  const retour = '#'+retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli:`/recipes/${encodeURIComponent(id)}`}).href;
   const root = el('div', { class: 'stack photo-gestion', dataset: { role: 'photo-gestion' } },
     el('a', { href: retour, class: 'btn link' }, t('Retour à la recette')),
     el('h1', null, t('Photo de la recette')), contenu, message);

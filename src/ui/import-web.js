@@ -1,3 +1,5 @@
+import { retourConnu, porteeNavigation } from './navigation-contexte.js';
+import { destinationApresRecette } from './actions-contenu.js';
 // Lire une recette web (lot B « Recette web complète », spec docs/superpowers/specs/2026-10-19-recette-web-design.md, § 4.1, § 4.3) : démarrer une
 // lecture (depuis la fiche d'un signet, ou « Garder et lire » de l'onglet Web), la lancer, l'annuler. Le vol est celui du DOCUMENT (./vol.js,
 // partagé avec l'extraction de pages : I-B3) ; toute écriture passe par repo.saveBatch conditionné (création, I-2 du lot A) ou repo.transitionner
@@ -387,7 +389,7 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
     const patch = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { status: 'ignore', finished_at: maintenant() }; };
     try { await repo.transitionner('imports', L.id, { recettes:[{...contexte,historique:true}], attendus: ['a_lancer', 'a_verifier', 'echec'], patch }); }
     catch (e) { if (!estRefus(e)) logError('import_web.ignorer', { error: e, id: L.id }); await redessiner(); return; }
-    if (root.isConnected) navigate(`/recipes/${encodeURIComponent(recipe.id)}`);
+    if (root.isConnected) navigate(destinationApresRecette(recipe.id,query,ctx));
   }
   async function enregistrer() {
     const L = etat.ligne; if (!L || etat.occupe) return;
@@ -396,16 +398,17 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
     try { r = await enregistrerLecture(L.id, { repo, maintenant, choisir, cle: cleLecture(L), ctx, fetch: fetchInjecte, enLigne, photoAnnoncee: etat.photoAnnoncee, contexte }); }
     catch (e) { logError('import_web.enregistrer', { error: e, id: L.id }); toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); }
     finally { etat.occupe = false; }
-    if (r?.issue === 'enregistre' && root.isConnected) { toast(t('Recette enregistrée')); navigate(`/recipes/${encodeURIComponent(recipe.id)}?v=${encodeURIComponent(r.versionId)}`); return; }
+    if (r?.issue === 'enregistre' && root.isConnected) { toast(t('Recette enregistrée')); navigate(destinationApresRecette(recipe.id,query,ctx,{v:r.versionId})); return; }
     await redessiner(); // annulé (rien d'écrit), refusé (un autre onglet, ou une autre lecture arrivée), illisible (echec écrit)
   }
 
   // --- Dessin
   const peutLire = () => !!session && enLigne() && !volEnCours() && https && !etat.occupe;
-  const retour = () => el('a', { class: 'btn', href: `#/recipes/${encodeURIComponent(recipe.id)}` }, t('Retour à la fiche'));
+  const hrefRetour=retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli:`/recipes/${encodeURIComponent(recipe.id)}`}).href;
+  const retour = () => el('a', { class: 'btn', href:'#'+hrefRetour }, t('Retour à la fiche'));
   const ouvrir = () => lienOrigine(lien); // D-UI-10 : « Voir la page d’origine », lien texte (null si l'adresse ne se lit pas)
   const enTete = () => el('header', { class: 'stack', style: { marginBottom: '1rem' } },
-    el('a', { href: `#/recipes/${encodeURIComponent(recipe.id)}`, class: 'muted', style: { textDecoration: 'none', fontSize: '.9rem' } }, `← ${t('Fiche recette')}`),
+    el('a', { href: '#'+hrefRetour, class: 'muted', style: { textDecoration: 'none', fontSize: '.9rem' } }, `← ${t('Retour')}`),
     el('p', { class: 'muted', style: { margin: 0 } }, t('Lire une recette web')),
     el('div', { class: 'row between top' },
       el('div', null, el('h1', null, recipe.original_title), el('p', { class: 'muted', dataset: { role: 'hote' } }, lien.ok ? lien.hote : t('Adresse non reconnue'))),

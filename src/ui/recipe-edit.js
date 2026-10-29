@@ -1,3 +1,5 @@
+import { retourConnu, porteeNavigation } from './navigation-contexte.js';
+import { destinationApresRecette } from './actions-contenu.js';
 import { recetteActiveDansContexte } from './state.js';
 import { mentionCycleRecette } from './corbeille.js';
 // Éditeur de version : extraction (saisie ou IA), correction ciblée, adaptation personnelle, traduction (spec §3.3, §6, §16).
@@ -47,7 +49,7 @@ export async function renderRecipeEdit(params, query, ctx) {
   let sansThermomix = false;
   const translationLocale = ['fr', 'en'].includes(query.locale) ? query.locale : f_defaultTranslation(recipe);
   // La traduction vérifie ses bornes et sa structure AVANT les jointures des champs de l'éditeur culinaire.
-  if (kind === 'translation') return translationEditor({ recipe, base, ctx, gardeRecette, f: { translationLocale } });
+  if (kind === 'translation') return translationEditor({ recipe, base, ctx, gardeRecette, query, f: { translationLocale } });
   // Import ciblé (spec § 4.3.7, N5) : une étape de la version de départ qui porte un saut de ligne a été lue ENTIÈRE par l'assistant ; l'éditeur
   // passe alors en « une étape par paragraphe » (zone jointe par une ligne vide, aide adaptée, aperçu et save() par parseStepsBlock parParagraphe) ;
   // sinon rien ne change (une étape par ligne ou par paragraphe, aide actuelle : une étape ajoutée sur une nouvelle ligne reste une étape).
@@ -96,7 +98,7 @@ export async function renderRecipeEdit(params, query, ctx) {
   const root = el('div', null);
   root.append(pageHeader(recipe ? (kind === 'adaptation' ? t('Créer ma version') : t('Corriger la recette')) : t('Nouvelle recette'), {
     subtitle: [book ? book.title : t('Sans livre'), base ? `${t('à partir de')} : ${label('version_kind', base.kind)} ${base.created_at ? new Date(base.created_at).toLocaleDateString() : ''}` : null].filter(Boolean).join(' · '),
-    back: recipe ? { href: `/recipes/${recipe.id}`, label: t('Fiche recette') } : { href: '/add', label: t('Ajouter') },
+    back: {...retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli:recipe?`/recipes/${encodeURIComponent(recipe.id)}`:'/add'}),label:t('Retour')},
   }));
   const erreurEnregistrement = el('div', { class: 'status warn', role: 'status', hidden: true, dataset: { role: 'erreur-enregistrement' } });
   root.append(erreurEnregistrement);
@@ -294,7 +296,7 @@ export async function renderRecipeEdit(params, query, ctx) {
     kind === 'adaptation' ? field(t('Statut'), select([{ value: 'proposed', label: t('Proposée') }, { value: 'tested', label: t('Testée par Neegan') }], f.status, (v) => { f.status = v; })) : null,
     field(t('Notes'), notesTa),
     el('div', { class: 'row' }, el('button', { class: 'btn primary big', onClick: save }, recipe ? t('Enregistrer une nouvelle version') : t('Enregistrer la recette')),
-      recipe ? el('a', { class: 'btn', href: `#/recipes/${recipe.id}` }, t('Annuler')) : null));
+      recipe ? el('a', { class: 'btn', href: '#'+retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli:`/recipes/${encodeURIComponent(recipe.id)}`}).href }, t('Annuler')) : null));
 
   // Lot D (§ 4.8.2 point 6, D-D19) : une lecture du journal a_verifier SANS référence, dans une édition connue → la proposition de référence au-dessus du
   // formulaire (rien sans candidate) ; la ligne est relue à chaque lecture posée. Ne rien choisir EST la nouvelle recette ; l'éditeur ne porte aucun texte neuf.
@@ -447,14 +449,14 @@ export async function renderRecipeEdit(params, query, ctx) {
       }
     } else await repo.saveBatch(lot, { recettes: [gardeRecette], ...(conditionFiche ? { conditions: conditionFiche } : {}) });
     toast(kind === 'adaptation' ? t('Ma version enregistrée') : t('Recette enregistrée'));
-    navigate(`/recipes/${recipeId}?v=${version.id}`);
+    navigate(destinationApresRecette(recipeId,query,ctx,{v:version.id}));
   }
 }
 
 function f_defaultTranslation(recipe) { return recipe?.original_language === 'en' ? 'fr' : 'en'; }
 
 // Traduction d'une version précise : signalée comme telle, sans devenir une adaptation culinaire (spec §14, §29.1).
-function translationEditor({ recipe, base, ctx, f, gardeRecette }) {
+function translationEditor({ recipe, base, ctx, f, gardeRecette, query = {} }) {
   if (!base) return el('div', { class: 'card' }, t('Aucune version à traduire.'));
   const existing = ctx.recipe_translations.find((tr) => tr.recipe_version_id === base.id && tr.locale === f.translationLocale);
   const lecture = lireTraduction(existing, base);
@@ -466,7 +468,7 @@ function translationEditor({ recipe, base, ctx, f, gardeRecette }) {
   const ancienValide = contenuAncien ? validerContenuTraduction(contenuAncien, base) : null;
   const sourceOuverte = projectionSourceTraduction(base), traductionOuverte = JSON.stringify(existing ?? null);
   const sourceTitre = recipe.original_title;
-  const root = el('div', null, pageHeader(t('Traduire — {l}', { l: f.translationLocale.toUpperCase() }), { back: { href: `/recipes/${recipe.id}`, label: t('Fiche recette') } }));
+  const root = el('div', null, pageHeader(t('Traduire — {l}', { l: f.translationLocale.toUpperCase() }), { back: {...retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli:`/recipes/${encodeURIComponent(recipe.id)}`}),label:t('Retour')} }));
   const montrerBrut = (titre, contenu) => {
     const panneau = el('details', { class: 'card', dataset: { role: 'ancienne-traduction' } }, el('summary', null, titre));
     // La consultation est explicite : une source hors bornes ne fabrique pas des milliers de contrôles au chargement.
@@ -541,7 +543,7 @@ function translationEditor({ recipe, base, ctx, f, gardeRecette }) {
           return null;
         } } : { key: row.id, absente: true }],
       } });
-      toast(t('Traduction enregistrée')); navigate(`/recipes/${recipe.id}?v=${base.id}&lang=${f.translationLocale}`);
+      toast(t('Traduction enregistrée')); navigate(destinationApresRecette(recipe.id,query,ctx,{v:base.id,lang:f.translationLocale}));
     } catch (error) {
       ecrireEtat(error instanceof TransitionRefusee
         ? error.store === 'recipes' ? t('Cette recette n’est plus disponible. Tes modifications restent dans ce formulaire.')

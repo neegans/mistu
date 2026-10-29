@@ -1,3 +1,4 @@
+import { retourConnu, porteeNavigation, lienAvecOrigine } from './navigation-contexte.js';
 // Séance de scan continue (spec §16) : photos et fichiers conservés sur l'appareil, miniatures numérotées, regroupement,
 // remplacement d'une page, entrées d'index, états fondés sur des événements réels. Aucune page n'est annoncée « sur le serveur » sans un remote
 // de ce compte sur sa ligne files (lot G, § 4.3, I5).
@@ -48,7 +49,7 @@ export async function startScanSession(files, { edition_id = null, session_id = 
   if(edition_id&&!contexteEdition){const edition=ctx?.editionsById?.get(edition_id)??await repo.get('book_editions',edition_id);contexteEdition=await capturerEdition(repo,edition,{ctx});}
   const { session } = await repo.ajouterPages(files, { edition_id, session_id, ...(contexteEdition?{editions:[contexteEdition]}:{}), conditions:{sync_state:[conditionProprietaire(proprietaire)],...(attendue?{scan_sessions:[conditionSeance(attendue)]}:{})} });
   notifier(t('{n} fichier(s) conservé(s) sur cet appareil', { n: files.length }));
-  naviguer(adresseSeance(session.id, intention));
+  naviguer(lienAvecOrigine(adresseSeance(session.id, intention)).slice(1));
   return session;
 }
 
@@ -59,22 +60,22 @@ export function deviceId() { return repo.deviceId(); }
 // src/ui/import-cible.js (tâche 6 du lot A et sa ronde 1 ; lot C, tâche 4).
 
 export async function renderImport(params, query, ctx, deps = {}) {
-  if (!query.session) return sessionsList(ctx);
+  if (!query.session) return sessionsList(ctx,query);
   const session = ctx.scan_sessions.find((s) => s.id === query.session);
   if (!session) return el('div', { class: 'card' }, t('Séance introuvable.'));
   return sessionView(session, ctx, query, { deps }); // deps (lot C, D-C20) : les injectables du panneau d'index — le routeur n'en passe aucun
 }
 
-function sessionsList(ctx) {
+function sessionsList(ctx,query={}) {
   const compte = capturerProprietaire(repo,ctx);
   // Import ciblé (spec § 4.1, N3) : la séance d'un import CIBLÉ non terminé se reprend par la section « Imports » (de retour après ignore).
   const open = ctx.scan_sessions.filter((s) => s.status === 'open' && !seanceDUnImportCible(s, ctx.imports)).sort((a, b) => (b.started_at || '').localeCompare(a.started_at || ''));
-  const root = el('div', null, pageHeader(t('Importer'), { back: { href: '/add', label: t('Ajouter') } }));
+  const root = el('div', null, pageHeader(t('Importer'), { back: {...retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli:'/add'}),label:t('Retour')} }));
   root.append(el('div', { class: 'row', style: { marginBottom: '1rem' } },
     el('button', { class: 'btn primary', onClick: async () => { const f = await pickFiles({ accept: 'image/*', capture: 'environment' }); if (f.length) await startScanSession(f,{compte,ctx}).catch(erreurImport); } }, t('Photographier des pages')),
     el('button', { class: 'btn', onClick: async () => { const f = await pickFiles({ accept: 'image/*,application/pdf,application/epub+zip' }); if (f.length) await startScanSession(f,{compte,ctx}).catch(erreurImport); } }, t('Choisir des fichiers'))));
   if (!open.length) root.append(emptyState('appareil-photo', t('Aucune séance en cours.')));
-  else root.append(section(t('Séances à reprendre'), ...open.map((s) => el('a', { class: 'item-link card flat', href: `#/import?session=${s.id}` },
+  else root.append(section(t('Séances à reprendre'), ...open.map((s) => el('a', { class: 'item-link card flat', href: lienAvecOrigine(`/import?session=${encodeURIComponent(s.id)}`) },
     el('div', { class: 'row between' }, el('strong', null, `${t('Séance du')} ${formatDate(s.started_at, { withTime: true })}`), el('span', { class: 'muted' }, t('{n} page(s)', { n: s.page_ids.length }))),
     el('div', { class: 'muted', style: { fontSize: '.85rem' } }, s.edition_id ? ctx.editionLabel(ctx.editionsById.get(s.edition_id)) : t('Livre non associé'))))));
   return root;
@@ -95,7 +96,7 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   const docs = session.document_ids.map((id) => ctx.source_documents.find((d) => d.id === id)).filter(Boolean);
   const fileDocs = docs.filter((d) => d.source_type !== 'photo');
   if(session.edition_id && lireCycleEdition(editionAffichee).etat!=='active') {
-    const root=el('div',{class:'stack'},pageHeader(t('Séance de scan'),{back:{href:'/import',label:t('Séances')}}),el('p',{class:'status warn'},t('Livre dans la corbeille')),el('a',{class:'btn',href:`#/books/${encodeURIComponent(session.edition_id)}`},t('Livre')));
+    const root=el('div',{class:'stack'},pageHeader(t('Séance de scan'),{back:{...retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli:'/import'}),label:t('Retour')}}),el('p',{class:'status warn'},t('Livre dans la corbeille')),el('a',{class:'btn',href:`#/books/${encodeURIComponent(session.edition_id)}`},t('Livre')));
     const vues=await vignettesDePages(pages,ctxF);
     root.append(el('div',{class:'thumbs'},...pages.map(p=>el('figure',null,vues.places.get(p.id),el('figcaption',null,p.printed_page??p.position)))));
     const telecharger=boutonTelechargerPages(vues.distantes,{connecte:ctxF.connecte,telecharger:vues.telecharger});if(telecharger)root.append(telecharger);
@@ -134,7 +135,7 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
     || (ctx.imports || []).some((i) => i?.kind === 'index' && i.scan_session_id === session.id) || (pages.length > 0 && pages.every((p) => p.kind === 'index')));
   if (applique.ouvrirIndex && session.but !== 'index') { await repo.save('scan_sessions', { ...session,but:'index' },await options()).then(()=>{session.but='index';}).catch(erreurImport); }
   const root = el('div', null);
-  root.append(pageHeader(t('Séance de scan'), { subtitle: `${t('Débutée le')} ${formatDate(session.started_at, { withTime: true })}`, back: { href: '/import', label: t('Séances') } }));
+  root.append(pageHeader(t('Séance de scan'), { subtitle: `${t('Débutée le')} ${formatDate(session.started_at, { withTime: true })}`, back: {...retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli:'/import'}),label:t('Retour')} }));
   const noteLots = noteLotsDeSeance(session, ctx); if (noteLots) root.append(noteLots); // lot D (D-D18)
 
   // Lot G (§ 4.3, I5, F-21) : la phrase de séance dit un FAIT — les pages dont la ligne a un remote de ce compte. /import est une route de saisie :
@@ -247,10 +248,10 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   indexPanel.hidden = !seanceIndex;
   root.append(indexPanel);
   // consommée : un refresh() ne la réappliquera pas — mais seulement si l'adresse est encore celle-ci (C7).
-  if (applique.consommee && peutRetirerIntention(applique, session.id, parseHash().query)) historique.remplacer(adresseSeance(session.id, null));
+  if (applique.consommee && peutRetirerIntention(applique, session.id, parseHash().query)) historique.remplacer(adresseSeance(session.id, null)+(query.origine?'&origine='+encodeURIComponent(query.origine):''));
 
   root.append(el('div', { class: 'row', style: { marginTop: '1rem' } },
-    el('button', { class: 'btn', onClick: async () => { try{await repo.save('scan_sessions',{...session,status:'done'},await options());toast(t('Séance terminée'));navigate(session.edition_id?`/books/${session.edition_id}`:'/library');}catch(e){erreurImport(e);} } }, t('Terminer la séance')),
+    el('button', { class: 'btn', onClick: async () => { try{await repo.save('scan_sessions',{...session,status:'done'},await options());toast(t('Séance terminée'));navigate(retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli:session.edition_id?`/books/${encodeURIComponent(session.edition_id)}`:'/library'}).href);}catch(e){erreurImport(e);} } }, t('Terminer la séance')),
     el('span', { class: 'muted' }, t('Une séance interrompue reste disponible dans Importer.'))));
 
   async function replacePage(pageId) {

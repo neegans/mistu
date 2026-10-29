@@ -1,4 +1,6 @@
 import { capturerRecette } from './recette-garde.js';
+import { actionsRecette, menuActions, boutonsActions, texteErreurAction, capturerSelectionRecettes, executerSelectionRecettes } from './actions-contenu.js';
+import { lienAvecOrigine, retourConnu, porteeNavigation } from './navigation-contexte.js';
 import { lireEtatRecette } from '../domain/cycle-edition.js';
 // Fiche recette (spec §17) : Original / Ma version, réglages combinables, unités et langue de lecture, remplacer un ingrédient,
 // « Avec quoi on mange ça ? », autres recettes du plat, historique et « Refaire comme la dernière fois ».
@@ -99,7 +101,8 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // Ronde 1 : l'identifiant d'une fiche reçue ou restaurée peut porter « & », « ? » ou « # » — les adresses l'encodent (le geste ouvert est celui annoncé).
   const rid = encodeURIComponent(recipe.id);
   const cycle = lireEtatRecette(recipe, ctx.editionsById.get(recipe.edition_id)), lectureSeule = cycle.etat !== 'active';
-  const lienEdition = (kind, v, locale) => `#/recipes/${rid}/edit${buildQuery({ kind, v, locale })}`;
+  const origine=ctx.navigation?{cleEntree:ctx.navigation.cleEntree}:{};
+  const lienEdition = (kind, v, locale) => lienAvecOrigine(`/recipes/${rid}/edit${buildQuery({ kind, v, locale })}`,origine);
   // Lot B (§ 4.1, § 4.5) : une fiche à adresse lisible porte « Voir la page d’origine » partout (I-B5, D-UI-10) ; la lecture par l'assistant a besoin de la session.
   const lienFiche = recipe.source_url ? lienSignet(recipe.source_url) : null;
   const lisibleParLAssistant = !!lienFiche?.ok && lienFiche.href.startsWith('https:');
@@ -116,7 +119,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     if (!enLigneWeb()) { dire(t('Tu es hors ligne.')); return; }
     try {
       const r = await demarrerLectureWeb({ recipe: (await gestesLecture.repo.get('recipes', recipe.id)) ?? recipe, ctx }, gestesLecture);
-      if (r.issue === 'ok') naviguer(`/recipes/${encodeURIComponent(recipe.id)}/importer`);
+      if (r.issue === 'ok') naviguer(lienAvecOrigine(`/recipes/${encodeURIComponent(recipe.id)}/importer`,origine).slice(1));
       else if (r.issue === 'refuse') dire(texteEchecLecture({ raison: r.raison === 'adresse' ? 'interdit' : r.raison }).texte);
     } catch (e) { logError('recipe.lire_web', { error: e, id: recipe.id }); dire(texteEchecLecture({ raison: 'interne' }).texte); }
   };
@@ -136,21 +139,35 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // affichée ici — sa lecture, son bandeau et son import ne sont pas ceux de cette fiche ; retour à la version courante.
   const demandee = query.v ? ctx.versionsById.get(query.v) : null;
   let version = (demandee?.recipe_id === recipe.id ? demandee : null) || original || versions[0] || null;
+  const actionsCommunes=actionsRecette({recipe,version,ctx,origine},deps);
   const state = { servings: query.servings ? Number(query.servings) : version?.servings || null, units: ctx.settings.units, lang: query.lang || ctx.settings.reading_locale, diet: '', onglet: 'ingredients' };
+  if(version&&!lectureSeule){
+    const secondaire=(id,libelle,extra)=>({id,libelle:t(libelle),nomAccessible:t(libelle),eligible:true,...extra});
+    const lienSecondaire=(id,libelle,href)=>{const a=secondaire(id,libelle,{verifier:actionsCommunes.find(a=>a.id==='modifier')?.verifier});Object.defineProperty(a,'href',{get:href});return a;};
+    actionsCommunes.push(
+      lienSecondaire('traduction','Traduction',()=>lienEdition('translation',version.id,['fr','en'].includes(state.lang)?state.lang:recipe.original_language==='fr'?'en':'fr')),
+      lienSecondaire('variante','Créer ma version',()=>lienEdition('adaptation',version.id)),
+      ...(version.steps?.length?[lienSecondaire('thermomix','Adapter au Thermomix',()=>lienAvecOrigine(`/recipes/${rid}/thermomix${buildQuery({v:version.id,servings:state.servings??''})}`,origine))]:[]),
+      secondaire('courses','Liste d’épicerie',{executer:()=>makeList()}),
+      secondaire('export-jsonld','Exporter JSON-LD',{actualise:false,executer:()=>exporter('jsonld')}),
+      secondaire('export-yaml','Exporter YAML (Paprika)',{actualise:false,executer:()=>exporter('yaml')}),
+    );
+  }
   const conventionId = ctx.conventionFor(recipe);
   const root = el('div', null);
 
   // Lot F (D-F16) : ★ Favori n'écrit que `favorite`, sur la fiche RELUE — ronde 1 : DANS la transaction d'écriture (condition { key, fusion } par
   // saveBatch, comme photo-plat.js) : une photo du plat posée depuis le rendu (descente web, autre onglet), même pendant ce geste, survit. La valeur
   // écrite est celle que l'écran annonce (« ☆ » → favori), jamais l'inverse de la base. Le repo et le toast injectés (deps) servent ici aussi.
+  let favoriEnCours=false;
   const favBtn = el('button', { class: 'btn discret', title: t('Favori'), 'aria-pressed': recipe.favorite ? 'true' : 'false', onClick: async () => {
-    let absente = false;
+    if(favoriEnCours)return;favoriEnCours=true;favBtn.disabled=true;
     try {
-      const contexte = await capturerRecette(gestesLecture.repo, recipe, {ctx});
-      await gestesLecture.repo.saveBatch({}, { recettes: [contexte], conditions: { recipes: [{ key: recipe.id, fusion: (c) => { if (!c) { absente = true; return null; } return { ...c, favorite: !recipe.favorite }; } }] } });
-    } catch (e) { logError('recipe.favori', { error: e, id: recipe.id }); dire(e?.code === 'source_absente' ? t('Recette introuvable.') : t('La recette a changé. Recharge sa fiche avant de réessayer.')); return; }
-    if (absente) { dire(t('Recette introuvable.')); return; }
-    refresh();
+      const resultat=await actionsCommunes.find(a=>a.id==='favori').executer();
+      if(resultat.issue!=='succes'){dire(resultat.raison==='source_absente'?t('Recette introuvable.'):texteErreurAction(resultat.raison,t('Favori')));return;}
+      (deps.refresh??refresh)();
+    } catch (e) { logError('recipe.favori', { error: e, id: recipe.id }); dire(texteErreurAction(e?.code,t('Favori'))); }
+    finally{favoriEnCours=false;favBtn.disabled=false;}
   } }, recipe.favorite ? '★' : '☆', el('span', { class: 'fav-libelle' }, ' ' + t('Favori'))); // maquettes : sur iPhone, l'étoile seule à côté du titre (le mot reste lu)
   // UI-1 (D-UI-6, F-5) : la largeur par un matchMedia INJECTABLE (deps.matchMedia ; défaut : celui de la fenêtre, appelé SUR window — jamais la fonction
   // nue : « Illegal invocation »). Une seule requête, celle de .two-col (760 px, le motif de dish.js) ; `large()` la relit à chaque usage.
@@ -160,7 +177,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // CARTE-PLAT (ligneSource), pas de la fiche — § 4.2 amendé par T6 ; tests/creer-ia.js:1338, 1375, 1397, 1400 lisent ce header p tel quel.
   // Fidélité aux maquettes (28 octobre 2026) : le titre vit dans la colonne de gauche de l'en-tête, en face de la photo (posé plus bas, dans .fiche-etat).
   const entete = pageHeader(recipe.original_title || recipe.display_title, {
-    subtitle: provenanceText(recipe, book, edition), back: edition ? { href: `/books/${edition.id}`, label: book?.title || t('Livre') } : { href: '/library', label: t('Bibliothèque') },
+    subtitle: provenanceText(recipe, book, edition), back: (()=>{const repli=edition?`/books/${encodeURIComponent(edition.id)}`:'/library';const back=retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli});return {...back,label:back.cleEntree?t('Retour'):edition?book?.title||t('Livre'):t('Bibliothèque')};})(),
     actions: lectureSeule ? [] : [favBtn], classeTitre: 'titre-fiche',
   });
 
@@ -198,10 +215,11 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const photoFiche = el('div', { class: 'fiche-photo' }, photo.entete, lectureSeule ? null : lienGestionPhoto(recipe, { connue: !!photoPrincipale(recipe, history)?.sha256 }));
   const tete = el('div', { class: 'two-col fiche-tete', dataset: { role: 'fiche-tete' } }, etat, photoFiche);
   root.append(tete);
-  const panneauCycle = await panneauCycleRecette(recipe, ctx, deps); if (panneauCycle) root.prepend(panneauCycle);
+  const panneauCycle = lectureSeule ? await panneauCycleRecette(recipe, ctx, deps) : null; if (panneauCycle) root.prepend(panneauCycle);
   root.append(lectureSeule ? sectionPlain(t('Mes notes'), el('div', {style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}, textePersonnel(recipe.personal_notes))) : await monterNotesPersonnelles(recipe, { ctx, repo: gestesLecture.repo, toast: dire }));
 
   if (!version) {
+    if(!lectureSeule)etat.insertBefore(el('div',{class:'row geste-principal',dataset:{role:'geste-principal'}},boutonsActions(actionsCommunes,['modifier']),menuActions(actionsCommunes,{titre:titreRecetteAffichee(),onResultat:()=> (deps.refresh??refresh)()})),etat.querySelector('.resume-reperes'));
     root.append(lectureSeule ? el('div', {class:'stack'}, lienOrigine(lienFiche), pages.length ? el('div', {class:'thumbs'}, ...((await vignettesDePages(pages, ctxF)).places.values())) : null) : await referenceOnly());
     if (!lectureSeule) root.append(el('p', { class: 'muted', dataset: { role: 'cuisson-reference' } }, t('Importe cette recette avant d’enregistrer une cuisson. Tes notes personnelles restent disponibles.')));
     // F-9 : la carte « Connecte-toi » et le bouton de lecture sont rendus cachée / éteint ; la session (déjà lue plus haut) les bascule ici —
@@ -223,23 +241,25 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   if (original) versionOptions.push({ value: original.id, label: libelleOption(original, { adaptation: false }) });
   for (const a of adaptations) versionOptions.push({ value: a.id, label: libelleOption(a, { adaptation: true }) });
   const estUneCreation = estCreationIA(version);
-  const selectVersion = (id) => navigate(`/recipes/${rid}${buildQuery({ v: id, servings: state.servings || '' })}`, { replace: true });
+  const selectVersion = (id) => navigate(`/recipes/${rid}${buildQuery({ ...query, v: id, servings: state.servings || '', lang:state.lang })}`, { replace: true });
   // Les gestes de tête (D-UI-6, B-I-8) : les repères, le lien d'origine (toute adresse lisible, http compris : I-B5), puis « Commencer à cuisiner » pleine
   // largeur et, tant que la version AFFICHÉE n'est pas vérifiée, « Corriger » en lien texte à côté — le seul geste que « — vérifie » et « {n} lignes à
   // vérifier » réclament ; il reste aussi dans « autres gestes ».
   const reperes = texteReperes(version);
-  if (!lectureSeule) tete.append(el('div', { class: 'stack fiche-gestes', dataset: { role: 'fiche-gestes' } },
+  const modifierTete=boutonsActions(actionsCommunes,['modifier']);
+  const lienModifierTete=modifierTete.querySelector('[data-action=modifier]');if(lienModifierTete)lienModifierTete.dataset.role='corriger-tete';
+  if (!lectureSeule) etat.insertBefore(el('div', { class: 'stack fiche-gestes', dataset: { role: 'fiche-gestes' } },
     reperes ? el('div', { class: 'reperes muted', dataset: { role: 'reperes' } }, reperes) : null,
     lienOrigine(lienFiche),
     el('div', { class: 'geste-principal', dataset: { role: 'geste-principal' } },
       el('button', { class: 'btn primary big block', onClick: startCooking }, t('Commencer à cuisiner')),
-      version.verification_state !== 'verified' ? el('a', { class: 'btn link', href: lienEdition('correction', version.id), dataset: { role: 'corriger-tete' } }, t('Corriger')) : null),
+      modifierTete,menuActions(actionsCommunes,{titre:titreRecetteAffichee(),onResultat:()=> (deps.refresh??refresh)()})),
     el('button', { type: 'button', class: 'btn', dataset: { role: 'jai-cuisine' }, onClick: async () => {
       if (cuissonOuverte) return;
       cuissonOuverte = true;
       try { if (await ouvrirCuissons([{ recipe, version, servings: state.servings }], { ...deps, ctx, repo: gestesLecture.repo, toast: dire })) (deps.refresh ?? refresh)(); }
       finally { cuissonOuverte = false; }
-    } }, t('J’ai cuisiné ce plat'))));
+    } }, t('J’ai cuisiné ce plat'))),etat.querySelector('.resume-reperes'));
 
   // « Portions, versions et autres gestes » (D-UI-6, § 13 point 4) : TOUT l'ancien contenu de la carte des contrôles et de la rangée d'actions, sauf
   // « Commencer à cuisiner » et le « Corriger » de tête — replié sous 760 px, ouvert au-dessus (le matchMedia, relu sur change) ; jamais « Réglages »
@@ -295,7 +315,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // Pages originales
   if (pagesOriginal.length) {
     const vignettes = await vignettesDePages(pagesOriginal, ctxF, { alt: () => t('Page originale') }); // ronde 1 : l'alt d'avant le lot G
-    root.append(sectionPlain(t('Original'), el('p', { class: 'muted' }, t('Pages du livre telles que photographiées. Une adaptation n’est jamais présentée comme le texte original.')),
+    root.append(sectionPlain(t('Sources'), el('h3',null,t('Original')),el('p', { class: 'muted' }, t('Pages du livre telles que photographiées. Une adaptation n’est jamais présentée comme le texte original.')),
       boutonTelechargerPages(vignettes.distantes, { connecte: ctxF.connecte, telecharger: vignettes.telecharger }),
       el('div', { class: 'thumbs' }, ...pagesOriginal.map((p) => el('figure', null, vignettes.places.get(p.id), el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : ''))))));
   }
@@ -322,19 +342,26 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
 
   // Export
   root.append(el('div', { class: 'row', style: { marginTop: '.5rem' } },
-    el('button', { class: 'btn small', onClick: () => { if (!gardeThermomix(version, state.servings).ok) { dire(t(BLOCAGE_THERMOMIX)); return; } downloadBlob(new Blob([JSON.stringify(toJsonLd({ recipe, version, book, edition }), null, 2)], { type: 'application/ld+json' }), `${slug(recipe.original_title)}.jsonld`); } }, t('Exporter JSON-LD')),
-    el('button', { class: 'btn small', onClick: () => { if (!gardeThermomix(version, state.servings).ok) { dire(t(BLOCAGE_THERMOMIX)); return; } downloadBlob(new Blob([toPaprikaYaml([{ recipe, version, book, edition }])], { type: 'text/yaml;charset=utf-8' }), `${slug(recipe.original_title)}.yml`); } }, t('Exporter YAML (Paprika)')),
+    el('button', { class: 'btn small', onClick: () => exporter('jsonld') }, t('Exporter JSON-LD')),
+    el('button', { class: 'btn small', onClick: () => exporter('yaml') }, t('Exporter YAML (Paprika)')),
     el('span', { class: 'muted', style: { fontSize: '.85rem' } }, t('Version et langue affichées ; inconnues omises.'))));
   // Ronde 1 : la largeur suivie au MONTAGE (suivreLargeur, plus haut), posé APRÈS le dernier await du rendu — le routeur insère la racine juste après.
   suivreLargeur(root, mq, () => { appliquerCorps(); }); // le panneau des autres gestes reste replié à toutes les largeurs (maquettes) : seule la bascule du corps suit la largeur
   return root;
+
+  function titreRecetteAffichee(){return recipe.display_title||recipe.original_title||t('Sans titre');}
+  function exporter(format){
+    if(format==='jsonld')downloadBlob(new Blob([JSON.stringify(toJsonLd({recipe,version,book,edition},{documentaire:true}),null,2)],{type:'application/ld+json'}),`${slug(recipe.original_title)}.jsonld`);
+    else downloadBlob(new Blob([toPaprikaYaml([{recipe,version,book,edition}],{documentaire:true})],{type:'text/yaml;charset=utf-8'}),`${slug(recipe.original_title)}.yml`);
+    return{issue:'succes',id:recipe.id};
+  }
 
   function setServings(n) { if (n < 1) return; state.servings = n; document.getElementById('servings-val').textContent = n; drawBody(); }
 
   function drawBody() {
     body.replaceChildren();
     const lienTM = root.querySelector('[data-role=adapter-thermomix]');
-    if (lienTM) lienTM.href = `#/recipes/${rid}/thermomix${buildQuery({ v: version.id, servings: state.servings ?? '' })}`;
+    if (lienTM) lienTM.href = lienAvecOrigine(`/recipes/${rid}/thermomix${buildQuery({ v: version.id, servings: state.servings ?? '' })}`,origine);
     const rappelTM = rappelThermomix(version); if (rappelTM) body.append(rappelTM);
     if (estThermomix(version)) {
       if (!gardeThermomix(version, state.servings).ok) body.append(el('div', { class: 'status warn', dataset: { role: 'thermomix-portions' } }, t(BLOCAGE_THERMOMIX), el('button', { class: 'btn small', onClick: () => { state.servings = version.servings ?? null; root.querySelector('#servings-val').textContent = state.servings ?? t('inconnues'); drawBody(); } }, t('Revenir aux quantités adaptées'))));
@@ -420,8 +447,8 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   }
 
   async function modifier(travail) {
-    try { const contexte = await capturerRecette(gestesLecture.repo, recipe, {ctx}); await travail(contexte); }
-    catch { dire(t('La recette a changé. Recharge sa fiche avant de réessayer.')); }
+    try { const contexte = await capturerRecette(gestesLecture.repo, recipe, {ctx}); await travail(contexte);return{issue:'succes',id:recipe.id}; }
+    catch(e) { dire(texteErreurAction(e?.code,t('Modifier')));return{issue:'refuse',id:recipe.id,raison:e?.code||'ecriture_refusee'}; }
   }
 
   async function startCooking() {
@@ -433,10 +460,11 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
 
   async function makeList() {
     const list = { id: repo.newId('sl'), title: `${recipe.display_title || recipe.original_title}`, items: [{ recipe_id: recipe.id, recipe_version_id: version.id, servings: state.servings, title: recipe.display_title || recipe.original_title }], checked: {} };
-    await modifier(async contexte => { await gestesLecture.repo.save('shopping_lists', list, {recettes:[contexte]}); navigate(`/lists/${list.id}`); });
+    return modifier(async contexte => { await gestesLecture.repo.save('shopping_lists', list, {recettes:[contexte]}); navigate(`/lists/${list.id}`); });
   }
 
   async function attachDish(contexte) {
+    const captures=await capturerSelectionRecettes([recipe],ctx,{repo:gestesLecture.repo});
     const options = [...ctx.dishes].sort((a, b) => a.labels.fr.label.localeCompare(b.labels.fr.label)).map((d) => ({ value: d.id, label: d.labels.fr.label }));
     options.push({ value: '__new__', label: t('+ Nouveau plat…') });
     let dishId = await chooseDialog(t('Rattacher cette recette à quel plat ?'), options);
@@ -449,7 +477,8 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
       nouveauPlat = d; dishId = d.id;
     }
     const existing = links.find((l) => l.dish_id === dishId);
-    await gestesLecture.repo.saveBatch({...(nouveauPlat ? {dishes:[nouveauPlat]} : {}),dish_recipe_links:[{ ...(existing || { id: repo.newId('drl'), dish_id: dishId, recipe_id: recipe.id }), state: 'confirmed', proposed_by: 'user', evidence: t('Rattachement manuel'), reviewed_at: repo.nowIso() }]}, {recettes:[contexte]});
+    if(!nouveauPlat){const result=(await executerSelectionRecettes(captures,{action:'rattacher',platId:dishId},{repo:gestesLecture.repo}))[0];if(result.issue!=='succes'){const e=new Error(result.raison);e.code=result.raison;throw e;}}
+    else await gestesLecture.repo.saveBatch({dishes:[nouveauPlat],dish_recipe_links:[{ id: repo.newId('drl'), dish_id: dishId, recipe_id: recipe.id, state: 'confirmed', proposed_by: 'user', evidence: t('Rattachement manuel'), reviewed_at: repo.nowIso() }]}, {recettes:[contexte],conditions:{dishes:[{key:dishId,absente:true}]}});
     toast(t('Recette rattachée au plat')); refresh();
   }
 

@@ -1,4 +1,15 @@
-# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — 0.24.0 EN LIGNE — L2 PUBLIÉ ET VÉRIFIÉ
+# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — 0.24.0 EN LIGNE — L3 REÇU LOCALEMENT
+
+**L3 — Gestion visible : réception locale terminée, publication en préparation.** Branche `l3-gestion-visible`, base publique `fc407df`.
+[Spec](docs/superpowers/specs/2026-10-29-l3-gestion-visible-design.md), [rapport](docs/superpowers/plans/2026-10-29-l3-gestion-visible.md).
+Poursuite et publication autorisées par « et enchaine sur le restant des lots » puis « continu ».
+Modifier/Actions visibles, grille et liste communes, filtres, sélection groupée avec résultats individuels,
+retour à la liste avec recherche/position conservées, contextes Recettes/Sources séparés ; maquettes fournies relues.
+**8547/8547** navigateur (épingle8546, +181 sans retrait), Node232/232, générateur0, syntaxe43 et diff propres.
+Parcours réels :25 +16 mesures, texte200 %, deux onglets, photos/notes après rechargement hors ligne, quatre modules en cache.
+Modifier livre visible/focalisé à390/1280 ; export documentaire TM et réessai après quota corrigés après revue indépendante.
+Cible **0.25.0**, cache `cuisine-os-v0.25.0-1` ; **DB6 et archive3 inchangées, aucun SQL nouveau**.
+La publication L3 reste à vérifier. L4–L10 et E1 restent à réaliser ; le plan complet n’est pas terminé.
 
 **Publication L2 vérifiée — 29 octobre,18 h 18 HAE (22:18:18UTC).** Code `9ec738c`, intégration `fc407df`,
 avance rapide dans `main` puis GitHub Pages construit. **82 fichiers** de production/tests publics identiques au commit.

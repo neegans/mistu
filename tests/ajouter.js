@@ -8,7 +8,7 @@
 // Lot UI-1, vague finale (constat 13) : UNE lecture des clés t() pour les filets i18n — t('…'), t("…") et t(`…`) sans ${…} (un gabarit à expression n'est pas
 // une clé, et une variable non plus) ; F13 la lit sur MODULES_NEUFS, tests/carnet.js (T6) sur ses modules. Son témoin, sur les trois formes, est au bloc F13.
 export const clesT = (src) => [...src.matchAll(/\bt\((['"`])((?:(?!\1)[^\\]|\\.)*)\1/g)].filter((m) => !(m[1] === '`' && m[2].includes('${'))).map((m) => m[2]);
-export const MODULES_NEUFS = ['../src/ui/reprise-import.js', '../src/ui/recipe-edit.js', '../src/ui/corbeille.js', '../src/domain/reperes.js', '../src/domain/reperes-parcours.js', '../src/ui/reperes.js', '../src/ui/reperes-affichage.js', '../src/ui/photos-visibles.js', '../src/ui/photo-gestion.js', '../src/ui/thermomix.js', '../src/ui/cookidoo.js', '../src/ui/thermomix-garde.js', '../src/domain/thermomix.js','../src/ui/cuisson.js', '../src/ui/livre-sans-saisie.js', '../src/ui/photo-page.js', '../src/ui/index-livre.js', '../src/domain/index-livre.js', '../src/ui/coquille.js', '../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js', '../src/sync/fichiers.js', '../src/ui/table-matieres.js', '../src/ui/regroupement.js', '../src/ui/photo-plat.js', '../src/domain/apercu-web.js', '../src/ui/icones.js'];
+export const MODULES_NEUFS = ['../src/ui/navigation-contexte.js', '../src/ui/actions-contenu.js', '../src/ui/bibliotheque-liste.js', '../src/ui/reprise-import.js', '../src/ui/recipe-edit.js', '../src/ui/corbeille.js', '../src/domain/reperes.js', '../src/domain/reperes-parcours.js', '../src/ui/reperes.js', '../src/ui/reperes-affichage.js', '../src/ui/photos-visibles.js', '../src/ui/photo-gestion.js', '../src/ui/thermomix.js', '../src/ui/cookidoo.js', '../src/ui/thermomix-garde.js', '../src/domain/thermomix.js','../src/ui/cuisson.js', '../src/ui/livre-sans-saisie.js', '../src/ui/photo-page.js', '../src/ui/index-livre.js', '../src/domain/index-livre.js', '../src/ui/coquille.js', '../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js', '../src/sync/fichiers.js', '../src/ui/table-matieres.js', '../src/ui/regroupement.js', '../src/ui/photo-plat.js', '../src/domain/apercu-web.js', '../src/ui/icones.js'];
 // CHAINES_NEUVES_AILLEURS reconstituée depuis le code réel (git diff main...HEAD, ensemble main vs HEAD des clés t(),
 // pas seulement les lignes ajoutées : une ligne réécrite pour une autre raison peut porter une chaîne déjà sur main —
 // book.js:'Cuisines', recipe-edit.js:'Cuisines / régions' et import.js:'— Aucun livre (à associer plus tard) —'
@@ -25,7 +25,7 @@ export const MODULES_NEUFS = ['../src/ui/reprise-import.js', '../src/ui/recipe-e
 // livre (book.js) ; le refus « non vide » dit la phrase de main (« Un livre avec des recettes… »), sans entrée en.js jusqu’ici : l’entrée est posée, la
 // chaîne n’est pas neuve.
 export const CHAINES_NEUVES_AILLEURS = {
-  '../src/ui/book.js': ['Pages source', 'Recettes', 'Mots-clés', 'Autre mot-clé', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre',
+  '../src/ui/book.js': ['Voir plus', 'Filtrer les recettes de ce livre', 'Filtrer les pages source', 'Ajouter une recette', 'Ajouter des pages d’index', 'Pages source', 'Recettes', 'Mots-clés', 'Autre mot-clé', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre',
     // Lot G, tâche 6 : la couverture par état (§ 4.2).
     'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Fichier illisible reçu du serveur.', 'Le téléchargement n’a pas abouti.',
     // Lot E, tâche 3a : le refus du geste « Supprimer » quand une lecture tient une ligne du journal de l’édition (D-E23).
@@ -873,11 +873,13 @@ export async function runAjouterTests({ eq, ok }) {
       const avant = await compterActivites();
       const fiche = await renderBook({ id: 'e1' }, {}, ctxDe());
       eq((await compterActivites()) - avant, 1, 'fiche : une ouverture volontaire reste journalisée (open_book)');
-      const menus = [...fiche.querySelectorAll('header details.menu-source')].filter(d => ['Ajouter des pages de sommaire', 'Ajouter des recettes'].includes(d.querySelector('summary')?.textContent));
-      eq(menus.map((d) => d.querySelector('summary').textContent), ['Ajouter des pages de sommaire', 'Ajouter des recettes'], 'fiche : deux gestes nommés en en-tête (§ 9 ; lot UI-1, D-UI-10 : le verbe avant l’outil)');
-      eq([...menus[0].querySelectorAll('button, a')].map((b) => b.textContent), ['Photographier', 'Choisir des photos ou un PDF'], 'fiche : « Ajouter des pages de sommaire » dévoile les deux sources');
-      eq([...menus[1].querySelectorAll('button, a')].map((b) => b.textContent), ['Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main'], 'fiche : « Ajouter des recettes » offre aussi la saisie à la main');
-      eq(menus[1].querySelector('a').getAttribute('href'), '#/recipes/new?edition=e1', 'fiche : la saisie à la main partie d’ici porte le livre (I-F)');
+      const gestes = [...fiche.querySelectorAll('header [data-action]')].filter(n => ['ajouter-index', 'ajouter-recette'].includes(n.dataset.action));
+      eq(gestes.map(n => n.textContent), ['Ajouter des pages d’index', 'Ajouter une recette'], 'L3 fiche : les deux gestes d’ajout sont directs en en-tête');
+      const panneaux = await Promise.all(['index', 'recette'].map(panel => renderBook({id:'e1'}, {panel}, ctxDe())));
+      const menus = panneaux.map(n => n.querySelector('[data-role=ajout-livre]'));
+      eq([...menus[0].querySelectorAll('button, a')].map(n=>n.textContent), ['Photographier', 'Choisir des photos ou un PDF'], 'L3 livre : index expose les deux sources sans sélecteur automatique');
+      eq([...menus[1].querySelectorAll('button, a')].map(n=>n.textContent), ['Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main'], 'L3 livre : recette offre aussi la saisie manuelle');
+      eq(menus[1].querySelector('a').getAttribute('href'), '#/recipes/new?edition=e1', 'L3 livre : la saisie manuelle conserve l’édition');
       ok(![...fiche.querySelectorAll('button')].some((b) => b.textContent === 'Photographier des pages'), 'fiche : l’ancien bouton unique « Photographier des pages » a disparu');
       eq(fiche.querySelector('.accueil-livre'), null, 'fiche : sans ?nouveau, aucun panneau d’accueil');
       eq([...fiche.querySelectorAll('a')].filter((a) => a.textContent === 'Reprendre').length, 0, 'fiche : sans séance ouverte, rien à reprendre');
@@ -3762,37 +3764,30 @@ export async function runAjouterTests({ eq, ok }) {
           editionsById: new Map(editions.map((e) => [e.id, e])), editionLabel: (e) => books.find((b) => b.id === e.book_id)?.title || '',
         };
       };
-      // UI-1 T2 : « Liens web gardés » est une section PLAIN (sectionPlain, D-UI-8) sous le segment Livres, que ces appels nomment par { tab: 'books' }.
-      const bloc = (n) => [...n.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Liens web gardés') || null;
-      const titres = (n) => [...(bloc(n)?.children || [])].filter((c) => c.tagName !== 'H2').map((c) => c.querySelector('h3')?.textContent ?? c.textContent);
-      const apres = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
-      // (a) aucun livre + un signet : l'état vide reste, ET la section suit, avec la carte du signet
-      const seul = signet('rS', 'Saumon au fenouil', { created_at: '2026-10-17T10:00:00.000Z' });
-      let n = await renderLibrary({}, { tab: 'books' }, ctxDe([seul]));
-      eq([n.textContent.includes('Aucun livre pour l’instant.'), !!bloc(n), titres(n), bloc(n)?.querySelector('.item-link.card h3 a')?.getAttribute('href'), apres(n.querySelector('.empty'), bloc(n))],
-        [true, true, ['Saumon au fenouil'], '#/recipes/rS', true], 'Mes livres sans livre : l’état vide ET la section « Liens web gardés » après lui, une carte au titre du signet vers sa fiche (confort, item 1)');
-      // (b) aucun signet : ni une recette tapée sans livre, ni un signet rangé dans un livre, ni une adresse vide ne font une section
-      n = await renderLibrary({}, { tab: 'books' }, ctxDe([{ id: 'rT', original_title: 'Tapée', availability: 'available', edition_id: null }, signet('rL', 'Rangé', { edition_id: 'eX' }), signet('rV', 'Vide', { source_url: '' })]));
-      eq([n.textContent.includes('Aucun livre pour l’instant.'), n.textContent.includes('Liens web gardés')], [true, false], 'Mes livres sans signet : aucune section « Liens web gardés » (rien n’est rendu)');
-      // (c) le plus récent d'abord : created_at, sinon updated_at
-      const ancien = signet('r1', 'Ancien', { created_at: '2026-10-01T10:00:00.000Z' });
-      const recent = signet('r2', 'Récent', { created_at: '2026-10-15T10:00:00.000Z' });
-      eq(titres(await renderLibrary({}, { tab: 'books' }, ctxDe([ancien, recent]))), ['Récent', 'Ancien'], 'Liens web gardés : le plus récent d’abord (created_at)');
-      eq(titres(await renderLibrary({}, { tab: 'books' }, ctxDe([{ ...ancien, updated_at: '2026-10-16T10:00:00.000Z' }, recent]))), ['Récent', 'Ancien'], 'Liens web gardés : created_at prime — « dernier gardé », un favori touché (updated_at) ne réordonne pas la liste (ronde 1)');
-      eq(titres(await renderLibrary({}, { tab: 'books' }, ctxDe([signet('r0', 'Sans date'), signet('r3', 'Modifié seulement', { updated_at: '2026-10-10T10:00:00.000Z' }), ancien, recent]))), ['Récent', 'Modifié seulement', 'Ancien', 'Sans date'],
-        'Liens web gardés : sans created_at, updated_at sert de repli ; sans aucun horodatage, aucune levée et en dernier (ronde 1)');
-      // (d) l'onglet Plats n'a pas la section
-      n = await renderLibrary({}, { tab: 'dishes' }, ctxDe([seul]));
-      eq(n.textContent.includes('Liens web gardés'), false, 'Mes livres, onglet Plats : pas de section « Liens web gardés »');
-      // Repli : un signet sans doc ne lève pas — un lien vers sa fiche, au titre du signet
-      n = await renderLibrary({}, { tab: 'books' }, ctxDe([seul], { sansDoc: ['rS'] }));
-      { const a = bloc(n)?.querySelector('a.btn'); eq([titres(n), a?.getAttribute('href'), a?.textContent], [['Saumon au fenouil'], '#/recipes/rS', 'Saumon au fenouil'], 'Liens web gardés : sans doc, un lien a.btn vers la fiche, jamais une levée'); }
-      // Avec des livres (grille sur une base jetable) : la section suit la grille, et le signet rangé dans un livre n'y est pas
-      await withRepo(async () => {
-        const ed = { id: 'eG', book_id: 'bG', year: 2020, cover_sha256: null };
-        const livre = { id: 'bG', title: 'Grille', author: 'G.', cuisines: [] };
-        const m = await renderLibrary({}, { tab: 'books' }, ctxDe([seul, signet('rL', 'Rangé', { edition_id: 'eG' })], { editions: [ed], books: [livre] }));
-        eq([m.textContent.includes('Aucun livre pour l’instant.'), titres(m), apres(m.querySelector('.grid'), bloc(m))], [false, ['Saumon au fenouil'], true], 'Mes livres avec un livre : la section suit la grille, le signet rangé dans un livre n’y est pas');
+      // L3 : Livres contient les éditions ; les signets restent retrouvables par source Web dans Recettes.
+      const bloc = n => n.querySelector('.bibliotheque-resultats');
+      const titres = n => [...n.querySelectorAll('.bibliotheque-item h3')].map(n=>n.textContent);
+      const recettesWeb = recipes => renderLibrary({}, {tab:'recettes', sources:'web'}, ctxDe(recipes));
+      const seul = signet('rS', 'Saumon au fenouil', {created_at:'2026-10-17T10:00:00.000Z'});
+      let n = await renderLibrary({}, {tab:'books'}, ctxDe([seul]));
+      const seuleRecette = await recettesWeb([seul]);
+      eq([n.textContent.includes('Aucun livre pour l’instant.'), !!bloc(n), titres(seuleRecette), seuleRecette.querySelector('.bibliotheque-item h3 a')?.getAttribute('href'), !!bloc(seuleRecette)],
+        [true, false, ['Saumon au fenouil'], '#/recipes/rS', true], 'L3 : aucun livre inventé ; signet accessible dans Recettes avec sa fiche');
+      n = await recettesWeb([{id:'rT', original_title:'Tapée',availability:'available',edition_id:null},signet('rL','Rangé',{edition_id:'eX'}),signet('rV','Vide',{source_url:''})]);
+      eq([titres(n), n.textContent.includes('Aucune recette ne correspond.')], [[],true], 'L3 : filtre Web exclut saisie, adresse vide et parent absent');
+      const ancien=signet('r1','Ancien',{created_at:'2026-10-01T10:00:00.000Z'}), recent=signet('r2','Récent',{created_at:'2026-10-15T10:00:00.000Z'});
+      eq(titres(await recettesWeb([ancien,recent])), ['Récent','Ancien'], 'L3 Web : ordre temporel sans date de modification');
+      eq(titres(await recettesWeb([{...ancien,updated_at:'2026-10-16T10:00:00.000Z'},recent])), ['Ancien','Récent'], 'L3 Web : tri explicite dernière modification, commun aux sources');
+      eq(titres(await recettesWeb([signet('r0','Sans date'),signet('r3','Modifié seulement',{updated_at:'2026-10-10T10:00:00.000Z'}),ancien,recent])), ['Récent','Modifié seulement','Ancien','Sans date'], 'L3 Web : modification sans création et date inconnue gérées');
+      n = await renderLibrary({}, {tab:'dishes'}, ctxDe([seul]));
+      eq(n.querySelectorAll('.bibliotheque-item').length,0,'L3 : Plats ne duplique pas les signets');
+      n = await renderLibrary({}, {tab:'recettes',sources:'web'}, ctxDe([seul],{sansDoc:['rS']}));
+      {const a=n.querySelector('.bibliotheque-item h3 a');eq([titres(n),a?.getAttribute('href'),a?.textContent],[['Saumon au fenouil'],'#/recipes/rS','Saumon au fenouil'],'L3 : signet sans document projeté, lien et titre conservés');}
+      await withRepo(async()=>{
+        const ed={id:'eG',book_id:'bG',year:2020,cover_sha256:null},livre={id:'bG',title:'Grille',author:'G.',cuisines:[]};
+        const ctx=ctxDe([seul,signet('rL','Rangé',{edition_id:'eG'})],{editions:[ed],books:[livre]});
+        const m=await renderLibrary({},{tab:'books'},ctx),web=await renderLibrary({},{tab:'recettes',sources:'web'},ctx);
+        eq([m.textContent.includes('Aucun livre pour l’instant.'),titres(web),!!m.querySelector('.grid')],[false,['Saumon au fenouil','Rangé'],true],'L3 : édition visible dans Livres ; signets autonome et rangé accessibles dans Recettes');
       });
       eq(EN['Liens web gardés'], 'Saved web links', 'en.js : « Liens web gardés »');
     } finally { setUiLocale(localeAvant); }
@@ -3855,9 +3850,9 @@ export async function runAjouterTests({ eq, ok }) {
     const sw = await lire('../sw.js');
     ok(sw.length > 300 && sw.includes('SHELL'), `statique sw.js : le source est bien lu (${sw.length} caractères, SHELL présent) — sans quoi les inclusions ci-dessous ne prouveraient rien (S4)`);
     for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js', './src/domain/lecture-web.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
-    ok(/VERSION = 'cuisine-os-v0\.24\.0-\d+'/.test(sw), 'sw.js : VERSION 0.24.0');
+    ok(/VERSION = 'cuisine-os-v0\.25\.0-\d+'/.test(sw), 'sw.js : VERSION 0.25.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.24.0', 'APP_VERSION 0.24.0 (lot UI-1, carnet)');
+    eq(APP_VERSION, '0.25.0', 'APP_VERSION 0.25.0 (lot UI-1, carnet)');
     const { GOOGLE_BOOKS } = await import('../src/sync/config.js');
     ok(typeof GOOGLE_BOOKS?.key === 'string' && (GOOGLE_BOOKS.key === '' || /^AIza[0-9A-Za-z_-]{35}$/.test(GOOGLE_BOOKS.key)), 'config : la clé Google Books est vide ou au format d’une clé d’API publique — un test de forme, jamais de valeur (S2/F2)');
   }

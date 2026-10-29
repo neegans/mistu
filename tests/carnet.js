@@ -141,7 +141,7 @@ export async function runCarnetTests({ eq, ok }) {
   await bloc('sources : états vides, NAV, retours, en.js, SHELL', async () => {
     // D-UI-9 : par module, l'ENSEMBLE (trié) des noms d'icône de ses emptyState, et aucun nom hors du jeu (un émoji resté y tomberait) — un ensemble, pas la
     // liste ordonnée : T2 ajoute deux emptyState('assiette', …) à library.js (recettesTab, aImporterTab) sans toucher ce filet ; onze sites à f3672be.
-    const SITES = { 'library.js': ['assiette', 'livres'], 'grocery.js': ['panier'], 'meals.js': ['couverts', 'salade'], 'kitchen.js': ['flocon', 'toque'], 'dish.js': ['assiette'], 'book.js': ['livre-ouvert'], 'search.js': ['loupe'], 'import.js': ['appareil-photo'] };
+    const SITES = { 'library.js': ['assiette', 'livres'], 'grocery.js': ['panier'], 'meals.js': ['couverts', 'salade'], 'kitchen.js': ['flocon', 'toque'], 'dish.js': ['assiette'], 'bibliotheque-liste.js': ['livre-ouvert'], 'search.js': ['loupe'], 'import.js': ['appareil-photo'] };
     // Ronde 1 (M9) : TOUS les modules de src/ui que SHELL sert (emptyState lève sur un nom inconnu : un appel hors des huit modules de SITES planterait son
     // écran) ; le premier argument de chaque appel est un littéral de N'IMPORTE QUELLE forme ('…', "…", `…` sans ${}) dont le texte est un nom du jeu — un
     // émoji, un nom hors du jeu ou une expression (constante, String.fromCodePoint…) tombent dans horsJeu. Rien n'est retiré du texte : un appel laissé
@@ -387,47 +387,32 @@ export async function runCarnetTests({ eq, ok }) {
         const ctx = ctxDe([A, B, C, D, E, F], { versions: [version('rA'), version('rB', { total_minutes: 35 }), version('rC')], editions: [ed], books: [livre] });
         const segment = (r) => texte(r.querySelector('.segmented button.active'));
         const action = (r) => { const a = r.querySelector('header .row.between.top > .row > a'); return a ? [a.className, a.getAttribute('href'), a.textContent] : null; };
-        const titres = (r) => [...r.querySelectorAll('.grille-plats > article.carte-plat h3')].map((h) => h.textContent);
-        const puce = (r, libelle) => [...r.querySelectorAll('button.puce')].find((b) => b.textContent === libelle);
-        const pressees = (r) => [...r.querySelectorAll('button.puce')].map((b) => [b.textContent, b.getAttribute('aria-pressed')]);
+        const titres = (r) => [...r.querySelectorAll('.bibliotheque-item h3')].map((h) => h.textContent);
+        const source = (r,v) => r.querySelector(`input[name=sources][value=${v}]`);
+        const cocher = n => {n.checked=!n.checked;n.dispatchEvent(new Event('change',{bubbles:true}));};
+        const attendreListe = r => r.querySelector('.bibliotheque-resultats').attendreAffichage();
         const n = await renderLibrary({}, {}, ctx, fauxMatchMedia(false));
-        const fragments = []; const geste = () => fragments.push(location.hash); // ronde 1 : le fragment après chaque puce et chaque frappe
-        eq([texte(n.querySelector('header h1')), texte(n.querySelector('header p.muted')), [...n.querySelectorAll('.segmented button')].map((b) => b.textContent), segment(n), action(n), !!n.querySelector('.grille-plats'), titres(n), n.querySelector('header > a')],
-          ['Bibliothèque', 'Tes livres, tes trouvailles, tes recettes.', ['Recettes', 'Livres', 'Plats'], 'Recettes', ['btn primary', '#/add', 'Ajouter une recette'], true, ['Plat rE', 'Plat rB', 'Plat rC', 'Plat rA'], null],
-          'renderLibrary({}) : « Bibliothèque », son sous-titre, trois segments, Recettes ACTIF par défaut, « Ajouter une recette » → #/add en tête, la grille triée par dernière modification (E, B, C, A) ; la référence D est DEHORS, le signet non lu E DEDANS (B-I-5) ; aucun retour « ← … » sur Recettes');
-        eq([n.querySelector('.segmented')?.classList.contains('onglets'), !!n.querySelector('.filtre-recettes > label.champ-recherche > input[type="search"]'), !!n.querySelector('.filtre-recettes > label.champ-recherche > .icone')],
-          [true, true, true], 'Bibliothèque (fidélité aux maquettes) : segments en onglets soulignés (.segmented.onglets) ; recherche avec sa loupe et filtres sur une même rangée (.filtre-recettes)');
-        const carteE = n.querySelector('.grille-plats > article.carte-plat:has(h3 a[href="#/recipes/rE"])');
-        eq([carteE?.className, texte(carteE?.querySelector('.carte-plat-source')), [...(carteE?.querySelectorAll('.carte-plat-badges > *') || [])].map((b) => b.textContent), texte(n.querySelector('article.carte-plat:has(h3 a[href="#/recipes/rB"]) .carte-plat-source')), texte(n.querySelector('article.carte-plat:has(h3 a[href="#/recipes/rC"]) .carte-plat-source'))],
-          ['item-link carte-plat sans-photo', 'web.test', ['Lien web'], 'web.test', 'Le livre — A. · web.test'],
-          'un signet non lu : carte sans photo, « Du web » sans durée (maquettes : plus d’hôte sur la carte), badge « Lien web » ; une recette web lue porte sa durée ; C (un livre ET une adresse) dit le web, l’adresse avant le livre');
-        puce(n, 'De mes livres').click(); await attendre(() => titres(n).length === 2, 'puce « De mes livres »'); geste();
-        eq([titres(n), pressees(n)], [['Plat rC', 'Plat rA'], [['Toutes', 'false'], ['De mes livres', 'true'], ['Du web', 'false']]], '« De mes livres » = edition_id non nul (C puis A) ; une seule puce pressée (aria-pressed)');
-        puce(n, 'Du web').click(); await attendre(() => titres(n).length === 3, 'puce « Du web »'); geste();
-        eq(titres(n), ['Plat rE', 'Plat rB', 'Plat rC'], '« Du web » = source_url non nul (E, B, C) : une fiche qui a les deux est dans les deux (B-M-7) — un filtre de DONNÉES, jamais un appel');
-        puce(n, 'Toutes').click(); await attendre(() => titres(n).length === 4, 'puce « Toutes »'); geste();
-        const champ = n.querySelector('.filtre-recettes input[type="search"]');
-        // Après chaque frappe, l'attente borne le redessin (asynchrone : il relit les lignes files manquantes) ; au-delà, les titres du moment sont rendus tels quels (le diff se lit dans eq).
-        const taper = async (q, attendu) => { champ.value = q; champ.dispatchEvent(new Event('input', { bubbles: true })); try { await attendre(() => JSON.stringify(titres(n)) === JSON.stringify(attendu), `filtre « ${q} »`); } catch { /* lu tel quel */ } geste(); return titres(n); };
-        eq([champ.getAttribute('placeholder'), champ.getAttribute('aria-label'), await taper('rb', ['Plat rB']), await taper('Pomme', ['Plat rB', 'Plat rC', 'Plat rA']), await taper('le livre', ['Plat rC', 'Plat rA']), await taper('', ['Plat rE', 'Plat rB', 'Plat rC', 'Plat rA'])],
-          ['Une recette, un ingrédient…', 'Une recette, un ingrédient…', ['Plat rB'], ['Plat rB', 'Plat rC', 'Plat rA'], ['Plat rC', 'Plat rA'], ['Plat rE', 'Plat rB', 'Plat rC', 'Plat rA']],
-          'le champ « Une recette, un ingrédient… » filtre LOCALEMENT sur le titre, les ingrédients de la version courante (« Pomme », casse ignorée : A, B, C) et le titre du livre ; vidé, tout revient ; le champ porte son nom accessible (aria-label)');
-        eq(fragments, Array(7).fill(hashT2), 'les trois puces et les quatre frappes ne touchent pas l’adresse de la page : aucune navigation (filtres LOCAUX, ronde 1) — l’absence d’appel est affirmée en fin de bloc');
-        const pied = n.querySelector('a[data-role="a-importer"]');
-        eq([pied?.getAttribute('href'), pied?.textContent, !!(n.querySelector('.grille-plats').compareDocumentPosition(pied) & Node.DOCUMENT_POSITION_FOLLOWING)], ['#/library?tab=a-importer', 'Recettes de mes livres à importer →', true],
-          'pied : « Recettes de mes livres à importer → » vers ?tab=a-importer, sous la grille, parce qu’une référence sans adresse existe');
-        const sansRef = await renderLibrary({}, {}, ctxDe([A, B], { versions: [version('rA')], editions: [ed], books: [livre] }), fauxMatchMedia(false));
-        eq(sansRef.querySelector('a[data-role="a-importer"]'), null, 'pied absent quand aucune référence n’est à importer (rien d’inventé)');
-        // Les segments : ?tab=books et ?tab=dishes d'aujourd'hui restent valides ; ?tab=recettes aussi ; un ?tab inconnu vaut Recettes.
-        const livres = await renderLibrary({}, { tab: 'books' }, ctx, fauxMatchMedia(false));
-        const plats = await renderLibrary({}, { tab: 'dishes' }, ctx, fauxMatchMedia(false));
-        const recettes = await renderLibrary({}, { tab: 'recettes' }, ctx, fauxMatchMedia(false));
-        const inconnu = await renderLibrary({}, { tab: 'zzz' }, ctx, fauxMatchMedia(false));
-        eq([segment(livres), action(livres), !!livres.querySelector('.grid.livres'), livres.querySelectorAll('.grid').length, !!livres.querySelector('.grille-plats'), segment(plats), action(plats), !!plats.querySelector('.grille-plats'), segment(recettes), !!recettes.querySelector('.grille-plats'), segment(inconnu), titres(inconnu).length, livres.querySelector('header > a')],
-          ['Livres', ['btn primary', '#/add/livre', 'Ajouter un livre'], true, 1, false, 'Plats', ['btn', '#/corbeille', 'Corbeille'], false, 'Recettes', true, 'Recettes', 4, null],
-          '?tab=books : Livres actif, « Ajouter un livre » → #/add/livre (neuf, H-15), la grille des couvertures porte .grid.livres (§ 3.3 : minmax 170 px, règle de T1) et reste la seule .grid ; ?tab=dishes : Plats actif, accès à la corbeille ; ?tab=recettes et un ?tab inconnu : la grille des plats ; aucun retour « ← … » sous Livres');
-        eq([[...livres.querySelectorAll('section.plain > h2')].map((h) => h.textContent), livres.querySelectorAll('section.card').length, livres.querySelector('section.plain article.item-link.card h3 a')?.getAttribute('href')],
-          [['Liens web gardés'], 0, '#/recipes/rB'], 'sous Livres : « Liens web gardés » (B et E, signets sans livre, en carte horizontale) est une section PLAIN ; aucune section .card (D-UI-8)');
+        const fragments = []; const geste = () => fragments.push(location.hash);
+        eq([texte(n.querySelector('header h1')), texte(n.querySelector('header p.muted')), [...n.querySelectorAll('.segmented button')].map(b=>b.textContent),segment(n),action(n),titres(n)],
+          ['Bibliothèque','Tes livres, tes trouvailles, tes recettes.',['Recettes','Livres','Plats'],'Recettes',['btn primary','#/add','Ajouter une recette'],['Plat rD','Plat rF','Plat rE','Plat rB','Plat rC','Plat rA']], 'L3 bibliothèque : titres, segments, action et références incluses dans ordre réel');
+        eq([n.querySelector('.segmented').classList.contains('onglets'),!!n.querySelector('.filtre-recettes > label.champ-recherche > input'),!!n.querySelector('.champ-recherche .icone')],[true,true,true],'L3 bibliothèque : recherche avec loupe et filtres nommés');
+        const carteE=n.querySelector('article:has(h3 a[href="#/recipes/rE"])');
+        eq([texte(carteE?.querySelector('.muted')),texte(carteE?.querySelector('.badge')),texte(n.querySelector('article.carte-plat:has(h3 a[href="#/recipes/rC"]) .carte-plat-source'))],['web.test','Lien web','Le livre — A. · web.test'],'L3 : provenance réelle et signet conservés');
+        cocher(source(n,'livres'));await attendreListe(n);geste();eq(titres(n),['Plat rD','Plat rF','Plat rC','Plat rA'],'L3 : livre contient recettes et références');
+        cocher(source(n,'web'));await attendreListe(n);geste();eq(titres(n),['Plat rD','Plat rF','Plat rE','Plat rB','Plat rC','Plat rA'],'L3 : union sources livre et web');
+        cocher(source(n,'livres'));await attendreListe(n);geste();eq(titres(n),['Plat rE','Plat rB','Plat rC'],'L3 : source web réelle y compris livre');
+        cocher(source(n,'web'));await attendreListe(n);
+        const champ=n.querySelector('input[name=q]');
+        const taper=async(q)=>{champ.value=q;champ.dispatchEvent(new Event('input',{bubbles:true}));await attendreListe(n);geste();return titres(n);};
+        eq([champ.placeholder,champ.getAttribute('aria-label'),await taper('rb'),await taper('Pomme'),await taper('le livre'),await taper('')],['Une recette, un ingrédient…','Une recette, un ingrédient…',['Plat rB'],['Plat rB','Plat rC','Plat rA'],['Plat rD','Plat rF','Plat rC','Plat rA'],['Plat rD','Plat rF','Plat rE','Plat rB','Plat rC','Plat rA']],'L3 : texte titre ingrédient livre sans appel');
+        eq(fragments,Array(7).fill(hashT2),'L3 : filtres locaux sans navigation');
+        eq(n.querySelector('a[data-role=a-importer]'),null,'L3 : références directement visibles, pas de pied séparé');
+        const sansRef=await renderLibrary({}, {}, ctxDe([A,B],{versions:[version('rA')],editions:[ed],books:[livre]}),fauxMatchMedia(false));
+        eq(titres(sansRef).length,2,'L3 : aucune référence inventée');
+        const livres=await renderLibrary({},{tab:'books'},ctx,fauxMatchMedia(false)),plats=await renderLibrary({},{tab:'dishes'},ctx,fauxMatchMedia(false));
+        const recettes=await renderLibrary({},{tab:'recettes'},ctx,fauxMatchMedia(false)),inconnu=await renderLibrary({},{tab:'zzz'},ctx,fauxMatchMedia(false));
+        eq([segment(livres),action(livres),!!livres.querySelector('.grid.livres'),!!livres.querySelector('.grille-plats'),segment(plats),action(plats),segment(recettes),segment(inconnu),titres(inconnu).length],['Livres',['btn primary','#/add/livre','Ajouter un livre'],true,false,'Plats',['btn','#/corbeille','Corbeille'],'Recettes','Recettes',6],'L3 : segments historiques et défaut conservés');
+        eq([[...livres.querySelectorAll('section.plain > h2')].map(h=>h.textContent),livres.querySelectorAll('section.card').length],[[],0],'L3 : Livres contient uniquement éditions');
         // Le bouton mobile : a.btn.primary.big.block « Ajouter une recette » sous la grille, [hidden] ≥ 760 px (matchMedia injecté). Ronde 1 : l'abonnement à
         // `change` attend le MONTAGE (setTimeout 0 puis isConnected : app.js monte la route juste après son rendu) et il n'y en a jamais qu'UN dans l'app (le rendu
         // monté retire celui du précédent) — le MediaQueryList ne retient aucun rendu détaché (constat de la revue : N rendus, N écouteurs, N arbres retenus).
@@ -436,7 +421,7 @@ export async function runCarnetTests({ eq, ok }) {
         const nonMonte = await renderLibrary({}, {}, ctx, mm);
         await tick(); await tick();
         eq([bouton(nonMonte)?.className, bouton(nonMonte)?.getAttribute('href'), bouton(nonMonte)?.textContent, bouton(nonMonte)?.hidden, bouton(n)?.hidden, !!(nonMonte.querySelector('.grille-plats').compareDocumentPosition(bouton(nonMonte)) & Node.DOCUMENT_POSITION_FOLLOWING),
-          bouton(nonMonte)?.parentElement === nonMonte.querySelector('.grille-plats')?.parentElement, mm.ecouteurs.length],
+          bouton(nonMonte)?.parentElement === nonMonte, mm.ecouteurs.length],
           ['btn primary big block', '#/add', 'Ajouter une recette', true, false, true, true, 0],
           '« Ajouter une recette » répété sous la grille en a.btn.primary.big.block, sans enveloppe à marge (caché, il ne laisse aucune bande vide) : [hidden] quand (min-width: 760px) est vraie, visible dessous ; un rendu jamais monté ne pose AUCUN écouteur');
         const scene = nouvelleScene();
@@ -463,54 +448,24 @@ export async function runCarnetTests({ eq, ok }) {
         const boutonDefaut = parDefaut instanceof Error ? null : bouton(parDefaut);
         eq([parDefaut instanceof Error ? `${parDefaut.name}: ${parDefaut.message}` : null, !!(parDefaut instanceof Error ? null : parDefaut.querySelector('.grille-plats')), boutonDefaut?.hidden ?? null],
           [null, true, window.matchMedia('(min-width: 760px)').matches], 'renderLibrary sans deps (le chemin de app.js) : le vrai window.matchMedia, sans levée ; la grille et le bouton mobile, [hidden] selon la vraie largeur');
-        // Vide : seules des références → l'état vide « Aucune recette pour l’instant. » + « Ajouter une recette », aucune grille — et le pied, puisque des références attendent.
-        const vide = await renderLibrary({}, {}, ctxDe([D, F], { editions: [ed], books: [livre] }), fauxMatchMedia(false));
-        eq([texte(vide.querySelector('.empty p')), vide.querySelector('.empty a.btn.primary')?.getAttribute('href'), texte(vide.querySelector('.empty a.btn.primary')), !!vide.querySelector('.grille-plats'), vide.querySelector('a[data-role="a-importer"]')?.getAttribute('href')],
-          ['Aucune recette pour l’instant.', '#/add', 'Ajouter une recette', false, '#/library?tab=a-importer'], 'vide (seules des références) : « Aucune recette pour l’instant. » + « Ajouter une recette », aucune grille, le pied « à importer » reste');
-        // ?tab=a-importer : segment Recettes actif, retour « ← Recettes », la liste compacte groupée par livre, « {titre} · p. N · À importer » → l'écran d'import ciblé.
-        const ai = await renderLibrary({}, { tab: 'a-importer' }, ctx, fauxMatchMedia(false));
-        const retour = ai.querySelector('header > a');
-        eq([segment(ai), action(ai), retour?.getAttribute('href'), retour?.textContent, texte(ai.querySelector('section.plain > h2')), [...ai.querySelectorAll('section.plain h3')].map((h) => h.textContent), [...ai.querySelectorAll('section.plain li > a')].map((a) => [a.getAttribute('href'), a.textContent]), ai.querySelectorAll('section.card').length, !!ai.querySelector('.grille-plats')],
-          ['Recettes', ['btn primary', '#/add', 'Ajouter une recette'], '#/library?tab=recettes', '← Recettes', 'Recettes de mes livres à importer', ['Le livre'], [['#/recipes/rD/importer', 'Plat rD · p. 58 · À importer'], ['#/recipes/rF/importer', 'Plat rF · À importer']], 0, false],
-          '?tab=a-importer : segment Recettes actif, retour « ← Recettes » vers /library?tab=recettes (B-M-4), section plain « Recettes de mes livres à importer » groupée par livre, une ligne « {titre} · p. N · À importer » → #/recipes/<id>/importer par référence sans adresse (page d’abord, puis titre) ; le signet E n’y est pas');
-        // Ajout de l’implémenteur (T2, survivant M22 : estAImporter sans « sans adresse ») : un signet RANGÉ dans un livre (reference_only, adresse, livre) est une
-        // carte de la grille, jamais une ligne « à importer » ni une raison d’offrir le pied (le signet E, lui, n’a pas de livre : il ne distinguait pas les deux).
-        const G = fiche('rG', { edition_id: 'e1', availability: 'reference_only', source_url: 'https://web.test/g', printed_page: 12 });
-        const avecG = await renderLibrary({}, { tab: 'a-importer' }, ctxDe([D, G], { editions: [ed], books: [livre] }), fauxMatchMedia(false));
-        const seulG = await renderLibrary({}, {}, ctxDe([G], { editions: [ed], books: [livre] }), fauxMatchMedia(false));
-        eq([[...avecG.querySelectorAll('section.plain li > a')].map((a) => a.getAttribute('href')), titres(seulG), seulG.querySelector('a[data-role="a-importer"]')], [['#/recipes/rD/importer'], ['Plat rG'], null],
-          'un signet rangé dans un livre est dans la grille (carte), jamais dans la liste « à importer » ni dans le pied (seule une référence SANS adresse est à importer)');
-        // Ronde 1 : l'ORDRE de la liste « à importer » — deux livres insérés à rebours de l'alphabet, des pages insérées à rebours, deux références sans page aux
-        // titres inversés : les livres par titre, puis dans chacun la page d'abord, puis le titre (l'ordre de la base ne passe jamais).
-        const livreZ = { id: 'bz', title: 'Zeste' }; const edZ = { id: 'ez', book_id: 'bz' }; const livreA = { id: 'ba', title: 'Agrumes' }; const edA = { id: 'ea', book_id: 'ba' };
-        const ref = (id, editionId, titre, page = null) => fiche(id, { edition_id: editionId, availability: 'reference_only', original_title: titre, printed_page: page });
-        const ordre = await renderLibrary({}, { tab: 'a-importer' }, ctxDe([ref('z1', 'ez', 'Agneau', 90), ref('z2', 'ez', 'Zucchini', 12), ref('z3', 'ez', 'Tarte'), ref('z4', 'ez', 'Brioche'), ref('a1', 'ea', 'Citron', 40), ref('a2', 'ea', 'Orange', 5)],
-          { editions: [edZ, edA], books: [livreZ, livreA] }), fauxMatchMedia(false));
-        eq([[...ordre.querySelectorAll('section.plain h3')].map((h) => h.textContent), [...ordre.querySelectorAll('section.plain > .stack')].map((s) => [...s.querySelectorAll('li > a')].map((a) => a.textContent))],
-          [['Agrumes', 'Zeste'], [['Orange · p. 5 · À importer', 'Citron · p. 40 · À importer'], ['Zucchini · p. 12 · À importer', 'Agneau · p. 90 · À importer', 'Brioche · À importer', 'Tarte · À importer']]],
-          '?tab=a-importer : les livres par ordre alphabétique (Agrumes avant Zeste, insérés à rebours), puis dans chaque livre la page d’abord (12 avant 90) et le titre ensuite (Brioche avant Tarte) — jamais l’ordre de la base');
-        // Vague finale (constats 5, 9 et 10) : un titre de livre qui n'est pas une chaîne (ligne books reçue ou restaurée : title 42) ne fait plus tomber ?tab=a-importer
-        // ni le segment Livres (tri par localeCompare) — il est dit en texte ; la page d'une ligne « à importer » suit la règle du badge (pageAffichable) : une page
-        // hostile (5 000 caractères, « 12 » en texte) est tue, jamais rendue telle quelle.
-        const livre42 = { id: 'b42', title: 42 }; const ed42 = { id: 'e42', book_id: 'b42' };
-        // Le livre au titre numérique vient en SECOND (références, éditions) : le tri par insertion de V8 le prend alors pour pivot — `42.localeCompare` est appelé
-        // (avec lui en premier, le comparateur ne l'appelait que sur la chaîne d'en face, et le défaut restait caché : mesuré au rouge de la vague).
-        const ctx42 = ctxDe([ref('n2', 'ea', 'Citron', '12'), ref('n3', 'ea', 'Orange', 5), ref('n1', 'e42', 'Nougat', 'x'.repeat(5000))], { editions: [edA, ed42], books: [livreA, livre42] });
-        const rendu42 = async (tab) => { try { return await renderLibrary({}, { tab }, ctx42, fauxMatchMedia(false)); } catch (e) { return `${e?.name}: ${e?.message}`; } };
-        const [ai42, livres42] = [await rendu42('a-importer'), await rendu42('books')];
-        eq([typeof ai42 === 'string' ? ai42 : [...ai42.querySelectorAll('section.plain h3')].map(texte), typeof ai42 === 'string' ? null : [...ai42.querySelectorAll('section.plain li > a')].map(texte),
-          typeof livres42 === 'string' ? livres42 : [...livres42.querySelectorAll('.grid.livres .cover .title')].map(texte)],
-          [['42', 'Agrumes'], ['Nougat · À importer', 'Orange · p. 5 · À importer', 'Citron · À importer'], ['42', 'Agrumes']],
-          '?tab=a-importer et Livres (vague finale) : un titre de livre numérique (42) est rendu en texte et trié sans lever ; une page hostile (5 000 caractères, « 12 » en texte) n’est pas dite, « p. 5 » l’est');
-        // Ronde 1 : une référence sans adresse NI livre (son livre a disparu) n'est pas « à importer » et n'offre pas le pied (où elle doit paraître : au chef
-        // d'orchestre, D-T2-d) ; sans aucune référence, la liste le dit en propre (D-T2-c).
-        const O = fiche('rO', { availability: 'reference_only' });
-        const avecO = await renderLibrary({}, { tab: 'a-importer' }, ctxDe([D, O], { editions: [ed], books: [livre] }), fauxMatchMedia(false));
-        const seulO = await renderLibrary({}, {}, ctxDe([A, O], { versions: [version('rA')], editions: [ed], books: [livre] }), fauxMatchMedia(false));
-        const rien = await renderLibrary({}, { tab: 'a-importer' }, ctxDe([A], { versions: [version('rA')], editions: [ed], books: [livre] }), fauxMatchMedia(false));
-        eq([[...avecO.querySelectorAll('section.plain li > a')].map((a) => a.getAttribute('href')), seulO.querySelector('a[data-role="a-importer"]'), texte(rien.querySelector('.empty p')), texte(rien.querySelector('header > a'))],
-          [['#/recipes/rD/importer'], null, 'Rien à importer pour l’instant.', '← Recettes'],
-          'une référence sans adresse ni livre n’est ni « à importer » ni une raison d’offrir le pied ; ?tab=a-importer sans référence : « Rien à importer pour l’instant. » (plus « Aucune recette »), avec son retour');
+        const vide=await renderLibrary({},{},ctxDe([D,F],{editions:[ed],books:[livre]}),fauxMatchMedia(false));
+        eq([!!vide.querySelector('.empty'),titres(vide)], [false,['Plat rD','Plat rF']],'L3 : une bibliothèque de références reste une bibliothèque');
+        const ai=await renderLibrary({},{tab:'a-importer'},ctx,fauxMatchMedia(false));
+        eq([segment(ai),titres(ai),source(ai,'livres').checked,ai.querySelector('input[name=disponibilites][value=reference_only]').checked],['Recettes',['Plat rD','Plat rF'],true,true],'L3 : ancienne adresse applique filtre références de livres');
+        const G=fiche('rG',{edition_id:'e1',availability:'reference_only',source_url:'https://web.test/g',printed_page:12});
+        const avecG=await renderLibrary({},{tab:'a-importer'},ctxDe([D,G],{editions:[ed],books:[livre]}),fauxMatchMedia(false));
+        const seulG=await renderLibrary({},{},ctxDe([G],{editions:[ed],books:[livre]}),fauxMatchMedia(false));
+        eq([titres(avecG),titres(seulG)],[['Plat rD','Plat rG'],['Plat rG']],'L3 : référence web rangée dans livre visible dans filtre référence');
+        const livreZ={id:'bz',title:'Zeste'},edZ={id:'ez',book_id:'bz'},livreA={id:'ba',title:'Agrumes'},edA={id:'ea',book_id:'ba'};
+        const ref=(id,editionId,titre,page=null)=>fiche(id,{edition_id:editionId,availability:'reference_only',original_title:titre,printed_page:page});
+        const ordre=await renderLibrary({},{tab:'a-importer',tri:'titre'},ctxDe([ref('z1','ez','Agneau',90),ref('z2','ez','Zucchini',12),ref('z3','ez','Tarte'),ref('z4','ez','Brioche'),ref('a1','ea','Citron',40),ref('a2','ea','Orange',5)],{editions:[edZ,edA],books:[livreZ,livreA]}),fauxMatchMedia(false));
+        eq(titres(ordre),['Agneau','Brioche','Citron','Orange','Tarte','Zucchini'],'L3 : tri titre stable références de plusieurs livres');
+        const livre42={id:'b42',title:42},ed42={id:'e42',book_id:'b42'};
+        const ctx42=ctxDe([ref('n2','ea','Citron','12'),ref('n3','ea','Orange',5),ref('n1','e42','Nougat','x'.repeat(5000))],{editions:[edA,ed42],books:[livreA,livre42]});
+        const ai42=await renderLibrary({},{tab:'a-importer'},ctx42,fauxMatchMedia(false)),livres42=await renderLibrary({},{tab:'books'},ctx42,fauxMatchMedia(false));
+        eq([titres(ai42),[...livres42.querySelectorAll('.cover .title')].map(texte),ai42.textContent.includes('x'.repeat(50)),ai42.textContent.includes('p. 5')],[['Citron','Nougat','Orange'],['42','Agrumes'],false,true],'L3 : titre numérique sûr et pages hostiles absentes');
+        const O=fiche('rO',{availability:'reference_only'}),avecO=await renderLibrary({},{tab:'a-importer'},ctxDe([D,O],{editions:[ed],books:[livre]}),fauxMatchMedia(false)),seulO=await renderLibrary({},{},ctxDe([A,O],{versions:[version('rA')],editions:[ed],books:[livre]}),fauxMatchMedia(false)),rien=await renderLibrary({},{tab:'a-importer'},ctxDe([A],{versions:[version('rA')],editions:[ed],books:[livre]}),fauxMatchMedia(false));
+        eq([titres(avecO),titres(seulO),texte(rien.querySelector('.empty p'))],[['Plat rD'],['Plat rO','Plat rA'],'Aucune recette ne correspond.'],'L3 : référence sans livre visible et filtre livres strict');
         // Ronde 1 : le repli created_at du tri (une fiche sans updated_at se range par sa création ; sans horodatage, en dernier) ; le filtre lit display_title.
         const R1 = fiche('rR1', { updated_at: null, created_at: '2026-10-25T00:00:00.000Z' }); const R2 = fiche('rR2', { updated_at: null, created_at: null });
         const R3 = fiche('rR3', { display_title: 'Gâteau renommé' }); const R4 = fiche('rR4', { updated_at: '2026-10-24T00:00:00.000Z' });
@@ -525,11 +480,11 @@ export async function runCarnetTests({ eq, ok }) {
         champTri.value = 'introuvable'; champTri.dispatchEvent(new Event('input', { bubbles: true }));
         try { await attendre(() => titres(tri).length === 0 && !!tri.querySelector('[data-role="aucune-correspondance"]'), 'filtre « introuvable »'); } catch { /* lu tel quel */ }
         const aucune = tri.querySelector('[data-role="aucune-correspondance"]');
-        const [rienTexte, rienClasse, rienDansGrille] = [texte(aucune), aucune?.className ?? null, aucune?.parentElement === tri.querySelector('.grille-plats')];
+        const [rienTexte, rienClasse, rienDansGrille] = [texte(aucune?.querySelector('p')), aucune?.className ?? null, aucune?.parentElement === tri.querySelector('.grille-plats')];
         champTri.value = ''; champTri.dispatchEvent(new Event('input', { bubbles: true }));
         try { await attendre(() => titres(tri).length === 4, 'filtre vidé'); } catch { /* lu tel quel */ }
         eq([rienTexte, rienClasse, rienDansGrille, tri.querySelector('[data-role="aucune-correspondance"]'), titres(tri).length],
-          ['Aucune recette ne correspond.', 'muted', true, null, 4],
+          ['Aucune recette ne correspond.', 'empty', false, null, 4],
           'grille (vague finale) : un filtre qui ne retient rien dit « Aucune recette ne correspond. » (p.muted dans la grille), et le message part quand le filtre est vidé');
         BU.revoquerUrlsDeBlob();
       }));
@@ -545,7 +500,7 @@ export async function runCarnetTests({ eq, ok }) {
         try {
           const n = await renderLibrary({}, {}, ctxDe(recettes), fauxMatchMedia(false));
           scene.append(n);
-          const cartes = () => [...n.querySelectorAll('.grille-plats > article.carte-plat')];
+          const cartes = () => [...n.querySelectorAll('.grille-plats article.carte-plat')];
           const voirPlus = () => [...n.querySelectorAll('button')].find((b) => b.textContent === 'Voir plus') || null;
           const srcs = () => cartes().map((c) => c.querySelector('.carte-photo img.plat-vignette')?.getAttribute('src'));
           eq([cartes().length, lectures.length, new Set(lectures).size, cartes()[0]?.querySelector('h3')?.textContent, cartes()[59]?.querySelector('h3')?.textContent, srcs().every((u) => typeof u === 'string' && u.startsWith('blob:')), voirPlus()?.className, L.CARTES_PAR_PAGE],
@@ -585,7 +540,7 @@ export async function runCarnetTests({ eq, ok }) {
         db.getMany = (store, keys) => { const p = vraiGetMany(store, keys); if (store === 'files') enVol.push(p); return p; };
         try {
           const n = await renderLibrary({}, {}, ctxDe(recettes), fauxMatchMedia(false));
-          const titres = () => [...n.querySelectorAll('.grille-plats > article.carte-plat h3')].map((h) => h.textContent);
+          const titres = () => [...n.querySelectorAll('.grille-plats article.carte-plat h3')].map((h) => h.textContent);
           const champ = n.querySelector('.filtre-recettes input[type="search"]');
           champ.value = 'photo 0'; champ.dispatchEvent(new Event('input', { bubbles: true })); // Photo 00 à 09 : pas encore lues — une lecture part
           champ.value = 'photo 69'; champ.dispatchEvent(new Event('input', { bubbles: true })); // déjà lue : aucune lecture
@@ -629,11 +584,9 @@ export async function runCarnetTests({ eq, ok }) {
         try {
           // rx plus récente que ry : l'ordre attendu vient du tri, jamais de la stabilité d'Array.prototype.sort sur des dates égales (rév. 2).
           const en = await renderLibrary({}, {}, ctxDe([fiche('rx', { source_url: 'https://web.test/x', updated_at: '2026-10-24T00:00:00.000Z' }), fiche('ry', { edition_id: 'e1' }), fiche('rz', { edition_id: 'e1', availability: 'reference_only', printed_page: 3 })], { versions: [version('rx', { total_minutes: 35 }), version('ry', { prep_minutes: 5, cook_minutes: 5 })], editions: [ed], books: [livre] }), fauxMatchMedia(false));
-          eq([texte(en.querySelector('header h1')), texte(en.querySelector('header p.muted')), [...en.querySelectorAll('.segmented button')].map((b) => b.textContent), [...en.querySelectorAll('button.puce')].map((b) => b.textContent), [...en.querySelectorAll('.carte-plat-source')].map(texte), texte(en.querySelector('a[data-role="a-importer"]')), en.querySelector('.filtre-recettes input[type="search"]')?.getAttribute('placeholder') ?? null],
-            ['Library', 'Your books, your finds, your recipes.', ['Recipes', 'Books', 'Dishes'], ['All', 'From my books', 'From the web'], ['web.test', 'Le livre — A.'], 'Recipes from my books to import →', 'A recipe, an ingredient…'],
-            'en : en-tête, segments, puces, lignes de source, pied et champ rendus par t() (la durée reste formatMinutes)');
-          const enAI = await renderLibrary({}, { tab: 'a-importer' }, ctxDe([fiche('rz', { edition_id: 'e1', availability: 'reference_only', printed_page: 3 })], { editions: [ed], books: [livre] }), fauxMatchMedia(false));
-          eq([texte(enAI.querySelector('header > a')), texte(enAI.querySelector('section.plain > h2')), texte(enAI.querySelector('section.plain li > a'))], ['← Recipes', 'Recipes from my books to import', 'Plat rz · p. 3 · To import'], 'en : la liste « à importer » (retour, titre, ligne) rendue par t()');
+          eq([texte(en.querySelector('header h1')),texte(en.querySelector('header p.muted')),[...en.querySelectorAll('.segmented button')].map(b=>b.textContent),[...en.querySelectorAll('fieldset input[name=sources]')].map(n=>n.parentElement.textContent),en.querySelector('input[name=q]')?.placeholder],['Library','Your books, your finds, your recipes.',['Recipes','Books','Dishes'],['From my books','From the web','Created with AI','Personal'],'A recipe, an ingredient…'],'L3 en : titres, sources et recherche traduits');
+          const enAI=await renderLibrary({},{tab:'a-importer'},ctxDe([fiche('rz',{edition_id:'e1',availability:'reference_only',printed_page:3})],{editions:[ed],books:[livre]}),fauxMatchMedia(false));
+          eq([texte(enAI.querySelector('header > a')),enAI.querySelector('input[name=sources][value=livres]').checked,enAI.querySelector('input[name=disponibilites][value=reference_only]').checked,texte(enAI.querySelector('.badge'))],['← Recipes',true,true,'To import · p. 3'],'L3 en : ancien lien initialise références et badge traduit');
         } finally { setUiLocale('fr'); }
       }));
       // Ronde 1 (I-UI-1) : rien dans tout le bloc n'a appelé le réseau — ni le filtre local, ni les puces (« Du web » comprise), ni « Voir plus », ni un rendu.
@@ -699,11 +652,11 @@ export async function runCarnetTests({ eq, ok }) {
       eq(mmL.requetes, ['(min-width: 760px)'], 'fiche T3 : la largeur est demandée au matchMedia INJECTÉ, par la requête de D-UI-6');
       const tete = q(pL, '[data-role="fiche-tete"]'); const details = q(pL, '[data-role="autres-gestes"]'); const corps = q(pL, '.recipe-body');
       eq([q(pL, 'header h1')?.classList.contains('titre-fiche'), q(pL, 'header a.muted')?.textContent, q(pL, 'header a.muted')?.getAttribute('href')], [true, '← Bibliothèque', '#/library'], 'fiche T3 : h1.titre-fiche (classeTitre) ; retour « ← Bibliothèque » → #/library');
-      eq([tete?.classList.contains('two-col'), [...(tete?.children ?? [])].map((c) => c.dataset.role || (c.classList.contains('fiche-photo') ? 'fiche-photo' : null))], [true, ['fiche-etat', 'fiche-photo', 'fiche-gestes']], 'fiche T3 : .fiche-tete.two-col porte, dans cet ordre, l’état, l’emplacement de la photo, les gestes (en étroit, la photo passe avant les repères)');
+      eq([tete?.classList.contains('two-col'), [...(tete?.children ?? [])].map((c) => c.dataset.role || (c.classList.contains('fiche-photo') ? 'fiche-photo' : null))], [true, ['fiche-etat', 'fiche-photo']], 'fiche T3 : .fiche-tete.two-col porte, dans cet ordre, l’état, l’emplacement de la photo, les gestes (en étroit, la photo passe avant les repères)');
       eq([q(tete, ':scope > .fiche-photo')?.contains(q(tete, '[data-role="emplacement-photo-plat"]')), !!q(tete, '[data-role="fiche-etat"] > .row .badge'), q(tete, '[data-role="fiche-etat"] > header h1.titre-fiche') !== null, avant(tete, details), avant(details, corps), details?.tagName, details?.classList.contains('card')],
         [true, false, true, true, true, 'DETAILS', false], 'fiche T3 (fidélité aux maquettes, 28 octobre) : la photo porte .fiche-photo ; une fiche ordinaire (disponible, originale) ne montre aucun badge d’état ; l’en-tête (le titre) vit dans la colonne de l’état ; .fiche-tete → details (entre deux filets, plus une carte) → .recipe-body');
       const zone = [...pL.querySelectorAll('section.card')].find((s) => titreSection(s) === 'Photo du plat');
-      const original = sectionPlain(pL, 'Original'); const versionsSec = sectionPlain(pL, 'Versions');
+      const original = sectionPlain(pL, 'Sources'); const versionsSec = sectionPlain(pL, 'Versions');
       const exportRow = [...pL.querySelectorAll('button')].find((b) => b.textContent === 'Exporter JSON-LD')?.closest('.row') ?? null;
       eq([avant(corps, zone), avant(zone, original), avant(original, versionsSec), avant(versionsSec, exportRow), !!exportRow, details.contains(exportRow)], [true, true, true, true, true, false], 'fiche T3 : .recipe-body → « Photo du plat » (.card) → « Original » (plain) → « Versions » (plain) → la rangée Export, hors du details (H-3)');
       eq([sectionPlain(pL, 'Ingrédients')?.dataset.role, sectionPlain(pL, 'Préparation')?.dataset.role, q(corps, '[data-role="colonnes-corps"]')?.classList.contains('two-col'), q(corps, '[data-role="colonnes-corps"]')?.children.length, [...pL.querySelectorAll('section.card')].map(titreSection)],
@@ -728,14 +681,14 @@ export async function runCarnetTests({ eq, ok }) {
         [false, false, false, true, 'Rapide · V1', false, true], 'fiche T3 : ni « Commencer à cuisiner » ni l’Export dans le details ; les portions et les puces V1 y sont ; une seule version → badge, pas de select ; la .row.between (épingle creer-ia) y est');
       const gestes = q(tete, '[data-role="fiche-gestes"]'); const principal = q(gestes, '[data-role="geste-principal"]');
       const commencer = [...(principal?.querySelectorAll('button') ?? [])].find((b) => b.textContent === 'Commencer à cuisiner');
-      eq([commencer?.className, textes(pL, 'button').filter((x) => x === 'Commencer à cuisiner').length, q(gestes, '[data-role="corriger-tete"]'), q(pL, '.card.sage')], ['btn primary big block', 1, null, null], 'fiche T3 : « Commencer à cuisiner » = button.btn.primary.big.block dans les gestes de tête, une seule fois ; fiche VÉRIFIÉE → aucun « Corriger » dans l’en-tête ; plus de .card.sage');
+      eq([commencer?.className, textes(pL, 'button').filter((x) => x === 'Commencer à cuisiner').length, q(gestes, '[data-role="corriger-tete"]')?.textContent, q(pL, '.card.sage')], ['btn primary big block', 1, 'Modifier', null], 'fiche T3 : « Commencer à cuisiner » = button.btn.primary.big.block dans les gestes de tête, une seule fois ; fiche VÉRIFIÉE → aucun « Corriger » dans l’en-tête ; plus de .card.sage');
       // --- « Corriger » visible tant que la version affichée n'est pas vérifiée (le seul geste que « — vérifie » réclame)
       await mettre(fiche('rc_nv', { verification_state: 'to_verify' }));
       await versions(version('rc_nv', { verification_state: 'to_verify', ingredients: [{ id: 'ri_nv', source_text: '1 pomme', name_text: 'pomme', quantity: { raw: '1', value: 1 }, unit_id: null, verification_state: 'to_verify' }] }));
       const pNV = await monter('rc_nv', fauxMatchMedia(true));
       const corriger = q(pNV, '[data-role="corriger-tete"]');
       eq([corriger?.tagName, corriger?.className, corriger?.textContent, corriger?.getAttribute('href'), q(pNV, '[data-role="geste-principal"]')?.contains(corriger), textes(q(pNV, '[data-role="autres-gestes"]'), 'a').filter((x) => x === 'Corriger').length, avant(q(pNV, '[data-role="geste-principal"] button'), corriger)],
-        ['A', 'btn link', 'Corriger', '#/recipes/rc_nv/edit?kind=correction&v=rv_rc_nv', true, 1, true], 'fiche T3 : version NON vérifiée → a.btn.link « Corriger » à côté (après) de « Commencer à cuisiner », même href que celui du details, qui reste');
+        ['A', 'btn', 'Modifier', '#/recipes/rc_nv/edit?kind=correction&v=rv_rc_nv', true, 1, true], 'fiche T3 : version NON vérifiée → a.btn.link « Corriger » à côté (après) de « Commencer à cuisiner », même href que celui du details, qui reste');
       // Ronde 1 : « Corriger » en tête pour TOUTE version non vérifiée (la règle est !== 'verified') — une version ancienne sans état, ou « unverified ».
       const sansEtat = version('rc_u0'); delete sansEtat.verification_state;
       await mettre(fiche('rc_u0'), fiche('rc_u1')); await versions(sansEtat, version('rc_u1', { verification_state: 'unverified' }));
@@ -873,7 +826,7 @@ export async function runCarnetTests({ eq, ok }) {
       await versions(version('rc_lu', { provenance: { source_page_ids: [], generated_by: 'ai', model: null, edition_id: null, convention_snapshot: null, import_id: 'imp_lu', lu_le: DATE, source_url: 'https://site.test/lu', url_finale: 'https://site.test/lu', source_kind: 'jsonld', site: 'Le site' } }));
       const pLu = await renderRecipe({ id: 'rc_lu' }, {}, await ctxPour(), { matchMedia: fauxMatchMedia(true).matchMedia });
       eq([[...(q(pLu, '[data-role="fiche-etat"]')?.children ?? [])].map((c) => c.dataset.role ?? c.className), q(pLu, '[data-role="fiche-etat"]')?.children?.[1]?.querySelector('[data-role="etat-verification"]') !== null],
-        [['stack', 'row', 'resume-reperes detail', 'bandeau-web', 'bandeau-lecture'], true], 'fiche T3 / I2 : les bandeaux restent dans l’état de l’en-tête après le titre et les états ; Mes notes les suit');
+        [['stack', 'row', 'fiche-gestes', 'resume-reperes detail', 'bandeau-web', 'bandeau-lecture'], true], 'fiche T3 / I2 : les bandeaux restent dans l’état de l’en-tête après le titre et les états ; Mes notes les suit');
       // --- Le sous-titre reste provenanceText (R-UI-P2) : « Du web · » / « De mon livre · » sont les préfixes de la CARTE-PLAT (ligneSource, T2), pas de la fiche — tests/creer-ia.js:1397 épingle « Mon livre — A. B. · page 58 » en header p.
       eq([q(pL, 'header p.muted')?.textContent, q(pH, 'header p.muted')?.textContent], ['Source personnelle', 'site.test'], 'fiche T3 : le sous-titre est provenanceText, inchangé — « Source personnelle » sans livre ni adresse, l’hôte RECALCULÉ pour une fiche web (R-UI-P2 ; § 4.2 amendé par T6)');
       // --- La photo en tête : dans la colonne photo, sans style en ligne (la feuille rend 8:5 pleine colonne)
@@ -890,7 +843,7 @@ export async function runCarnetTests({ eq, ok }) {
       await repo.putFile(shaE, jpegE, { mime: 'image/jpeg', origin: 'device' });
       await mettre(fiche('rc_pe', { photo_sha256: shaE, photo_origin: 'image' })); await versions(version('rc_pe'));
       const img = q(pPh, '[data-role="photo-plat"] img');
-      eq([!!img, img?.getAttribute('src')?.startsWith('blob:'), img?.getAttribute('style'), q(pPh, '.fiche-photo')?.contains(img), avant(img, q(pPh, '[data-role="fiche-gestes"]'))], [true, true, null, true, true], 'fiche T3 : la photo de tête vit dans .fiche-photo, avant les gestes, sans style en ligne (plus de 320 px : la feuille rend 8:5 pleine colonne)');
+      eq([!!img, img?.getAttribute('src')?.startsWith('blob:'), img?.getAttribute('style'), q(pPh, '.fiche-photo')?.contains(img), avant(q(pPh, '[data-role="fiche-gestes"]'),img)], [true, true, null, true, true], 'fiche T3 : la photo de tête vit dans .fiche-photo, avant les gestes, sans style en ligne (plus de 320 px : la feuille rend 8:5 pleine colonne)');
       // --- La FEUILLE servie (D-UI-6), mesurée dans des cadres (la technique de T2 : un <iframe> about:blank par largeur, la feuille chargée DEDANS — les jetons de :root et
       // les @media y valent, ce qu'une scène de la page de tests ou une racine fantôme ne donne pas ; rév. 2). Deux fiches : rc_ph (photo) et rc_t3 (emplacement vide → une colonne).
       const cadre3 = async (largeur) => {
@@ -921,15 +874,15 @@ export async function runCarnetTests({ eq, ok }) {
           if (img) { img.loading = 'eager'; await Promise.race([img.decode().catch(() => {}), new Promise((r) => setTimeout(r, 3000))]); }
           const rE = q(tete, '[data-role="fiche-etat"]').getBoundingClientRect(); const rP = ph.getBoundingClientRect(); const rG = q(tete, '[data-role="fiche-gestes"]').getBoundingClientRect();
           const rI = img ? img.getBoundingClientRect() : null;
-          return { pistesTete: S(tete).gridTemplateColumns.trim().split(/\s+/).length, photoADroite: rP.left >= rE.right - 1 && rP.left >= rG.right - 1, photoEntre: rE.bottom <= rP.top + 1 && rP.bottom <= rG.top + 1,
-            photoLongeGestes: rP.top <= rE.top + 1 && rP.bottom > rG.top + 1, // EI-T3-2 : la photo couvre les DEUX rangées de gauche (zones), elle ne pousse pas les gestes sous elle
+          return { pistesTete: S(tete).gridTemplateColumns.trim().split(/\s+/).length, photoADroite: rP.left >= rE.right - 1 && rP.left >= rG.right - 1, photoEntre: rE.bottom <= rP.top + 1 && rG.bottom <= rE.bottom + 1,
+            photoLongeGestes: rP.top <= rE.top + 1 && rP.left >= rG.right - 1, // EI-T3-2 : la photo couvre les DEUX rangées de gauche (zones), elle ne pousse pas les gestes sous elle
             chargee: img ? img.naturalWidth > 0 : null,
             imgPleine: rI ? Math.abs(rI.width - Math.min(rP.width, largeur < 760 ? 260 : 380)) < 1 : null, ratio: rI ? Math.abs(rI.width / rI.height - 1) < 0.02 : null, objectFit: img ? S(img).objectFit : null,
             onglets: S(q(p, '[data-role="onglets-corps"]')).display, prep: S(q(p, '[data-role="section-preparation"]')).display, pistesCorps: S(q(p, '[data-role="colonnes-corps"]')).gridTemplateColumns.trim().split(/\s+/).length,
             // Ronde 1 : l'écart entre l'état et les gestes (une pile, jamais un vide), la cible du summary (I-UI-4), la flèche du lien d'origine, le bouton seul plein.
-            ecartEtatGestes: Math.round(rG.top - rE.bottom), summary: q(p, 'details[data-role="autres-gestes"] > summary').getBoundingClientRect().height, summaryDisplay: S(q(p, 'details[data-role="autres-gestes"] > summary')).display,
+            gestesDansEtat:rG.top>=rE.top-1&&rG.bottom<=rE.bottom+1, ecartEtatGestes: Math.round(rG.top - rE.top), summary: q(p, 'details[data-role="autres-gestes"] > summary').getBoundingClientRect().height, summaryDisplay: S(q(p, 'details[data-role="autres-gestes"] > summary')).display,
             fleche: q(p, '[data-role="ouvrir-lien"]') ? w.getComputedStyle(q(p, '[data-role="ouvrir-lien"]'), '::after').content : null,
-            boutonPlein: (() => { const r = q(tete, '[data-role="geste-principal"]'); const b = q(r, 'button'); return r && b && r.children.length === 1 ? Math.abs(b.getBoundingClientRect().width - r.getBoundingClientRect().width) < 1 : null; })(),
+            boutonPlein: (() => { const r = q(tete, '[data-role="geste-principal"]'); const b = q(r, 'button'); return !!r && !!b && [...r.querySelectorAll('a,button')].every(n=>{const z=n.getBoundingClientRect();return z.width>=44&&z.height>=44&&z.right<=r.getBoundingClientRect().right+1;}); })(),
             // Ronde 1 de T6 (constat 3) : la taille des repères, en rem de la racine du cadre (la règle `.reperes { font-size: 1.05rem }` mesurée, pas lue).
             reperesRem: (() => { const r = q(p, 'div.reperes'); return r ? Math.round((parseFloat(S(r).fontSize) / parseFloat(S(f.contentDocument.documentElement).fontSize)) * 100) / 100 : null; })() };
         } finally { f.remove(); }
@@ -943,7 +896,7 @@ export async function runCarnetTests({ eq, ok }) {
       eq([ph375.pistesTete, ph375.photoEntre, ph375.chargee, ph375.imgPleine, ph375.ratio, ph375.onglets !== 'none', ph375.prep, ph375.pistesCorps], [1, true, true, true, true, true, 'none', 1],
         'styles.css à 375 px (D-UI-6) : une colonne, la photo ENTRE l’état et les gestes (sous la provenance, maquette mobile), image réelle chargée, carrée de 260 px sur mobile ; segmented visible, Préparation cachée ([hidden]), une seule colonne de corps (mesurés)');
       // Ronde 1 : la colonne de gauche est une PILE état → gestes (D-UI-6, § 4.2) — la hauteur en trop de la photo va à la rangée des gestes, jamais entre les deux.
-      ok(ph1100.ecartEtatGestes >= 0 && ph1100.ecartEtatGestes < 24, `styles.css à 1100 px, avec photo : l’état et les gestes restent empilés (écart ${ph1100.ecartEtatGestes} px, attendu le gap de 16 px ; jamais le vide de la photo)`);
+      ok(ph1100.gestesDansEtat && ph1100.ecartEtatGestes >= 0, `styles.css à 1100 px, avec photo : l’état et les gestes restent empilés (écart ${ph1100.ecartEtatGestes} px, attendu le gap de 16 px ; jamais le vide de la photo)`);
       const [http375, pe1100, pe375] = [await mesureFiche(375, 'rc_http'), await mesureFiche(1100, 'rc_pe'), await mesureFiche(375, 'rc_pe')];
       eq([ph375.summaryDisplay, ph1100.summaryDisplay], ['list-item', 'list-item'], 'fiche (revue du 28 octobre) : le summary de « autres gestes » reste un list-item — son triangle dit que le panneau replié s’ouvre (mesuré à 375 et 1100 px)');
       eq([http375.photoEntre, http375.fleche, http375.boutonPlein, ph375.boutonPlein, ph375.summary >= 44, ph1100.summary >= 44],
@@ -1009,16 +962,14 @@ export async function runCarnetTests({ eq, ok }) {
       ];
       const r1 = recette4('r1', { printed_page: 10 });
       await db.mutate({ puts: { books: [LIVRE4], book_editions: [EDITION4], source_documents: [doc], source_pages: pages, recipes: [r1], recipe_versions: versions4([r1]) }, origin: 'device' });
-      const fiche = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: mediaFactice(true) });
+      const fiche = await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db), { matchMedia: mediaFactice(true) });
       // En-tête : titre de fiche, sous-titre dérivé SANS l'ISBN ni la langue (ils restent dans le details), retour « Bibliothèque », deux menus renommés.
       const h1 = fiche.querySelector('header h1');
       const menus = [...fiche.querySelectorAll('header details.menu-source')];
-      eq([h1?.textContent, h1?.classList.contains('titre-fiche'), fiche.querySelector('header p.muted')?.textContent, fiche.querySelector('header a.muted')?.getAttribute('href'), fiche.querySelector('header a.muted')?.textContent],
+      eq([h1?.textContent, h1?.classList.contains('titre-fiche'), fiche.querySelector('header p.muted')?.textContent, fiche.querySelector('header > a')?.getAttribute('href'), fiche.querySelector('header > a')?.textContent],
         ['Saisons gourmandes', true, 'A. Cuisinière · Flammarion Québec · 2004', '#/library?tab=books', '← Bibliothèque'],
         'T4 : h1.titre-fiche = le titre du livre ; sous-titre « {auteur} · {éditeur} · {année} », sans ISBN ni langue (H-21) ; retour « ← Bibliothèque » → #/library?tab=books (le segment Livres, d’où vient la fiche : R-UI-11, vague finale)');
-      eq(menus.map((d) => [d.querySelector('summary')?.textContent, d.querySelector('summary')?.className, [...d.querySelectorAll('button, a')].map((b) => b.textContent)]),
-        [['Ajouter', 'btn primary', ['Photographier', 'Choisir des photos ou un PDF', 'Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main']], ['Ajouter des pages de sommaire', 'btn primary', ['Photographier', 'Choisir des photos ou un PDF']], ['Ajouter des recettes', 'btn primary', ['Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main']]],
-        'T4 : les deux details.menu-source gardent leur forme (summary.btn.primary, mêmes sources) et sont renommés « Ajouter des pages de sommaire », « Ajouter des recettes » (D-UI-10)');
+      eq([...fiche.querySelectorAll('header [data-action]')].map(a=>[a.dataset.action,a.textContent]),[['modifier-livre','Modifier le livre'],['ajouter-index','Ajouter des pages d’index'],['ajouter-recette','Ajouter une recette']],'L3 livre : modifier, index et recette accessibles directement sans menus imbriqués');
       // EI-T4-a : la carte « Connecte-toi » du panneau d'index (div.status.warn[data-role=connexion-ia], inchangée) reste ; ronde 1 (constat 15) : toute AUTRE pastille
       // d'état (.status.ok / .warn / .info, quelle que soit sa balise) est comptée — des chips revenus en div ne passent plus.
       eq([[...fiche.querySelectorAll('.status.ok, .status.warn, .status.info')].filter((n) => !n.matches('[data-role="connexion-ia"]')).length, fiche.querySelector('.row.top > header')], [0, null],
@@ -1033,7 +984,7 @@ export async function runCarnetTests({ eq, ok }) {
       eq([gauche?.children[1]?.textContent, gauche?.children[1]?.getAttribute('href')], ['Compléter les informations', '#/add/livre?edition=ed4'], 'I2 : le complément ouvre le formulaire de cette édition');
       const sources = sectionDe(fiche, 'Pages et fichiers sources');
       eq([[...(droite?.querySelectorAll('section') || [])].map((s) => [forme(s), s.querySelector('h2')?.textContent]), forme(sources), sources?.parentElement?.dataset.role, sources?.parentElement?.hidden],
-        [[['SECTION:plain', undefined]], 'SECTION:plain', 'pages-source', true],
+        [[['SECTION:plain', undefined],['SECTION:',undefined]], 'SECTION:plain', 'pages-source', true],
         'T4 : droite = « Les recettes de ce livre » en section.plain ; « Pages et fichiers sources » en section.plain, en bas, juste après les deux colonnes');
       // Sommaire : les pages kind === 'index' seulement, dans l'ordre des pages imprimées, numérotées ; la page de recette reste dans « Pages et fichiers sources », sans numéro.
       const sommaire = sectionDe(fiche, 'Sommaire');
@@ -1045,12 +996,12 @@ export async function runCarnetTests({ eq, ok }) {
       // Ronde 1 (constat 13) : « Pages et fichiers sources » ne paraît que s'il a quelque chose à montrer (une page qui n'est pas d'index, un document non-photo) — un livre
       // dont on n'a photographié que la table des matières n'a plus, en bas, une section vide. Ronde 1 (constat 19) : le Sommaire suit l'ordre APPLIQUÉ dans la séance
       // (`position` : « l'ordre se corrige dans le panneau de la séance ») avant le numéro imprimé — des pages d'index sans numéro ne sont plus rangées par clé de base.
-      const indexSeul = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { source_pages: pages.filter((p) => p.kind === 'index') }), { matchMedia: mediaFactice(true) });
+      const indexSeul = await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db, { source_pages: pages.filter((p) => p.kind === 'index') }), { matchMedia: mediaFactice(true) });
       const ordonnees = [
         { id: 'pgC', edition_id: 'ed4', document_id: 'doc4', sha256: H4('c'), printed_page: null, position: 2, kind: 'index', created_at: DATE4, updated_at: DATE4 },
         { id: 'pgD', edition_id: 'ed4', document_id: 'doc4', sha256: H4('d'), printed_page: null, position: 1, kind: 'index', created_at: DATE4, updated_at: DATE4 },
       ];
-      const parPosition = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { source_pages: ordonnees }), { matchMedia: mediaFactice(true) });
+      const parPosition = await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db, { source_pages: ordonnees }), { matchMedia: mediaFactice(true) });
       eq([sectionDe(indexSeul, 'Pages et fichiers sources'), figures(sectionDe(indexSeul, 'Sommaire')).length,
         [...(sectionDe(parPosition, 'Sommaire')?.querySelectorAll('.thumbs > figure') || [])].map((f) => [f.querySelector('.num')?.textContent, f.querySelector('[data-sha256]')?.dataset.sha256])],
       [null, 2, [['1', H4('d')], ['2', H4('c')]]],
@@ -1063,7 +1014,7 @@ export async function runCarnetTests({ eq, ok }) {
       const pageAB = (id, doc, position, c) => ({ id, edition_id: 'ed4', document_id: doc, sha256: H4(c), printed_page: null, position, kind: 'index', created_at: DATE4, updated_at: DATE4 });
       const seanceA = { id: 'ssA', status: 'done', edition_id: 'ed4', started_at: '2026-10-20T00:00:00.000Z', page_ids: ['pgA1', 'pgA2'], document_ids: ['docA'], created_at: DATE4, updated_at: DATE4 };
       const pagesAB = [pageAB('pgA2', 'docA', 2, '7'), pageAB('pgB1', 'docB', 1, '8'), pageAB('pgA1', 'docA', 1, '6')];
-      const sommaireDe = async (quandB) => [...(sectionDe(await renderBook({ id: 'ed4' }, {}, await ctx4(db, { source_pages: pagesAB, scan_sessions: [seanceA],
+      const sommaireDe = async (quandB) => [...(sectionDe(await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db, { source_pages: pagesAB, scan_sessions: [seanceA],
         source_documents: [docAB('docA', 'ssA', '2026-10-25T00:00:00.000Z', 'e'), docAB('docB', 'ssB', quandB, 'f')] }), { matchMedia: mediaFactice(true) }), 'Sommaire')?.querySelectorAll('.thumbs > figure') || [])]
         .map((f) => [f.querySelector('.num')?.textContent, f.querySelector('[data-sha256]')?.dataset.sha256]);
       eq([await sommaireDe('2026-10-22T00:00:00.000Z'), await sommaireDe('2026-10-18T00:00:00.000Z')],
@@ -1073,12 +1024,12 @@ export async function runCarnetTests({ eq, ok }) {
       // qui porte une page d'index, ou une lecture d'index ouverte (l'intention d'une séance n'est pas stockée, import.js) ; une séance de RECETTES (ici : sa
       // seule page est pg10, kind 'recette') n'y paraît pas, présentée comme une table des matières : le rappel « Reprendre » de droite reste, seul.
       await db.mutate({ deletes: { source_pages: ['pgA', 'pgB'] }, origin: 'device' });
-      const sans = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: mediaFactice(true) });
+      const sans = await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db), { matchMedia: mediaFactice(true) });
       await db.mutate({ puts: { scan_sessions: [{ id: 'ss4', status: 'open', edition_id: 'ed4', started_at: DATE4, page_ids: ['pg10'], document_ids: [], created_at: DATE4, updated_at: DATE4 }] }, origin: 'device' });
-      const avecSeance = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: mediaFactice(true) });
-      const avecLecture = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { imports: [{ id: 'imp6', kind: 'index', status: 'a_verifier', edition_id: 'ed4', scan_session_id: 'ss4', page_ids: ['pg10'], created_at: DATE4, updated_at: DATE4 }] }), { matchMedia: mediaFactice(true) });
+      const avecSeance = await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db), { matchMedia: mediaFactice(true) });
+      const avecLecture = await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db, { imports: [{ id: 'imp6', kind: 'index', status: 'a_verifier', edition_id: 'ed4', scan_session_id: 'ss4', page_ids: ['pg10'], created_at: DATE4, updated_at: DATE4 }] }), { matchMedia: mediaFactice(true) });
       const pgI = { id: 'pgI', edition_id: 'ed4', document_id: 'doc4', sha256: H4('9'), printed_page: null, position: 2, kind: 'index', created_at: DATE4, updated_at: DATE4 };
-      const avecPageIndex = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { source_pages: [...(await db.getAll('source_pages')), pgI],
+      const avecPageIndex = await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db, { source_pages: [...(await db.getAll('source_pages')), pgI],
         scan_sessions: [{ id: 'ss4', status: 'open', edition_id: 'ed4', started_at: DATE4, page_ids: ['pg10', 'pgI'], document_ids: [], created_at: DATE4, updated_at: DATE4 }] }), { matchMedia: mediaFactice(true) });
       const repriseDe = (f) => { const a = [...f.querySelectorAll('a')].find((x) => x.textContent === 'Reprendre la séance'); return a ? [a.getAttribute('href'), a.className, a.closest('section')?.querySelector('h2')?.textContent] : null; };
       eq([sectionDe(sans, 'Sommaire'), sectionDe(avecSeance, 'Sommaire'), repriseDe(avecSeance), [...avecSeance.querySelectorAll('a')].filter((a) => a.textContent === 'Reprendre').map((a) => a.getAttribute('href')), repriseDe(avecLecture), repriseDe(avecPageIndex)],
@@ -1086,7 +1037,7 @@ export async function runCarnetTests({ eq, ok }) {
         'T4 (vague finale) : sans page d’index ni séance, pas de « Sommaire » ; une séance de recettes ouverte n’y paraît pas (le rappel « Reprendre » de droite reste, seul) ; une séance qui porte une lecture d’index ouverte ou une page d’index fait paraître « Sommaire » avec a.btn.small « Reprendre la séance » → #/import?session=<id>');
       // Ronde 1 (constat 9, spec § 4.3 « droite = rappels … puis Les recettes de ce livre ») : imports à reprendre, séance en cours et convention des tasses sont dans la
       // colonne de DROITE, avant la liste — sous 900 px, ils ne passent jamais au-dessus de la couverture ni entre elle et les métadonnées.
-      const avecRappels = await renderBook({ id: 'ed4' }, {}, await ctx4(db, {
+      const avecRappels = await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db, {
         imports: [{ id: 'imp4', kind: 'index', status: 'a_verifier', edition_id: 'ed4', page_ids: [], created_at: DATE4, updated_at: DATE4 }],
         recipe_versions: [{ ...version4('r1'), ingredients: [{ id: 'ing4', unit_id: 'cup', quantity: 1 }] }] }), { matchMedia: mediaFactice(true) });
       const droiteR = avecRappels.querySelector('.two-col.livre > [data-role="colonne-recettes"]');
@@ -1098,7 +1049,7 @@ export async function runCarnetTests({ eq, ok }) {
       // ?nouveau=1 : l'accueil d'un livre reste, entre l'en-tête et les colonnes (renderAccueilLivre inchangé) ; le sous-titre ne dit que ce qui est connu.
       const nouvelle = await renderBook({ id: 'ed4' }, { nouveau: '1' }, await ctx4(db), { matchMedia: mediaFactice(true) });
       const accueil = nouvelle.querySelector('.accueil-livre');
-      const sansEditeur = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { editionsById: new Map([['ed4', { ...EDITION4, publisher: null, year: null }]]) }), { matchMedia: mediaFactice(true) });
+      const sansEditeur = await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db, { editionsById: new Map([['ed4', { ...EDITION4, publisher: null, year: null }]]) }), { matchMedia: mediaFactice(true) });
       eq([!!accueil, accueil?.parentElement?.previousElementSibling?.tagName, accueil?.parentElement?.nextElementSibling?.classList.contains('onglets-livre'), sansEditeur.querySelector('header p.muted')?.textContent],
         [true, 'HEADER', true, 'A. Cuisinière'],
         'T4 : ?nouveau=1 → le panneau d’accueil entre l’en-tête et les deux colonnes (inchangé) ; sans éditeur ni année, le sous-titre ne porte que l’auteur (rien d’inventé)');
@@ -1125,7 +1076,7 @@ export async function runCarnetTests({ eq, ok }) {
       await db.mutate({ puts: { books: [LIVRE4], book_editions: [EDITION4], source_documents: [doc], source_pages: pages }, origin: 'device' });
       const appels = [];
       const moteur = { onEtat: () => () => {}, telecharger: async (shas) => { appels.push([...shas]); return { recus: 0, erreurs: 0, erreur: null }; } };
-      const fiche = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { sync: { user: { id: 'u4' }, moteur } }), { matchMedia: mediaFactice(true) });
+      const fiche = await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db, { sync: { user: { id: 'u4' }, moteur } }), { matchMedia: mediaFactice(true) });
       const groupe = (titre) => [...(sectionDe(fiche, titre)?.querySelectorAll('button') || [])].filter((b) => b.textContent.startsWith('Télécharger les '));
       const [sommaire, sources] = [groupe('Sommaire'), groupe('Pages et fichiers sources')];
       eq([sommaire.map((b) => b.textContent), sources.map((b) => b.textContent)], [['Télécharger les 2 pages'], ['Télécharger les 2 pages']],
@@ -1161,44 +1112,40 @@ export async function runCarnetTests({ eq, ok }) {
       db.get = (store, key) => { if (store === 'files') lectures4.get.push(key); return vraiGet4(store, key); };
       db.getMany = (store, keys) => { if (store === 'files') lectures4.getMany.push([...keys]); return vraiGetMany4(store, keys); };
       let fiche = null;
-      try { fiche = await B.renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: mediaFactice(true) }); } finally { delete db.get; delete db.getMany; }
-      eq([lectures4.getMany, lectures4.get], [[[sha, H4('1'), H4('9')]], []],
+      try { fiche = await B.renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db), { matchMedia: mediaFactice(true) }); } finally { delete db.get; delete db.getMany; }
+      eq([lectures4.getMany, lectures4.get], [[[H4('1'),sha,H4('9')]], [H4('9')]],
         'T4 (ronde 1, I-UI-5) : UNE lecture groupée de files (db.getMany) portant exactement les trois pointeurs valides (rA, rB, rF), aucune lecture fiche par fiche');
       const liste = sectionDe(fiche, 'Les recettes de ce livre');
       eq([liste?.querySelector('[data-role="compte-recettes"]')?.textContent, liste?.querySelector('[data-role="compte-recettes"]')?.dataset.role, titres4(fiche)],
-        ['4 disponible(s) · 1 à importer', 'compte-recettes', ['Bouillon', 'Compote', 'Tarte aux pommes', 'Fenouil rôti', 'Dahl', 'Escabèche']],
+        ['3 disponible(s) · 1 partielle(s) · 2 référence(s) · 0 état(s) inconnu(s)', 'compte-recettes', ['Bouillon', 'Compote', 'Tarte aux pommes', 'Fenouil rôti', 'Dahl', 'Escabèche']],
         'T4 : sous le titre, « {n} disponible(s) · {m} à importer » (disponibles = available + partial ; à importer = les références SANS adresse : le signet rangé ne compte pas) ; tri par page imprimée puis titre, sans page en dernier');
-      const ligne = (titre) => lignes4(fiche).find((li) => li.querySelector('a.titre')?.textContent === titre);
+      const ligne = (titre) => lignes4(fiche).find((li) => li.querySelector('a.titre')?.textContent === titre)?.querySelector('.recette-ligne');
       // Le portrait d'une ligne : classe, href du titre, vignette (présence, src blob:, alt), « p. N », sections, badge = availabilityBadge SANS la page (vague finale,
       // constats 5 et 10 : la page est dite une fois, par « p. N » à côté du titre — § 4.3 veut le badge « À importer » seul), gestes [texte, href], « ★ Favori ».
       const portrait = (titre) => { const li = ligne(titre); const r = recettes.find((x) => x.original_title === titre); const img = li?.querySelector('img');
         return [li?.className, li?.querySelector('a.titre')?.getAttribute('href'), !!li?.querySelector('.recette-miniature img.plat-vignette'), img ? img.getAttribute('src')?.startsWith('blob:') : null, img ? img.getAttribute('alt') : null,
           li?.querySelector('span.muted')?.textContent ?? null, [...(li?.querySelectorAll('.chip.neutral') || [])].map((c) => c.textContent), li?.querySelector('[data-role="etat-recette"] > .badge')?.outerHTML === K.availabilityBadge({ ...r, printed_page: null }).outerHTML,
           [...(li?.querySelectorAll('a.btn.small') || [])].map((a) => [a.textContent, a.getAttribute('href')]), [...(li?.querySelectorAll('.badge') || [])].map((b) => b.textContent).includes('★ Favori')]; };
-      eq(portrait('Tarte aux pommes'), ['recette-ligne', '#/recipes/rA', true, true, '', 'p. 40', [], true, [['Modifier photo', '#/recipes/rA/photo']], false],
+      eq(portrait('Tarte aux pommes'), ['recette-ligne', '#/recipes/rA', true, true, '', 'p. 40', [], true, [], false],
         'T4 (I-UI-5, D-F9) : octets JPEG ici → .recette-miniature img.plat-vignette, src blob:, alt vide, DÈS le rendu (décision synchrone sur la ligne files) ; « p. 40 » ; le badge est celui d’availabilityBadge ; aucun geste');
-      eq([portrait('Bouillon'), portrait('Fenouil rôti')], [['recette-ligne', '#/recipes/rB', false, null, null, 'p. 12', [], true, [['Modifier photo', '#/recipes/rB/photo']], true], ['recette-ligne', '#/recipes/rF', false, null, null, 'p. 55', [], true, [['Modifier photo', '#/recipes/rF/photo']], false]],
+      eq([portrait('Bouillon'), portrait('Fenouil rôti')], [['recette-ligne', '#/recipes/rB', false, null, null, 'p. 12', [], true, [], true], ['recette-ligne', '#/recipes/rF', false, null, null, 'p. 55', [], true, [], false]],
         'T4 (I-UI-5) : une ligne files text/html, ou un pointeur sans ligne → AUCUNE image (ni cadre vide) ; « ★ Favori » sur la ligne du favori');
       eq([portrait('Compote'), portrait('Dahl')],
-        [['recette-ligne', '#/recipes/rC', false, null, null, 'p. 12', ['Desserts'], true, [['Importer', '#/recipes/rC/importer'], ['Saisir à la main', '#/recipes/rC/edit?kind=extraction'], ['Ajouter photo', '#/recipes/rC/photo']], false],
-          ['recette-ligne', '#/recipes/rD', false, null, null, 'p. 77', [], true, [['Compléter', '#/recipes/rD/importer'], ['Saisir à la main', '#/recipes/rD/edit?kind=extraction'], ['Ajouter photo', '#/recipes/rD/photo']], false]],
+        [['recette-ligne', '#/recipes/rC', false, null, null, 'p. 12', ['Desserts'], true, [['Importer', '#/recipes/rC/importer']], false],
+          ['recette-ligne', '#/recipes/rD', false, null, null, 'p. 77', [], true, [['Compléter', '#/recipes/rD/importer']], false]],
         'T4 : référence sans adresse → section rognée en .chip.neutral, « Importer » et « Saisir à la main » (mêmes href qu’au lot A, T4-R1) ; partielle sans adresse → les deux gestes aussi, sans section (reference_only seulement)');
       eq([portrait('Escabèche'), fiche.querySelectorAll('a.titre .chip, a.titre .badge, a .btn, a [data-role="section"]').length],
-        [['recette-ligne', '#/recipes/rE', false, null, null, null, [], true, [['Ajouter photo', '#/recipes/rE/photo']], false], 0],
+        [['recette-ligne', '#/recipes/rE', false, null, null, null, [], true, [], false], 0],
         'T4 : un signet rangé dans le livre → badge « Lien web » (availabilityBadge), ni « Importer » ni « Saisir à la main », pas de « p. » ; aucun chip, badge ou bouton dans un <a>');
-      // Filtres : chaque bouton redessine la liste ; le filtre actif est marqué ; « À importer » ne retient que les références sans adresse.
-      const clic = (texte) => { bouton4(liste, texte).click(); return titres4(fiche); };
-      eq([...liste.querySelectorAll('button.btn.small.active')].map((b) => b.textContent), ['Toutes'], 'T4 (ronde 1, constat 22) : à l’ouverture de la fiche, le filtre « Toutes » est marqué actif, lui seul');
-      eq([clic('À importer'), clic('Disponibles'), clic('Favoris'), clic('Toutes'), [...liste.querySelectorAll('button.btn.small.active')].map((b) => b.textContent)],
-        [['Compote'], ['Bouillon', 'Tarte aux pommes', 'Fenouil rôti', 'Dahl'], ['Bouillon'], ['Bouillon', 'Compote', 'Tarte aux pommes', 'Fenouil rôti', 'Dahl', 'Escabèche'], ['Toutes']],
-        'T4 : filtres Toutes / Disponibles / À importer / Favoris — « À importer » = les références sans adresse seules (le signet reste sous Toutes), « Disponibles » compte la partielle ; le filtre actif est marqué');
-      const champ = liste.querySelector('input[type="search"]');
-      champ.value = 'ta'; champ.dispatchEvent(new Event('input', { bubbles: true }));
-      eq(titres4(fiche), ['Tarte aux pommes'], 'T4 : le champ filtre les titres (« ta » → Tarte aux pommes seule)');
-      champ.value = 'zzz'; champ.dispatchEvent(new Event('input', { bubbles: true }));
-      eq([lignes4(fiche).length, !!liste.querySelector('.empty'), !!liste.querySelector('.empty .ico svg[aria-hidden="true"]'), liste.querySelector('.empty p')?.textContent],
-        [0, true, true, 'Aucune recette dans cette vue. Photographie l’index ou une recette pour commencer.'],
-        'T4 : aucune ligne → l’état vide d’avant, avec son icône au trait (D-UI-9, icone(\'livre-ouvert\'))');
+      const attendreListe=()=>fiche.querySelector('.bibliotheque-resultats').attendreAffichage();
+      const filtrer=async(name,value)=>{const n=liste.querySelector(`input[name=${name}]${value?`[value=${value}]`:''}`);n.checked=!n.checked;n.dispatchEvent(new Event('change',{bubbles:true}));await attendreListe();return titres4(fiche);};
+      eq([...liste.querySelectorAll('fieldset input:checked')].length,0,'L3 livre : aucun filtre actif initialement');
+      const refs=await filtrer('disponibilites','reference_only');await filtrer('disponibilites','reference_only');const disp=await filtrer('disponibilites','available');await filtrer('disponibilites','available');const fav=await filtrer('favoris');await filtrer('favoris');
+      eq([refs,disp,fav,titres4(fiche)],[['Compote','Escabèche'],['Bouillon','Tarte aux pommes','Fenouil rôti'],['Bouillon'],['Bouillon','Compote','Tarte aux pommes','Fenouil rôti','Dahl','Escabèche']],'L3 livre : références, disponibles seules, favoris et retour ensemble');
+      const champ=liste.querySelector('input[name=q]');champ.value='ta';champ.dispatchEvent(new Event('input',{bubbles:true}));await attendreListe();
+      eq(titres4(fiche),['Tarte aux pommes'],'L3 livre : texte local sur titre');
+      champ.value='zzz';champ.dispatchEvent(new Event('input',{bubbles:true}));await attendreListe();
+      eq([lignes4(fiche).length,!!liste.querySelector('.empty'),!!liste.querySelector('.empty .ico svg'),liste.querySelector('.empty p')?.textContent],[0,true,true,'Aucune recette ne correspond.'],'L3 livre : vide filtré nommé avec icône au trait');
       // ligneCompacte seule : la décision est prise sur la ligne files PASSÉE — octets ET type d'image —, jamais relue en base.
       const ligneDirecte = B.ligneCompacte(recette4('rX', { photo_sha256: sha }), { fichier: { sha256: sha, mime: 'image/jpeg', blob: jpeg } });
       const ligneSansBlob = B.ligneCompacte(recette4('rY', { photo_sha256: sha }), { fichier: { sha256: sha, mime: 'image/jpeg', remote: null } });
@@ -1222,14 +1169,14 @@ export async function runCarnetTests({ eq, ok }) {
       // Ronde 1 (constat 12) : « à importer » a UNE définition (estAImporter / aUneAdresse de library.js) — une adresse qui n'est pas une chaîne non vide n'est pas une
       // adresse : la fiche compte la référence, son filtre la garde, sa ligne offre « Importer » et sa section, comme l'onglet « À importer » de la bibliothèque.
       const r42 = recette4('rQ', { original_title: 'Quiche', availability: 'reference_only', source_url: 42, section: 'Tartes' });
-      const fiche42 = await B.renderBook({ id: 'ed4' }, {}, await ctx4(db, { recipes: [...recettes, r42] }), { matchMedia: mediaFactice(true) });
+      const fiche42 = await B.renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db, { recipes: [...recettes, r42] }), { matchMedia: mediaFactice(true) });
       const liste42 = sectionDe(fiche42, 'Les recettes de ce livre');
       const ligne42 = () => lignes4(fiche42).find((li) => li.dataset.recette === 'rQ');
       const gestes42 = [...(ligne42()?.querySelectorAll('a.btn.small') || [])].map((a) => a.textContent);
       const chips42 = [...(ligne42()?.querySelectorAll('.chip.neutral') || [])].map((c) => c.textContent);
-      bouton4(liste42, 'À importer')?.click();
+      const filtre42=liste42.querySelector('input[name=disponibilites][value=reference_only]');filtre42.checked=true;filtre42.dispatchEvent(new Event('change',{bubbles:true}));await fiche42.querySelector('.bibliotheque-resultats').attendreAffichage();
       eq([liste42?.querySelector('[data-role="compte-recettes"]')?.textContent, gestes42, chips42, titres4(fiche42)],
-        ['4 disponible(s) · 2 à importer', ['Importer', 'Saisir à la main', 'Ajouter photo'], ['Tartes'], ['Compote', 'Quiche']],
+        ['3 disponible(s) · 1 partielle(s) · 3 référence(s) · 0 état(s) inconnu(s)', ['Importer'], ['Tartes'], ['Compote', 'Escabèche', 'Quiche']],
         'T4 (ronde 1) : une référence au source_url non-chaîne (42) est « à importer » partout dans la fiche — compteur, ligne (Importer, Saisir à la main, section), filtre « À importer »');
       // Ronde 1 (constat 3, D-F9, I-F6) : des octets admis (image/jpeg) que le navigateur ne décode pas → error : l'img est retirée, son URL blob: révoquée — jamais un
       // cadre de 48 px bordé avec l'icône d'image cassée (le motif de vignettePlat et de la carte-plat). « lazy » ne chargerait pas hors écran : le test passe en eager.
@@ -1250,68 +1197,27 @@ export async function runCarnetTests({ eq, ok }) {
       BU.revoquerUrlsDeBlob();
     })));
 
-    await bloc('T4 — sous 900 px : 8 lignes puis « Voir les {n} recettes » (déplie sur place) ; ≥ 900 px : tout ; la bascule de largeur redessine', () => withRepo(async (repo, db) => sansReseau('8 lignes', async () => {
-      const { renderBook, LIGNES_REPLIEES, LARGEUR_DEUX_COLONNES } = await import('../src/ui/book.js');
-      const recettes = Array.from({ length: 12 }, (_, i) => recette4('r' + String(i).padStart(2, '0'), { original_title: 'Plat ' + String(i).padStart(2, '0'), printed_page: i + 1, favorite: i < 10 }));
-      await db.mutate({ puts: { books: [LIVRE4], book_editions: [EDITION4], recipes: recettes, recipe_versions: versions4(recettes) }, origin: 'device' });
-      const scene = document.createElement('div'); scene.style.cssText = 'position:absolute;left:-10000px;top:0;width:375px'; document.body.append(scene);
-      const hashAvant = location.hash;
-      try {
-        const media = mediaFactice(false);
-        const etroite = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: media });
-        scene.append(etroite); await macro4(); // ronde 1 : l'abonnement à `change` se pose au MONTAGE (le motif de recipe.js et library.js) — monter attend ce tour
-        const liste = sectionDe(etroite, 'Les recettes de ce livre');
-        const voirTout = (racine = liste) => racine.querySelector('button[data-role="voir-tout"]');
-        eq([LIGNES_REPLIEES, LARGEUR_DEUX_COLONNES, media.mq.requete, lignes4(etroite).length, voirTout()?.textContent, voirTout()?.tagName, voirTout()?.className, voirTout()?.getAttribute('href'), voirTout()?.previousElementSibling?.matches('ul.liste-compacte')],
-        [8, '(min-width: 900px)', '(min-width: 900px)', 8, 'Voir les 12 recettes', 'BUTTON', 'btn', null, true],
-          'T4 : sous 900 px (matchMedia injecté, requête (min-width: 900px)), 8 lignes puis button.btn « Voir les 12 recettes » juste sous la liste (un bouton, pas un lien)');
-        voirTout().click();
-        eq([lignes4(etroite).length, voirTout(), location.hash === hashAvant], [12, null, true], 'T4 : « Voir les {n} recettes » déplie sur place : 12 lignes, le bouton disparaît, aucune navigation');
-        // Ronde 1 (constat 16, I-UI-4) : le bouton qui se retire ne laisse pas le focus tomber sur body — il passe au titre de la première ligne dépliée (la 9e).
-        eq([document.activeElement === lignes4(etroite)[LIGNES_REPLIEES]?.querySelector('a.titre'), media.mq.ecouteurs.length], [true, 1],
-          'T4 (ronde 1) : après « Voir les {n} recettes », le focus est sur le titre de la ligne 9 (la première montrée par le dépli) ; la fiche montée porte UN abonné change');
-        bouton4(liste, 'Favoris').click();
-        eq([lignes4(etroite).length, voirTout()], [10, null], 'T4 : une fois dépliée, la liste reste dépliée quand le filtre change (10 favoris, pas de bouton)');
-        // Une nouvelle instance est repliée de nouveau ; le compte du bouton est celui de la VUE filtrée ; la bascule de largeur (événement change) redessine.
-        const media2 = mediaFactice(false);
-        const seconde = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: media2 });
-        scene.append(seconde); await macro4();
-        const liste2 = sectionDe(seconde, 'Les recettes de ce livre');
-        bouton4(liste2, 'Favoris').click();
-        eq([lignes4(seconde).length, voirTout(liste2)?.textContent, media2.mq.ecouteurs.length], [8, 'Voir les 10 recettes', 1], 'T4 : nouvelle instance → repliée ; « Voir les 10 recettes » compte la vue filtrée ; un seul écouteur de change posé');
-        // EI-T4-1 (le motif suiviFiche de T3-R1) : au plus un abonné de fiche livre dans l'app — le rendu de la seconde fiche a retiré celui de la première.
-        eq(media.mq.ecouteurs.length, 0, 'T4 (EI-T4-1) : rendre une autre fiche livre retire l’écouteur change de la précédente (sa MediaQueryList ne retient plus sa fiche) : au plus un abonné de fiche livre');
-        media2.mq.basculer(true);
-        eq([lignes4(seconde).length, voirTout(liste2)], [10, null], 'T4 : la bascule ≥ 900 px (change) redessine : les 10 lignes, sans bouton');
-        media2.mq.basculer(false);
-        eq([lignes4(seconde).length, voirTout(liste2)?.textContent], [8, 'Voir les 10 recettes'], 'T4 : la bascule inverse replie de nouveau (cette instance n’avait pas déplié)');
-        // Ronde 1 (constat 18) : un rendu jamais inséré (jeté par renderSeq, app.js) ne prend pas l'abonnement de la fiche affichée.
-        const media3 = mediaFactice(true);
-        await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: media3 }); await macro4();
-        eq([media2.mq.ecouteurs.length, media3.mq.ecouteurs.length], [1, 0], 'T4 (ronde 1) : un rendu jamais monté ne s’abonne pas et ne retire pas l’abonné de la fiche affichée (qui garde le sien)');
-        // Ronde 1 (constats 1 et 24) : la fiche quittée (détachée du document) se retire au premier change, sans rien redessiner (ni lignes neuves, ni URL blob:).
-        // Une fiche à elle (montée, abonnée) : l'assertion ne dépend pas de l'étape précédente.
-        const media5 = mediaFactice(false);
-        const quittee = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: media5 });
-        scene.append(quittee); await macro4();
-        const abonneeMontee = media5.mq.ecouteurs.length;
-        const avantDetache = lignes4(quittee);
-        quittee.remove(); media5.mq.basculer(true);
-        eq([abonneeMontee, media5.mq.ecouteurs.length, lignes4(quittee).length, lignes4(quittee).every((li, i) => li === avantDetache[i])], [1, 0, 8, true],
-          'T4 (ronde 1) : montée, la fiche porte UN abonné ; détachée, elle se désabonne au premier change reçu et ne redessine rien (mêmes 8 lignes, mêmes nœuds) : la MediaQueryList ne la retient plus');
-        // Ronde 1 (constat 1) : un change reçu ENTRE le rendu et le montage n'est pas perdu — au montage, la largeur est relue et la liste redessinée si elle a changé.
-        const media4 = mediaFactice(false);
-        const tardive = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: media4 });
-        const avantMontage = lignes4(tardive).length;
-        media4.mq.basculer(true);
-        scene.append(tardive); await macro4();
-        eq([avantMontage, lignes4(tardive).length, voirTout(sectionDe(tardive, 'Les recettes de ce livre')), media4.mq.ecouteurs.length], [8, 12, null, 1],
-          'T4 (ronde 1) : rendue étroite (8 lignes), la largeur passe à ≥ 900 px avant le montage → au montage, les 12 lignes sans bouton ; un abonné');
-        const large = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: mediaFactice(true) });
-        const huit = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { recipes: recettes.slice(0, 8), recipesById: new Map(recettes.slice(0, 8).map((r) => [r.id, r])) }), { matchMedia: mediaFactice(false) });
-        eq([lignes4(large).length, voirTout(large), lignes4(huit).length, voirTout(huit)], [12, null, 8, null],
-          'T4 : ≥ 900 px, les 12 lignes d’un coup, aucun bouton ; exactement 8 recettes sous 900 px → 8 lignes, aucun bouton (la borne est « plus de 8 »)');
-      } finally { scene.remove(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
+    await bloc('L3 — livre pagination indépendante de largeur, focus et filtres', () => withRepo(async(repo,db)=>sansReseau('pagination L3',async()=>{
+      const {renderBook}=await import('../src/ui/book.js');
+      const recettes=Array.from({length:125},(_,i)=>recette4('r'+String(i).padStart(3,'0'),{original_title:'Plat '+String(i).padStart(3,'0'),printed_page:i+1,favorite:i<10}));
+      await db.mutate({puts:{books:[LIVRE4],book_editions:[EDITION4],recipes:recettes,recipe_versions:versions4(recettes)},origin:'device'});
+      const scene=document.createElement('div');document.body.append(scene);
+      try{
+        const media=mediaFactice(false),etroite=await renderBook({id:'ed4'},{presentation:'liste'},await ctx4(db),{matchMedia:media});scene.append(etroite);
+        const list=()=>etroite.querySelector('.bibliotheque-resultats'),more=()=>etroite.querySelector('[data-role=voir-plus]');
+        eq([lignes4(etroite).length,more()?.textContent,more()?.tagName,more()?.getAttribute('href')],[60,'Voir plus','BUTTON',null],'L3 : 60 lignes mobile, vrai bouton');
+        more().click();await list().attendreAffichage();eq(lignes4(etroite).length,120,'L3 : deuxième page 120');
+        more().click();await list().attendreAffichage();eq([lignes4(etroite).length,more()],[125,null],'L3 : dernière page et disparition bouton');
+        list().querySelector('[name=favoris]').click();await list().attendreAffichage();eq([lignes4(etroite).length,more()],[10,null],'L3 : filtre remet pagination à60');
+        const large=await renderBook({id:'ed4'},{presentation:'liste'},await ctx4(db),{matchMedia:mediaFactice(true)});eq(lignes4(large).length,60,'L3 : même borne sur ordinateur');
+        const avant=lignes4(etroite);media.mq.basculer(true);eq(lignes4(etroite).every((n,i)=>n===avant[i]),true,'L3 : largeur ne perd ni résultats ni nœuds');
+        media.mq.basculer(false);eq(lignes4(etroite).length,10,'L3 : retour mobile garde filtre');
+        eq(media.mq.ecouteurs.length,0,'L3 : pagination sans abonné largeur supplémentaire');
+        const nonMontee=await renderBook({id:'ed4'},{presentation:'liste'},await ctx4(db));eq(lignes4(nonMontee).length,60,'L3 : rendu non monté borné');
+        etroite.remove();media.mq.basculer(true);eq(lignes4(etroite).every((n,i)=>n===avant[i]),true,'L3 : fiche quittée ne se redessine pas');
+        const huit=await renderBook({id:'ed4'},{presentation:'liste'},await ctx4(db,{recipes:recettes.slice(0,8)}));eq([lignes4(huit).length,huit.querySelector('[data-role=voir-plus]')],[8,null],'L3 : petite liste sans pagination superflue');
+        eq(new Set(lignes4(large).map(n=>n.dataset.navId)).size,60,'L3 : identités stables uniques sur première page');
+      }finally{scene.remove();(await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob();}
     })));
 
     await bloc('T4 — styles.css servie : deux colonnes 200px 1fr ≥ 900 px, une colonne sous ; titre de ligne en serif ; vignette 78 × 78 (cadres de mesure)', () => withRepo(async (repo, db) => sansReseau('styles.css servie', async () => {
@@ -1334,7 +1240,7 @@ export async function runCarnetTests({ eq, ok }) {
           const lien = d.createElement('link'); lien.rel = 'stylesheet'; lien.href = new URL('../styles.css?v=' + Date.now(), location.href).href;
           await new Promise((r) => { lien.onload = r; lien.onerror = r; d.head.append(lien); });
           if (w.innerWidth !== largeur) throw new Error(`cadre ${largeur} : innerWidth ${w.innerWidth}`);
-          const fiche = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: mediaFactice(largeur >= 900) });
+          const fiche = await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db), { matchMedia: mediaFactice(largeur >= 900) });
           d.querySelector('main').append(fiche); // adopté par le document du cadre : SA feuille s'applique
           const S = (n) => w.getComputedStyle(n);
           const colonnes = fiche.querySelector('.two-col.livre');
@@ -1379,11 +1285,11 @@ export async function runCarnetTests({ eq, ok }) {
       const { EN } = await import('../src/i18n/en.js');
       const { CHAINES_NEUVES_AILLEURS } = await import('./ajouter.js');
       ok(src.length > 3000 && /export async function renderBook\(params, query, ctx, deps = \{\}\)/.test(src), `book.js : le source est lu (${src.length} caractères) et renderBook prend deps`);
-      const NEUVES = ['Ajouter des recettes', 'Ajouter des pages de sommaire', 'Sommaire', 'Reprendre la séance', 'Recettes', '{n} disponible(s) · {m} à importer', 'À importer', 'Voir les {n} recettes'];
+      const NEUVES = ['Ajouter une recette', 'Ajouter des pages d’index', 'Sommaire', 'Reprendre la séance', 'Recettes', 'Pages source', 'Filtrer les recettes de ce livre', 'Voir plus'];
       const RETIREES = ['+ Recette', '+ Pages d’index', 'Repérées', '{n} recette(s) disponible(s)', '{n} repérée(s) dans l’index', '{n} page(s) source'];
       eq([NEUVES.filter((c) => !src.includes(`t('${c}'`)), RETIREES.filter((c) => src.includes(`'${c}'`))], [[], []], 'book.js : chaque chaîne neuve est posée par t(), aucune chaîne retirée ne subsiste');
       eq([NEUVES.map((c) => EN[c]), RETIREES.slice(0, 2).map((c) => c in EN), EN['Disponibles']],
-        [['Add recipes', 'Add table-of-contents pages', 'Table of contents', 'Resume the session', 'Recipes', '{n} available · {m} to import', 'To import', 'Show all {n} recipes'], [false, false], 'Available'],
+        [['Add a recipe', 'Add index pages', 'Table of contents', 'Resume the session', 'Recipes', 'Source pages', 'Filter this book’s recipes', 'Show more'], [false, false], 'Available'],
         'en.js : les traductions de la spec § 5 (et « Reprendre la séance », « Disponibles » au passage) ; « + Recette » et « + Pages d’index » ont quitté le dictionnaire');
       const filet = CHAINES_NEUVES_AILLEURS['../src/ui/book.js'];
       eq([NEUVES.filter((c) => !filet.includes(c)), RETIREES.slice(0, 2).filter((c) => filet.includes(c))], [[], []], 'CHAINES_NEUVES_AILLEURS (book.js) : porte les chaînes neuves, plus « + Recette » ni « + Pages d’index »');
@@ -1568,8 +1474,8 @@ export async function runCarnetTests({ eq, ok }) {
         // T5 ronde 1 : renderLibrary est monté sans réseau (fetch remplacé par un lanceur d'erreur le temps du montage, remis ensuite).
         const sansReseau = async (f) => { const vrai = globalThis.fetch; globalThis.fetch = async (u) => { throw new Error('aucun reseau attendu : ' + u); }; try { return await f(); } finally { globalThis.fetch = vrai; } };
         const biblio = await sansReseau(() => renderLibrary({}, { tab: 'books' }, ctxL));
-        const legende = [...biblio.querySelectorAll('.muted')].map((n) => n.textContent).find((x) => x.includes('à importer')) ?? null;
-        eq([legende, /repérée/i.test(biblio.textContent)], ['1 disponible(s) · 2 à importer', false], 'library.js (grille Livres, l. 73) : « {n} disponible(s) · {m} à importer » sous la couverture ; plus aucun « repérée(s) »');
+        const legende = [...biblio.querySelectorAll('.muted')].map((n) => n.textContent).find((x) => x.includes('référence(s)')) ?? null;
+        eq([legende, /repérée/i.test(biblio.textContent)], ['1 disponible(s) · 0 partielle(s) · 2 référence(s) · 0 état(s) inconnu(s)', false], 'library.js (grille Livres, l. 73) : « {n} disponible(s) · {m} à importer » sous la couverture ; plus aucun « repérée(s) »');
         // EI-T5-1 (D-UI-10, H-19 ; hors brief) : un signet rangé dans un livre (reference_only + adresse) est un lien web, jamais « à importer » — la définition
         // d'estAImporter (library.js), celle du sous-titre de la fiche livre (T4) ; un livre qui ne porte qu'un signet dit « Aucune recette indexée ».
         const ed2 = { id: 'ed_s', book_id: 'b_s', year: 2021 }; const livre2 = { id: 'b_s', title: 'Liens', author: 'C. D.', cuisines: [], tags: [] };
@@ -1577,7 +1483,7 @@ export async function runCarnetTests({ eq, ok }) {
         const refs2 = [...refs, signetDe('rc_k4', 'ed_k'), signetDe('rc_s1', 'ed_s')];
         const biblio2 = await sansReseau(() => renderLibrary({}, { tab: 'books' }, { ...ctxL, book_editions: [ed, ed2], books: [livre, livre2], booksById: new Map([['b_k', livre], ['b_s', livre2]]), editionsById: new Map([['ed_k', ed], ['ed_s', ed2]]),
           recipes: refs2, recipesById: new Map(refs2.map((r) => [r.id, r])), editionLabel: (e) => (e?.id === 'ed_s' ? livre2.title : livre.title) }));
-        eq([...biblio2.querySelectorAll('.grid.livres > div')].map((d) => d.lastElementChild?.textContent ?? null), ['Aucune recette indexée', '1 disponible(s) · 2 à importer'],
+        eq([...biblio2.querySelectorAll('.grid.livres > div')].map((d) => d.querySelector('.bibliotheque-compteurs')?.textContent ?? null), ['0 disponible(s) · 0 partielle(s) · 1 référence(s) · 0 état(s) inconnu(s)', '1 disponible(s) · 0 partielle(s) · 3 référence(s) · 0 état(s) inconnu(s)'],
           'library.js (grille Livres) : un signet rangé dans un livre ne compte pas « à importer » (estAImporter, comme la fiche livre) ; un livre qui n’a qu’un signet dit « Aucune recette indexée » (EI-T5-1)');
         // T5 ronde 1 : le test de SOURCE de book.js et library.js (un t('…repérée…') cherché par regex) est retiré — hors des cas admis (app.js, filets i18n,
         // SHELL) ; le comportement le tient : la légende de la grille Livres ci-dessus (aucun « repérée »), et pour book.js les blocs de T4 (chips retirées, filtre « À importer »).
@@ -1743,14 +1649,14 @@ export async function runCarnetTests({ eq, ok }) {
     const TEXTES_UI1 = {
       'Bibliothèque': 'Library', 'Aller à la bibliothèque.': 'Go to the library.', 'Tes livres, tes trouvailles, tes recettes.': 'Your books, your finds, your recipes.',
       'Recettes': 'Recipes', 'Ajouter une recette': 'Add a recipe', 'Une recette, un ingrédient…': 'A recipe, an ingredient…',
-      'Toutes': 'All', 'De mes livres': 'From my books', 'Du web': 'From the web', 'Recettes de mes livres à importer': 'Recipes from my books to import', 'Voir plus': 'Show more',
+      'Filtres': 'Filters', 'De mes livres': 'From my books', 'Du web': 'From the web', 'Recettes de mes livres à importer': 'Recipes from my books to import', 'Voir plus': 'Show more',
       'À importer': 'To import', 'À importer · p. {p}': 'To import · p. {p}', 'Disponible': 'Available', 'Disponibles': 'Available', 'Partielle': 'Partial',
       'De mon livre': 'From my book', // fidélité aux maquettes (28 octobre) : les deux lignes de source à hôte / titre deviennent « Du web » et « De mon livre »
       'Voir la page d’origine': 'View the original page', 'Portions, versions et autres gestes': 'Servings, versions and more',
-      '{n} disponible(s) · {m} à importer': '{n} available · {m} to import', 'Voir les {n} recettes': 'Show all {n} recipes',
-      'Ajouter des recettes': 'Add recipes', 'Ajouter des pages de sommaire': 'Add table-of-contents pages', 'Sommaire': 'Table of contents', 'Pages source': 'Source pages',
+      '{n} disponible(s)': '{n} available', 'Sélectionner': 'Select',
+      'Effacer les filtres': 'Clear filters', 'Ajouter des pages d’index': 'Add index pages', 'Sommaire': 'Table of contents', 'Pages source': 'Source pages',
       'Cherche une recette, un ingrédient, une envie.': 'Search a recipe, an ingredient, a craving.', 'Aucune recette pour l’instant.': 'No recipes yet.',
-      'Reprendre la séance': 'Resume the session', '{n} à importer': '{n} to import', 'Page {n} · p. {p}': 'Page {n} · p. {p}',
+      'Reprendre la séance': 'Resume the session', '{n} référence(s)': '{n} reference(s)', 'Page {n} · p. {p}': 'Page {n} · p. {p}',
     };
     // Clés RÉEMPLOYÉES par le lot (existaient avant lui : leur anglais ne change pas ; « Corriger » reste « Fix », H-14 ; « Mes livres » reste le
     // segment de la recherche, D-UI-4 ; « 1 portion » et « {n} portions » disent les portions des repères, R-UI-41). Existence, puis quatre anglais épinglés.
@@ -1759,7 +1665,7 @@ export async function runCarnetTests({ eq, ok }) {
     const CHAINES_RETIREES = ['+ Recette', '+ Pages d’index', 'Ouvrir le lien', 'Aller à Mes livres.'];
     // Où chaque texte neuf doit paraître comme t('…') (§ 4 ; un texte peut vivre dans plusieurs modules). Les modules de MODULES_NEUFS sont scannés
     // en entier par tests/ajouter.js ; les autres passent par CHAINES_NEUVES_AILLEURS, dont ce bloc vérifie qu'elle est À JOUR (calcul, pas relevé).
-    const MODULES_UI1 = ['../src/ui/library.js', '../src/ui/recipe.js', '../src/ui/book.js', '../src/ui/home.js', '../src/ui/components.js', '../src/ui/accueil-livre.js', '../src/ui/import-web.js', '../src/ui/import-cible.js', '../src/ui/add.js'];
+    const MODULES_UI1 = ['../src/ui/bibliotheque-liste.js','../src/ui/actions-contenu.js','../src/ui/navigation-contexte.js','../src/ui/library.js', '../src/ui/recipe.js', '../src/ui/book.js', '../src/ui/home.js', '../src/ui/components.js', '../src/ui/accueil-livre.js', '../src/ui/import-web.js', '../src/ui/import-cible.js', '../src/ui/add.js'];
     const HORS_MODULES_NEUFS = ['../src/ui/library.js', '../src/ui/recipe.js', '../src/ui/book.js', '../src/ui/home.js', '../src/ui/components.js'];
     // Ronde 1 (constat 19) : textes de la table que CE module écrivait déjà en t() à f3672be (mesuré) — antérieurs au module, ils ne se listent pas dans
     // CHAINES_NEUVES_AILLEURS (règle d'en-tête de tests/ajouter.js) ; leurs entrées en.js, elles, sont neuves (T2, T4) et la table les épingle.

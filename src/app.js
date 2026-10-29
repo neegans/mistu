@@ -1,13 +1,13 @@
 import { renderCorbeille } from './ui/corbeille.js';
 // Point d'entrée : initialise la base, la langue de l'interface, la coquille et le routeur ; enregistre le service worker.
 import { el, replace, toast } from './core/dom.js';
-import { route, setNotFound, start, parseHash, refresh } from './core/router.js';
+import { route, setNotFound, start, parseHash, refresh, remplacerAdresse } from './core/router.js';
 import { setUiLocale, t } from './core/i18n.js';
 import * as repo from './model/repo.js';
 import { on } from './core/bus.js';
 import { logError } from './core/log.js';
 import { revoquerUrlsDeBlob } from './core/blob-urls.js';
-import { getData, invalidate, getSyncState, routeApresRetour, relireReglages, isActivitySynced, demarrerSync, setSyncState, poserMoteur, passeAEcrit, doitRendreApresPasse, SYNC_ROUTE_KEY, qualiteEnvoi } from './ui/state.js';
+import { getData, invalidate, getSyncState, getSyncGeneration, routeApresRetour, relireReglages, isActivitySynced, demarrerSync, setSyncState, poserMoteur, passeAEcrit, doitRendreApresPasse, SYNC_ROUTE_KEY, qualiteEnvoi } from './ui/state.js';
 import { installCapture } from './sync/outbox.js';
 import { createAuth } from './sync/auth.js';
 import { createMoteur } from './sync/moteur.js';
@@ -39,21 +39,29 @@ import { renderCreerIA } from './ui/creer-ia.js';
 import { renderImportCible } from './ui/import-cible.js';
 import { porteEntreeModel, renderPorteEntree } from './ui/porte-entree.js';
 
+import { activerEntree, porteeNavigation, capturerVue, restaurerVue, invaliderNavigation, installerRetours, lienBibliotheque } from './ui/navigation-contexte.js';
+
 function shell() { return coquille(parseHash().path); }
 
 let current = null;
 let renderSeq = 0;
+let porteeAffichee = null;
+let gardeRefusee = null;
 
-async function onRoute({ handler, params, query, path }) {
+async function onRoute({ handler, params, query, path, navigation = {} }) {
+  const seq = ++renderSeq, base = repo.db, generation = getSyncGeneration();
+  if (current) capturerVue(current.main);
+  const estCourante = () => seq === renderSeq && base === repo.db && generation === getSyncGeneration();
   // La coquille est reconstruite au premier rendu et après un changement de langue : la pastille neuve est remise
   // à l'état RÉEL du moteur tout de suite, sinon elle resterait vide jusqu'à la prochaine passe.
   if (!current) { current = shell(); replace(document.getElementById('app'), current.root); majPastille(getSyncState().moteur?.etat(), !!getSyncState().user); }
   for (const a of [...current.side.querySelectorAll('a'), ...current.tabs.querySelectorAll('a')]) {
-    const href = a.getAttribute('href').slice(1);
+    const href = a.dataset.navDestination || a.getAttribute('href').slice(1).split('?')[0];
     const nav = NAV.find((n) => n.href === href);
-    a.classList.toggle('active', nav ? nav.match(path) : path.startsWith(href));
+    const actif = nav ? nav.match(path) : path.startsWith(href);
+    a.classList.toggle('active', actif);
+    if (actif) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   }
-  const seq = ++renderSeq;
   // Les URL blob: de la vue qu'on quitte n'ont plus de lecteur (spec § 6, F4/S15) : elles sont révoquées ICI, au
   // seul endroit qui voit tous les changements de vue. Sans cela, chaque couverture affichée retiendrait ses octets
   // en mémoire jusqu'au rechargement de la page.
@@ -63,13 +71,27 @@ async function onRoute({ handler, params, query, path }) {
   replace(current.main, el('p', { class: 'muted' }, t('Chargement…')));
   try {
     const ctx = await getData();
-    const node = await handler(params, query, ctx);
-    if (seq !== renderSeq) { node.dispose?.(); for (const photo of node.querySelectorAll('[data-role="photo-visible"]')) photo.dispose?.(); return; }
+    if (!estCourante()) { if (seq === renderSeq) refresh(); return; }
+    let portee = porteeNavigation(ctx);
+    const guard = getSyncState().guard;
+    const changee = porteeAffichee && (porteeAffichee.proprietaire !== portee.proprietaire || porteeAffichee.base !== portee.base || porteeAffichee.epoque !== portee.epoque);
+    if (changee || guard?.ok === false && guard !== gardeRefusee) {
+      if (!changee || porteeAffichee.epoque === portee.epoque) invaliderNavigation({ motif: guard?.ok === false ? 'compte_refuse' : 'proprietaire_change' });
+      if (guard?.ok === false) gardeRefusee = guard;
+      portee = porteeNavigation(ctx);
+      query = ['/library', '/search'].includes(path) || path.startsWith('/books/') ? {} : Object.fromEntries(Object.entries(query).filter(([k]) => !['origine', 'retour_nav'].includes(k)));
+      remplacerAdresse(path + (Object.keys(query).length ? '?' + new URLSearchParams(query) : ''));
+    }
+    porteeAffichee = portee;
+    activerEntree({ cleEntree: navigation.cleEntree, position: navigation.position, chaine: navigation.chaine, type: navigation.type, route: path, query, portee });
+    const node = await handler(params, query, { ...ctx, navigation: { cleEntree: navigation.cleEntree, portee } });
+    if (!estCourante()) { node.dispose?.(); for (const photo of node.querySelectorAll('[data-role="photo-visible"]')) photo.dispose?.(); if (seq === renderSeq) refresh(); return; }
     replace(current.main, node);
-    window.scrollTo(0, 0);
+    for (const a of current.root.querySelectorAll('[data-nav-destination="/library"]')) a.href = lienBibliotheque();
+    await restaurerVue({ racine: node, cleEntree: navigation.cleEntree, portee, estCourante });
   } catch (e) {
     logError('route', { error: e });
-    if (seq !== renderSeq) return;
+    if (!estCourante()) { if (seq === renderSeq) refresh(); return; }
     replace(current.main, el('div', { class: 'card danger' }, el('h2', null, t('Une erreur est survenue')), el('p', { class: 'muted' }, t('Code : {c}', { c: e?.name || 'Erreur' })), el('button', { class: 'btn', onClick: () => location.reload() }, t('Recharger'))));
   }
 }
@@ -269,7 +291,7 @@ async function boot() {
     // peut les réécrire (réglage touché, restauration d'archive, vidage d'appareil).
     const settings = await relireReglages();
     setUiLocale(settings.ui_locale);
-    on('settings', ({ key, value }) => { if (key === 'ui_locale') { setUiLocale(value); current = null; refresh(); } });
+    on('settings', ({ key, value }) => { if (key === 'ui_locale') { capturerVue(current?.main); setUiLocale(value); current = null; refresh(); } });
     // Avant la porte (R34) : l'app doit être installable dès la première visite, même si la personne reste devant
     // l'écran d'accueil sans rien toucher.
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
@@ -283,6 +305,8 @@ async function boot() {
     try { demarrerMoteur(); }
     catch (error) { logError('sync.moteur', { error }); }
     registerRoutes();
+    installerRetours();
+    window.addEventListener('pagehide', () => capturerVue(current?.main));
     start(onRoute);
   } catch (e) {
     logError('boot', { error: e });

@@ -1,3 +1,5 @@
+import { retourConnu, porteeNavigation } from './navigation-contexte.js';
+import { destinationApresRecette } from './actions-contenu.js';
 import { panneauAbandonProposition, texteConfirmationAbandon, texteErreurReprise } from './reprise-import.js';
 import { recetteActiveDansContexte } from './state.js';
 import { revoirLectureImport, memeCaptureImport } from '../domain/contexte-import.js';
@@ -137,7 +139,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
     if (importId) return importId;
     if (!opening) opening = P.ouvrirThermomix({ recipeId: propreRecette.id, versionId: version.id, contexteRecette, ...snapshot }, patchDeps()).then(r => {
       row = r; importId = r.id;
-      if (vivant()) adresse(`#${lien}/thermomix${buildQuery({ import: importId })}`);
+      if (vivant()) adresse(`#${lien}/thermomix${buildQuery({ ...query, import: importId })}`);
       return r.id;
     }).catch(async e => { opening = null; await montrerConflit(); throw e; });
     return opening;
@@ -236,9 +238,9 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
   const avisCycle = el('div', {class:'status warn'}, el('p', null, t('Cette proposition date d’avant le retrait de la recette. Une nouvelle relecture est nécessaire.')), revoir);
   const copieBrouillon = action(t('Créer une copie de ce brouillon sur cet appareil'), 'copier-brouillon-tm7', async () => {
     if (!importId || !terminal()) return;
-    const nouvelle = await P.copierBrouillonThermomix(importId, patchDeps()); nav(`${lien}/thermomix${buildQuery({ import: nouvelle.id })}`);
+    const nouvelle = await P.copierBrouillonThermomix(importId, patchDeps()); nav(`${lien}/thermomix${buildQuery({ ...query, import: nouvelle.id })}`);
   });
-  append(root, [pageHeader(t('Chef Thermomix'), { subtitle: propreRecette.display_title || propreRecette.original_title, back: { href: lien + buildQuery({ v: version.id }), label: t('Recette') } }),
+  append(root, [pageHeader(t('Chef Thermomix'), { subtitle: propreRecette.display_title || propreRecette.original_title, back: {...retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli:lien+buildQuery({v:version.id})}),label:t('Retour')} }),
     el('div', { class: 'status' }, t('TM7 · Amérique du Nord · 120 V. Manuel et vapeur, sans chauffe ou 100 °C. Les autres modes restent hors de cette version.')),
     el('p', { class: 'muted' }, t('Adapte seulement les étapes choisies. Les ingrédients et les autres étapes resteront inchangés.')),
     propreRecette.availability === 'partial' ? el('p', { class: 'status warn' }, t('Cette recette est partielle. Les informations nécessaires doivent être complétées avant toute proposition qui en dépend.')) : null,
@@ -314,7 +316,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
     renderPrecedent();
     propositionZone.replaceChildren(); relecture = false; montage = false;
     if (row?.status === 'enregistre' && row.version_id) {
-      propositionZone.append(el('p', null, t('Adaptation conservée.')), el('a', { class: 'btn', href: `#${lien}${buildQuery({ v: row.version_id })}` }, t('Ouvrir cette adaptation'))); return;
+      propositionZone.append(el('p', null, t('Adaptation conservée.')), el('a', { class: 'btn', href: '#'+destinationApresRecette(propreRecette.id,query,ctx,{v:row.version_id}) }, t('Ouvrir cette adaptation'))); return;
     }
     if (terminal()) return;
     if (!resultat) { if (row?.validation_erreur) message(texteErreurThermomix({ code: row.validation_erreur })); return; }
@@ -339,7 +341,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
       try {
         await queue; if (!vivant()) return;
         const gardee = await P.garderThermomix({ importId, relu: true, contexteRecette, attendu: journalRelu }, patchDeps());
-        if (vivant()) { dire(t('Adaptation conservée')); nav(lien + buildQuery({ v: gardee.id })); row = await P.lireBrouillonThermomix(importId, { repo }); renderResultat(); }
+        if (vivant()) { dire(t('Adaptation conservée')); nav(destinationApresRecette(propreRecette.id,query,ctx,{v:gardee.id})); row = await P.lireBrouillonThermomix(importId, { repo }); renderResultat(); }
       } finally { saving = false; relu.disabled = readonly() || perime(); monte.disabled = readonly() || perime(); garder.disabled = !relecture || !montage || readonly() || perime(); synchroniser(); }
     }, true); garder.disabled = true; relu.disabled = readonly() || perime(); monte.disabled = readonly() || perime();
     propositionZone.append(el('label', { class: 'row top' }, relu, el('span', null, t('J’ai relu les étapes et les réglages proposés.'))),

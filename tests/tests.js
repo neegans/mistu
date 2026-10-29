@@ -14,6 +14,10 @@ import { runL2CorbeilleImportsTests } from './l2-corbeille-imports.js';
 import { runL2SyncRepriseTests } from './l2-sync-reprise.js';
 import { runL2SourcesSyncTests } from './l2-sources-sync.js';
 import { runL2SourcesProvenanceTests } from './l2-sources-provenance.js';
+import { runL3NavigationTests } from './l3-navigation.js';
+import { runL3BibliothequeTests } from './l3-bibliotheque.js';
+import { runL3ListesTests } from './l3-listes.js';
+import { runL3ActionsTests } from './l3-actions.js';
 import { runL0TraductionsTests } from './l0-traductions.js';
 import { runL0CuisineTests } from './l0-cuisine.js';
 import { runL0RepasCoursesTests } from './l0-repas-courses.js';
@@ -339,11 +343,17 @@ for (const suite of [runL2CorbeilleDomaineTests, runL2CorbeilleArchiveTests, run
   catch (error) { ok(false, `Suite L2 interrompue : ${error?.message || String(error)}`); }
 }
 
+// L3 : contexte de navigation, filtres, listes et commandes capturées depuis le contenu affiché.
+for (const suite of [runL3NavigationTests, runL3BibliothequeTests, runL3ListesTests, runL3ActionsTests]) {
+  try { await suite({ eq, ok, close }); }
+  catch (error) { ok(false, `Suite L3 interrompue : ${error?.message || String(error)}`); }
+}
+
 // --- Compte total épinglé (F2). Une assertion qui DISPARAÎT — un bloc supprimé, une boucle qui ne tourne plus, une
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 8365,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 8546,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

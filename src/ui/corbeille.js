@@ -94,6 +94,8 @@ function texteBilanRestauration(bilan) {
 export async function panneauCycleLivre(edition, ctx, deps = {}) {
   const R = deps.repo ?? repoModule, cycle = lireCycleEdition(edition);
   const root = el('div', {class:'stack',dataset:{role:'cycle-livre'}});
+  // L3 réutilise le même flux depuis Actions, avec la capture prise sur la couverture affichée.
+  root.agir = async () => { await agir(); return root.resultat || {issue:'annule'}; };
   if (cycle.etat === 'invalide') return el('div', {class:'status warn',role:'status'}, t('L’état de ce livre est à vérifier. Son contenu est conservé.'));
   const retire = cycle.etat === 'retiree', message = el('p', {class:'muted',role:'status'});
   const bouton = el('button', {type:'button',class:retire?'btn':'btn danger',dataset:{role:retire?'restaurer-livre':'retirer-livre'},onClick:agir}, retire?t('Restaurer le livre'):t('Mettre à la corbeille'));
@@ -116,6 +118,7 @@ export async function panneauCycleLivre(edition, ctx, deps = {}) {
     }},t('Vérifier la disponibilité')));
   }
   async function terminer(resultat) {
+    root.resultat={issue:'succes',id:edition.id,...resultat};
     const apres=resultat.edition;
     if(retire){livresAnnulables.delete(edition.id);if(resultat.bilanRestauration)restaurationsLivres.set(edition.id,resultat.bilanRestauration);}
     else {livresAnnulables.set(edition.id,lireCycleEdition(apres).id);restaurationsLivres.delete(edition.id);}
@@ -125,8 +128,9 @@ export async function panneauCycleLivre(edition, ctx, deps = {}) {
   }
   async function agir() {
     if(enCours||!autorise)return;enCours=true;verrouiller();
+    root.resultat=null;
     try {
-      const contexte=await capturerEdition(R,edition,{ctx});
+      const contexte=deps.contexte || await capturerEdition(R,edition,{ctx});
       if(retire){await terminer(await (deps.restaurerLivre??restaurerLivre)(edition,{repo:R,contexte}));return;}
       let bilan=await (deps.preparerRetraitLivre??preparerRetraitLivre)(edition,{repo:R,contexte});
       if(bilan.vide){
@@ -134,7 +138,7 @@ export async function panneauCycleLivre(edition, ctx, deps = {}) {
         catch(e){if(e?.code!=='bilan_change')throw e;bilan=await (deps.preparerRetraitLivre??preparerRetraitLivre)(edition,{repo:R,contexte});}
       }
       await choisir(bilan,contexte);
-    }catch{message.textContent=retire?t('Le livre n’a pas pu être restauré. Il a peut-être changé ; recharge sa fiche avant de réessayer.'):t('Le livre n’a pas pu être mis à la corbeille. Recharge sa fiche avant de réessayer.');}
+    }catch(e){root.resultat={issue:'refuse',id:edition.id,raison:e?.code||'ecriture_refusee'};message.textContent=retire?t('Le livre n’a pas pu être restauré. Il a peut-être changé ; recharge sa fiche avant de réessayer.'):t('Le livre n’a pas pu être mis à la corbeille. Recharge sa fiche avant de réessayer.');}
     finally{enCours=false;verrouiller();}
   }
   function choisir(initial,contexte) {

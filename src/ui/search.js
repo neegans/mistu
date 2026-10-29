@@ -1,3 +1,4 @@
+import { lireContexteListe, memoriserListe, porteeNavigation, lienAvecOrigine } from './navigation-contexte.js';
 import { recetteActiveDansContexte } from './state.js';
 import { lireCycleRecette, recetteActive } from '../domain/cycle-recette.js';
 import { TEXTE_RECETTE_RETIREE, TEXTE_CYCLE_INVALIDE } from './corbeille.js';
@@ -101,6 +102,9 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   // deps.routeCourante (ronde 1) : la route lue par la garde du vol d'aperçus quand la dernière vue se déconnecte (par défaut celle du routeur ; injectée par les tests).
   const { chercher = chercherRecettesWeb, apercus: apercusFn = (deps.chercher === undefined ? lireApercusWeb : null), enLigne, navigate: nav = navigate, remplacerAdresse: remplacer = remplacerAdresse, routeCourante = currentPath, toast = toastDom, lecture = {} } = deps;
   const state = { q: query.q || '', mode: query.mode || 'all', favorites: query.fav === '1', cooked: query.cooked === '1', requireAll: query.any !== '1', parsed: parseQuery(query.q || '') };
+  const portee=ctx.navigation?.portee||porteeNavigation(ctx),memo=lireContexteListe({route:'/search',query,portee});
+  if(memo.filtresRecherche)state.parsed.filters=structuredClone(memo.filtresRecherche);
+  const memoriser=()=>memoriserListe({route:'/search',portee,cleEntree:ctx.navigation?.cleEntree,q:state.q,filtresRecherche:state.parsed.filters,filtresRechercheQ:state.q});
   // La session de l'assistant (R-T3-1) : lue ICI pour les gardes de l'écran, relue à chaque appel (un jeton expiré se rafraîchit).
   // Attendue en mode web SEULEMENT : jeton() peut rafraîchir le jeton par le réseau, et les autres modes de recherche n'en ont pas
   // besoin. Quand la personne bascule vers « Web » dans cette MÊME instance (run() → render(), sans ré-instanciation), elle est lue avant
@@ -113,7 +117,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   const role = query.role || (forRecipe ? 'salade' : null);
   if (forRecipe && role) state.parsed.filters.type = role;
 
-  const input = el('input', { type: 'search', value: state.q, placeholder: forRecipe ? t('Préciser : concombre, sans gluten, 15 minutes…') : t('Ex. : une salade avec du concombre, sans gluten, en quinze minutes'), enterkeyhint: 'search' });
+  const input = el('input', { type: 'search', value: state.q, dataset:{navFocus:'recherche'}, placeholder: forRecipe ? t('Préciser : concombre, sans gluten, 15 minutes…') : t('Ex. : une salade avec du concombre, sans gluten, en quinze minutes'), enterkeyhint: 'search' });
   // L'adresse de la recherche n'a qu'UNE définition : run() (Entrée, mode, cases) et lancer() (la tape web) la rejouent
   // en replace par le `navigate` injecté (par défaut celui du routeur).
   const requeteRoute = () => '/search' + buildQuery({ q: state.q, mode: state.mode, fav: state.favorites ? 1 : '', cooked: state.cooked ? 1 : '', any: state.requireAll ? '' : 1, for: query.for || '', role: role || '' });
@@ -146,6 +150,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   root.append(header, results);
 
   function render() {
+    memoriser();
     affiche = null; // UI-2 (R-UI2-7) : ce que cette vue montre est reposé par renderIssue (un « trouvé »), ou rien
     // Lot F (§ 4.2, D-T9) : les URL des vignettes de la génération précédente, relevées AVANT le vidage, révoquées APRÈS (remplacerEnRevoquant).
     remplacerEnRevoquant(results);
@@ -178,7 +183,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
         hit.timeState === 'unknown' ? el('span', { class: 'chip neutral' }, t('Durée inconnue')) : null,
         hit.why ? el('div', null, el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Pourquoi cet accord ?')), ...hit.why.map((w) => el('div', { style: { fontSize: '.9rem' } }, w.text, ' ', el('span', { class: 'badge' }, w.origin)))) : null,
         forRecipe ? el('button', { class: 'btn small sage', onClick: (e) => { e.preventDefault(); e.stopPropagation(); addToMealFlow(ctx, hit.doc, { role: role === 'soupe' ? 'entree' : 'accompagnement', mainDoc: forRecipe, mealId: query.meal || null }); } }, t('Ajouter à mon repas')) : null);
-      return recipeCard(hit.doc, { extra, reasons: hit.reasons, ctxF });
+      return recipeCard(hit.doc, { extra, reasons: hit.reasons, ctxF, ctx });
     };
     const total = groups.admissible.length + groups.to_verify.length + groups.adaptation.length + groups.time_unknown.length;
     if (groups.admissible.length) results.append(section(forRecipe ? t('Propositions') : t('Recettes admissibles'), ...groups.admissible.slice(0, forRecipe ? 3 : 50).map(card),
@@ -188,7 +193,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     if (groups.adaptation.length) results.append(section(t('Adaptation nécessaire (ingrédient facultatif à retirer)'), ...groups.adaptation.map(card)));
     if (groups.references.length && state.mode !== 'recipes') results.append(section(t('Repérées dans tes livres — recettes incomplètes'),
       el('p', { class: 'muted' }, t('Références d’index : ingrédients, durées et compatibilités inconnus tant que la recette n’est pas scannée.')),
-      ...groups.references.slice(0, 30).map((h) => recipeCard(h.doc, { reasons: h.reasons, ctxF }))));
+      ...groups.references.slice(0, 30).map((h) => recipeCard(h.doc, { reasons: h.reasons, ctxF, ctx }))));
     if (!total && !groups.references.length) {
       const opts = [];
       if (parsed.filters.max_total_minutes) opts.push(el('button', { class: 'btn', onClick: () => { parsed.filters.max_total_minutes += 15; render(); } }, t('Allonger à {n} min', { n: parsed.filters.max_total_minutes + 15 })));
@@ -423,7 +428,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     let r;
     try { r = await garderEtLire(lien, { ctx, ...lecture }); }
     catch (e) { logError('search.garder_et_lire', { error: e }); r = null; } // ronde 1 : une écriture impossible (quota, base fermée) laisse une trace
-    if (r?.issue === 'ok') { nav(`/recipes/${encodeURIComponent(r.recipeId)}/importer`); return; }
+    if (r?.issue === 'ok') { nav(lienAvecOrigine(`/recipes/${encodeURIComponent(r.recipeId)}/importer`).slice(1)); return; }
     if (r?.issue === 'doublon') {
       const carteNoeud = bouton.closest('.card');
       for (const rangee of [...carteNoeud.querySelectorAll(':scope > .row')]) rangee.remove();

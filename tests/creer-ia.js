@@ -8,7 +8,7 @@ import { EN } from '../src/i18n/en.js';
 export async function runCreerIaTests({ eq, ok }) {
   const C = await import('../src/domain/creation-ia.js');
   buildIngredientIndex(INGREDIENTS); // l'index des lignes est global (lines.js:6) : la suite le pose elle-même (F10)
-  eq(APP_VERSION, '0.24.0', 'T1 : APP_VERSION 0.24.0 (lot UI-1)');
+  eq(APP_VERSION, '0.25.0', 'T1 : APP_VERSION 0.25.0 (lot UI-1)');
 
   // --- estCreationIA (C-2, F6)
   const synth = { kind: 'synthesis', provenance: { generated_by: 'ai', creation: { demande: 'x' } } };
@@ -1504,19 +1504,22 @@ export async function runCreerIaTests({ eq, ok }) {
         return { book_editions: [], recipes, recipe_versions: versions, source_documents: [], source_pages: [], rediscovery_prefs: [], dishes: [], dish_recipe_links: [], recipesById: new Map(recipes.map((r) => [r.id, r])), docsByRecipe: new Map(d.map((x) => [x.recipe.id, x])), scan_sessions: [], settings: {}, books: [], booksById: new Map(), editionsById: new Map(), editionLabel: () => '' };
       };
       const signet = { id: 'rc_t6_sig', original_title: 'Un lien gardé', availability: 'reference_only', source_url: 'https://a.test/x', edition_id: null, created_at: '2026-10-19T00:00:00.000Z' };
-      const recente = { ...fiche, id: 'rc_t6_rec', original_title: 'La plus récente', current_version_id: 'rv_t6_rec', created_at: '2026-10-18T09:00:00.000Z' };
-      const ancienne = { ...fiche, id: 'rc_t6_anc', original_title: 'La plus ancienne', current_version_id: 'rv_t6_anc', created_at: '2026-10-17T00:00:00.000Z' };
+      const recente = { ...fiche, id: 'rc_t6_rec', original_title: 'La plus récente', current_version_id: 'rv_t6_rec', created_at: '2026-10-18T09:00:00.000Z', updated_at: '2026-10-18T09:00:00.000Z' };
+      const ancienne = { ...fiche, id: 'rc_t6_anc', original_title: 'La plus ancienne', current_version_id: 'rv_t6_anc', created_at: '2026-10-17T00:00:00.000Z', updated_at: '2026-10-17T00:00:00.000Z' };
       const vRecente = { ...creation, id: 'rv_t6_rec', recipe_id: recente.id };
       const vAncienne = { ...creation, id: 'rv_t6_anc', recipe_id: ancienne.id };
-      // UI-1 T2 : les deux sections vivent sous Livres ({ tab: 'books' }) et sont PLAIN (D-UI-8).
-      const sections = (racine) => [...racine.querySelectorAll('section.plain')].map((s) => s.querySelector('h2')?.textContent);
-      const sectionIA = (racine) => [...racine.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Recettes créées avec l’IA') || null;
-      const biblio = await renderLibrary({}, { tab: 'books' }, ctxBiblio([ancienne, fiche, signet, ficheMain, recente], [vAncienne, creation, manuelle, vRecente]));
-      eq(sections(biblio), ['Liens web gardés', 'Recettes créées avec l’IA'], 'bibliothèque : la section « Recettes créées avec l’IA » vient après « Liens web gardés » (N-7)');
-      eq([textes(sectionIA(biblio), 'h3'), textes(sectionIA(biblio), '[data-role="etiquette-ia"]')], [['La plus récente', 'Saumon au fenouil', 'La plus ancienne'], ['Créée avec l’IA · non testée', 'Créée avec l’IA · non testée', 'Créée avec l’IA · non testée']], 'bibliothèque : les fiches origine ia seulement (ni le signet, ni la recette à la main), la plus récemment créée d’abord, avec leur étiquette');
-      eq(sections(await renderLibrary({}, { tab: 'books' }, ctxBiblio([signet, ficheMain], [manuelle]))), ['Liens web gardés'], 'bibliothèque : sans fiche origine ia, aucune section');
-      const biblioC = await renderLibrary({}, { tab: 'books' }, ctxBiblio([ficheCorrigee], [creation, correction]));
-      eq([sections(biblioC), textes(sectionIA(biblioC), 'h3 + div'), textes(sectionIA(biblioC), '[data-role="etiquette-ia"]')], [['Recettes créées avec l’IA'], ['Créée avec l’IA'], ['Corrigée par toi — d’après une création IA']], 'bibliothèque (N-10) : une fiche corrigée reste dans la section (origine, pas la version courante) et dit sa lignée');
+      // L3 : les fiches IA sont des recettes filtrables ; Livres reste réservé aux éditions.
+      const sections = racine => [...racine.querySelectorAll('section.plain')].map(s=>s.querySelector('h2')?.textContent);
+      const resultats = racine => racine.querySelector('.bibliotheque-resultats');
+      const toutes = ctxBiblio([ancienne, fiche, signet, ficheMain, recente],[vAncienne,creation,manuelle,vRecente]);
+      const livres = await renderLibrary({}, {tab:'books'}, toutes);
+      eq([sections(livres),livres.querySelectorAll('.bibliotheque-item').length],[[],0],'L3 : créations et liens ne deviennent pas des livres');
+      const biblio = await renderLibrary({}, {tab:'recettes',sources:'ia'}, toutes);
+      eq([textes(resultats(biblio),'h3'),textes(resultats(biblio),'[data-role="etiquette-ia"]')],[['La plus récente','Saumon au fenouil','La plus ancienne'],['Créée avec l’IA · non testée','Créée avec l’IA · non testée','Créée avec l’IA · non testée']],'L3 : filtre IA inclut uniquement créations, ordre temporel et étiquettes conservés');
+      const sansIA = await renderLibrary({}, {tab:'recettes',sources:'ia'}, ctxBiblio([signet,ficheMain],[manuelle]));
+      eq(sansIA.querySelectorAll('.bibliotheque-item').length,0,'L3 : filtre IA vide sans création, sans signet ni saisie personnelle');
+      const biblioC = await renderLibrary({}, {tab:'recettes',sources:'ia'},ctxBiblio([ficheCorrigee],[creation,correction]));
+      eq([textes(resultats(biblioC),'h3'),textes(resultats(biblioC),'.carte-plat-source'),textes(resultats(biblioC),'[data-role="etiquette-ia"]')],[[ficheCorrigee.original_title],['Créée avec l’IA'],['Corrigée par toi — d’après une création IA']],'L3 : correction reste dans filtre IA par origine, avec sa lignée exacte');
 
       // --- Chaînes anglaises : chaque texte neuf de T6 a son entrée, et l'interface anglaise les rend
       const CLES_T6 = ['Créée avec l’IA', 'Créée avec l’IA · non testée', 'Créée avec l’IA · testée', 'Adaptée avec l’IA · non testée', 'Adaptée avec l’IA · testée', 'Corrigée par toi — d’après une création IA', 'Ma version — d’après une création IA', 'Adapter avec l’IA', 'Recettes créées avec l’IA', 'Selon l’assistant : {texte}', 'environ {m} min (estimé par l’assistant)', 'Conseils', 'À vérifier avant de servir', AVERT, 'Création'];
