@@ -1,4 +1,4 @@
-# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — CORRECTIFS 0.23.2 VALIDÉS LOCALEMENT
+# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — CORRECTIFS 0.23.2 PUBLIÉS
 
 **29 octobre 2026 — PRIORITÉ DONNÉE PAR NEEGAN : THERMOMIX, APPELS PAYÉS ET BROUILLONS.**
 Travail isolé dans `correctifs-thermomix-0.23.2`, base publique `752566d` ; L2 est conservé, non terminé, dans `l2-corbeille-livres`.
@@ -10,11 +10,14 @@ Abandon explicite des anciens brouillons, résultats précédents récupérables
 Corrections TM en versions personnelles avec retour explicite aux étapes source ; exports documentaires des plans invalidés.
 Clôtures connues réconciliées sur réception/envoi, copies tardives consultables localement sans réouverture ; limites des anciens clients documentées.
 
-**Réception locale terminée ; publication autorisée en cours.** Navigateur **7952/7952** (épingle7951, +288 depuis7664 ; aucune assertion retirée), zéro erreur JavaScript/requête externe. Node **231/231**, migrations `--check`0, syntaxe de45 fichiers JS et diff propres.
+**Correctif 0.23.2 publié et vérifié.** Navigateur **7952/7952** (épingle7951, +288 depuis7664 ; aucune assertion retirée), zéro erreur JavaScript/requête externe. Node **231/231**, migrations `--check`0, syntaxe de45 fichiers JS et diff propres.
 Ciblés : sécurité38, JSON10, brouillons61, repères56, adaptation46, synchronisation67 ; huit mutations de protections détectées.
 Application réelle en profil Chrome jetable : deux passages complets,20 mesures à320/390/768/1280 par passage, sans débordement ni texte parasite ; cinq modules neufs en cache et lecture hors ligne.
 L’anomalie de lecture des temps venait du harnais : son attente asynchrone se résolvait sur `false`. Reproduction minimale conservée ; attente remplacée par lectures explicitement attendues jusqu’à l’état écrit. Les deux parcours corrigés prouvent description, estimations et correction manuelle conservées.
-Preuves : `.superpowers/sdd/2026-10-29-correctifs/`. La version publique demeure **0.23.1** jusqu’à vérification de la publication ci-après.
+Code **`5412745`**, avancé dans `main` et poussé ; GitHub Pages construit le29octobre à **17 h 26 HAE (21:26:05 UTC)**.
+**46 fichiers** de production/tests modifiés identiques au commit public. Suite publique **7952/7952**, zéro erreur JavaScript/requête externe.
+Parcours public complet : **20 mesures** sans débordement ni texte parasite, deux réponses simulées conservées, ancien brouillon abandonné, cinq modules en cache et lecture hors ligne.
+Preuves : `.superpowers/sdd/2026-10-29-correctifs/`. La version publique est désormais **0.23.2** ; L2 est repris séparément, encore incomplet.
 Aucun compte privé, HTTP Supabase authentifié, appareil physique iPhone/Safari ou TM7 utilisé ; copies de conflit locales hors archive et limite des anciens clients explicitement conservées dans le rapport.
 
 **29 octobre 2026 — PUBLICATION L0 + L1 SUR « deploy avant », PUIS POURSUITE DU PLAN AUTORISÉE.**

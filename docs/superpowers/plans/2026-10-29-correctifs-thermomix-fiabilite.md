@@ -38,10 +38,18 @@ Base publique 0.23.1 (`752566d`, documentation ; code `d6b4488`). Cible 0.23.2, 
 - La revue indépendante a reproduit puis corrigé deux courses supplémentaires : Garder lie l’écriture à la réponse affichée et relue (avant et dans transaction) ; une correction Thermomix ne rétablit plus un ancien `current_version_id` si un autre onglet a corrigé l’original.
 - Deux passages finaux de l’application réelle passent avec20 mesures chacun. La lecture intermittente de temps vides provenait d’une attente du harnais : le Playwright installé résolvait `waitForFunction(async () => false)` en58ms malgré un timeout500ms, tandis que le prédicat synchrone expirait normalement. L’attente des écritures utilise désormais des lectures `page.evaluate` explicitement attendues et bornées. Aucun correctif applicatif spéculatif n’a été ajouté pour ce faux échec ; les deux reprises constatent les valeurs écrites avant la suite.
 
-Artefacts de travail ignorés : `.superpowers/sdd/2026-10-29-correctifs/`, notamment `securite-rouge.log`, `json-rouge.log`, `mutations-securite.json`, les rapports par volet et `parcours-local/resultat.json`. Réception locale terminée. La publication et ses contrôles seront consignés ci-dessous après déploiement.
+Artefacts de travail ignorés : `.superpowers/sdd/2026-10-29-correctifs/`, notamment `securite-rouge.log`, `json-rouge.log`, `mutations-securite.json`, les rapports par volet et `parcours-local/resultat.json`. Réception locale et publique terminées, publication détaillée ci-dessous.
 
 ## Limites
 
 Les volumes alimentaires non mesurés ne sont pas déduits d’une masse ; le contrôle ne certifie pas le remplissage réel ni une cuisson sur le robot. Les restrictions du profil Mistu sont propres au logiciel. Le contenu original et les données de sauvegarde restent conservés, y compris un plan devenu non conforme, sans lui rendre sa validité de cuisson.
 
 Les essais utilisent des données fictives et des appels simulés, sans compte privé ni robot. Aucun appareil physique iPhone/Safari, lecteur d’écran, échange HTTP Supabase authentifié ou nouvelle mesure sur les deux appareils de Neegan n’est prouvé ici. Les essais de synchronisation emploient les vrais moteurs avec transport simulé. Sans migration SQL, un ancien client ignorant la clôture peut encore rouvrir temporairement la ligne distante. Une application à jour qui connaît la clôture conserve son état fermé et réconcilie à la réception. Les copies perdantes sont locales, hors archive et non purgées automatiquement ; aucune adaptation n’est créée automatiquement par une réponse tardive.
+
+
+## Publication vérifiée
+
+Code `5412745`, intégré en avance rapide dans `main` et poussé sous l’autorisation de la conversation. GitHub Pages construit le29octobre à21:26:05UTC (17h26HAE).
+Comparaison de **46 fichiers** de production/tests modifiés : tous identiques au commit ; le premier essai Python utilisait un magasin de certificats local incomplet, la comparaison a été relancée avec `curl` et vérification TLS normale.
+Suite publique **7952/7952**, zéro erreur JavaScript et requête externe. Parcours public réel avec deux appels simulés : **20 mesures** sans débordement ni texte parasite, conservation des propositions, retour aux étapes source, abandon ancien brouillon, cache des cinq modules et lecture hors ligne.
+Aucune migration SQL requise ou appliquée. La corbeille des livres L2 reste séparée ; sa construction reprend après intégration de ce correctif.

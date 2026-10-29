@@ -3632,4 +3632,4 @@ APP0.23.2, cache `cuisine-os-v0.23.2-1`, DB5/archive2 inchangées, cinq modules 
 Réception locale **7952/7952** (épingle7951, +288), Node231/231, migrations check0, syntaxe45/diff propres ; deux parcours20 mesures et hors ligne verts.
 Le harnais d’attente asynchrone a été corrigé après reproduction minimale ; pas de modification applicative sans défaut confirmé.
 Aucun compte privé, appareil physique ou nouvelle preuve HTTP authentifiée. L2 conservé dans son checkout, non terminé ; suite du plan toujours à réaliser.
-Publication autorisée dans la conversation ; son résultat est consigné en tête de STATE.md après vérification publique.
+Publication autorisée et vérifiée : code5412745, GitHub Pages21:26:05UTC,46 fichiers identiques ; navigateur public7952/7952 et parcours public20 mesures avec cinq modules en cache/hors ligne, zéro erreur JS/requête externe. État consigné en tête de STATE.md.
