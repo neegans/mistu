@@ -545,3 +545,27 @@ concurrentes** ont été exécutées sur PostgreSQL local jetable pendant la con
 La convergence sur les deux appareils réels reste à vérifier.
 Traces locales : `.superpowers/sdd/2026-10-29-l1-publication/` (`migration-0008.log`,
 `postflight-0008-resultat.json`, `postgrest-anonyme.json`). Aucun redéploiement de l’assistant.
+
+
+## Migration `0009_corbeille_livres.sql` — appliquée le29octobre2026
+
+Autorisation persistante : « deploy avant », puis « et enchaine sur le restant des lots », confirmée par « continu ».
+Code9ec738c/intégrationfc407df, application0.24.0. Sauvegarde physique29oct06:29UTC observée `COMPLETED` avant geste.
+Ancien catalogue0008 : sept corps exacts, neuf triggers/RLS et droits attendus. Migration exécutée une seule fois viaCLI Management API,
+transaction avec lock_timeout5s/statement_timeout60s, contrôle d’absence0009 et empreintes des fonctions remplacées, notification PostgREST.
+Aucune donnée métier n’est réécrite par le SQL.
+SHA256 : `1acc501bd34db30c5240fadc8ece75fafae9ef21b6524d4474fe9f219eb5e1a9`.
+
+| Postflight distant, lecture seule | Résultat |
+|---|---|
+| Fonctions : corps, volatilité, security invoker |17/17 exactes|
+| Droits authenticated/anon |Tous conformes ; fonctions de trigger non appelables directement|
+| Triggers, type, fonction et RLS |50/50 conformes (9L1 +41L2)|
+| Capacité sous rôle authenticated autorisé |recipe_lifecycle1, edition_lifecycle1|
+
+Les claims de cette dernière lecture SQL proviennent d’un compte déjà autorisé, sans identifiant/courriel émis et sans JWT utilisateur emprunté.
+Aucun échange HTTP authentifié n’est revendiqué. Les preuves mutantes sont exclusivement locales : PostgreSQL neuf0001→0009,
+121assertions (20cycles,26sources,33tombales,42régressionL1), deux sessions réelles RPC/REST, aliasL1 et CAS/association/source_batch.
+Ancien deadlock et tombales reproduits puis fermés et contre-vérifiés ; aucune preuve de mutation exécutée sur la production.
+La sérialisation des écritures est par propriétaire ; les groupes de nouvelles sources sont atomiques, l’envoi initial d’une bibliothèque reste progressif.
+Traces : `.superpowers/sdd/2026-10-29-l2-publication/serveur/`. Aucun redéploiement de la fonction assistant.
