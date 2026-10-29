@@ -1,5 +1,10 @@
 # STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — 0.25.0 EN LIGNE — L3 PUBLIÉ
 
+**L4 — Éditeurs et brouillons en construction.** [Spec](docs/superpowers/specs/2026-10-29-l4-editeurs-brouillons-design.md)
+relue techniquement après réception publique L3 ; branche `l4-editeurs-brouillons`, base `9ecf826`.
+Brouillons locaux conditionnés, publication atomique, édition de recette et de livre, sorties protégées.
+Cible0.26.0 ; DB6/archive3 inchangées, aucun SQL nouveau. L4 n’est pas encore reçu ni publié.
+
 **L3 — Gestion visible : publié et vérifié.** Branche `l3-gestion-visible`, base publique `fc407df`.
 [Spec](docs/superpowers/specs/2026-10-29-l3-gestion-visible-design.md), [rapport](docs/superpowers/plans/2026-10-29-l3-gestion-visible.md).
 Poursuite et publication autorisées par « et enchaine sur le restant des lots » puis « continu ».
