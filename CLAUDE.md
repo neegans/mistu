@@ -3655,3 +3655,8 @@ Navigateur8366/8366 (épingle8365, +414), Node232/232, générateur0, syntaxe87 
 SQL local neuf121 assertions + deux sessions concurrentes ; trois moteurs/501 membres/archive3/photos ; vrai passageDB5→6.
 Parcours réel24 mesures et deux rechargements hors ligne, photos et notes intactes. Réception locale seulement à ce point ; aucun SQL0009 distant.
 Rapport : `docs/superpowers/plans/2026-10-29-l2-corbeille-livres.md`. L3–L10 etE1 restent à réaliser ; limites physiques et propriétaires hérités documentées.
+
+Publication L2 vérifiée : migration0009 appliquée une fois ;17 fonctions/50triggers/RLS/droits exacts et capacité d’édition1.
+Code9ec738c intégréfc407df, Pages construit29oct22:18:18UTC. Public8366/8366 ;82 fichiers identiques ;24 mesures publiques,
+cache0.24.0/DB6 et deux rechargements hors ligne avec photos/notes intactes. Pas d’essai HTTP authentifié ou appareil physique.
+La suite L3 reprend ; le plan directeur complet n’est pas encore terminé.

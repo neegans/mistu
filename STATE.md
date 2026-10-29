@@ -1,4 +1,13 @@
-# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — 0.23.2 EN LIGNE ; L2 REÇU LOCALEMENT
+# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — 0.24.0 EN LIGNE — L2 PUBLIÉ ET VÉRIFIÉ
+
+**Publication L2 vérifiée — 29 octobre,18 h 18 HAE (22:18:18UTC).** Code `9ec738c`, intégration `fc407df`,
+avance rapide dans `main` puis GitHub Pages construit. **82 fichiers** de production/tests publics identiques au commit.
+Suite publique **8366/8366**, zéro erreur JavaScript/requête extérieure. Parcours public :24 mesures sans débordement,
+rechargements livre et recette avec réseau coupé, photos/notes/versions intactes, six modules nouveaux et deux modifiés en cache unique.
+Migration0009 appliquée une seule fois avant le site ;17 fonctions exactes, droits exacts,50 triggers avec RLS conformes.
+Capacités `recipe_lifecycle:1` et `edition_lifecycle:1` vérifiées sous rôle authenticated autorisé, en lecture seule.
+Aucune donnée métier serveur modifiée, aucun appel assistant ni JWT utilisateur emprunté ; pas d’essai HTTP authentifié sur appareils privés.
+[Rapport complet](docs/superpowers/plans/2026-10-29-l2-corbeille-livres.md). **L3 reprend ensuite ; L3–L10 etE1 ne sont pas terminés.**
 
 **29 octobre 2026 — L2 : CORBEILLE DES LIVRES, RÉCEPTION LOCALE TERMINÉE.**
 Après « deploy avant », Neegan demande « et enchaine sur le restant des lots ».

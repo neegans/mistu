@@ -94,3 +94,22 @@ adoptés silencieusement par un compte connecté. La sérialisation SQL est par 
 ne sont pas mesurés. L’envoi initial complet reste progressif, seul un groupe de nouvelles sources est atomique côté serveur.
 Essais physiques iPhone/Safari, lecteur d’écran et synchronisation HTTP authentifiée sur deux appareils personnels non exécutés.
 À cette réception locale, **aucune migration0009 ni publication0.24.0 n’est encore effectuée** ; la suite du rapport consignera les gestes réels.
+
+## Publication autorisée et vérifiée
+
+Code **9ec738c**, intégration **fc407df** (bilan public0.23.2 conservé), avance rapide de`main`, publication GitHub Pages
+le29octobre à **22:18:18UTC /18 h 18HAE**. **82 fichiers** publics de production/tests comparés au commit : identiques.
+Suite publique **8366/8366**, zéro erreur JavaScript ou requête externe.
+Parcours public complet répété :24 mesures sans débordement/texte parasite, photo et notes conservées après deux rechargements hors ligne,
+cache unique avec six nouveaux modules et deux modules de corbeille modifiés. Dialogues capturés à la hauteur du viewport pour éviter
+un artefact de capture longue de couche fixe ; DOM unique vérifié, aucun défaut applicatif confirmé. Captures publiques réellement relues.
+
+Migration0009 appliquée une seule fois en transaction avec délais bornés et gardes anti-répétition/empreintes des anciennes fonctions.
+SHA256 **1acc501bd34db30c5240fadc8ece75fafae9ef21b6524d4474fe9f219eb5e1a9**.
+Postflight distant en lecture seule :17 corps/volatilités/security-invoker exacts, droits exacts,50 triggers et RLS exacts.
+Capacité sous rôle authenticated autorisé :recipe_lifecycle1 etedition_lifecycle1. Les preuves mutantes121assertions restent locales ;
+aucun contenu métier serveur consulté ou modifié pour cette réception, aucun assistant appelé, aucun JWT utilisateur emprunté.
+Le contrôle de capacité SQL ne constitue pas un échange HTTP authentifié ni une preuve de deux appareils personnels synchronisés.
+
+La version publique est **0.24.0**. Les rapports et résultats de publication sont dans`.superpowers/sdd/2026-10-29-l2-publication/`.
+L3–L10 etE1 restent à réaliser sous l’autorisation de poursuivre le plan.
