@@ -1,4 +1,14 @@
-# STATE.md — Cuisine OS (mistu) — 28 octobre 2026 — PHOTOS ET REPÈRES EN LIGNE, 0.21.0, 7080/7080
+# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — PHOTOS ET REPÈRES EN LIGNE, 0.21.0, 7080/7080
+
+**29 octobre 2026 — MISE À JOUR D’UNE INSTALLATION 0.20.0 VÉRIFIÉE.**
+Sur une même origine locale `/mistu/`, Chrome en profil jetable passe du commit publié `d832528` au commit `9faa1bf`.
+Avant rechargement, l’onglet garde bien son code 0.20.0 même après activation du nouveau service worker ; après rechargement en ligne,
+Réglages affiche 0.21.0. Recette, version culinaire, notes permanentes, observations, session et empreintes des deux photos sont identiques.
+Seul le cache `cuisine-os-v0.21.0-1` reste, actif et contrôlant avec les six modules. Hors ligne après rechargement : photo personnelle
+prioritaire décodée, note affichée, cuisine reprise à la seconde étape. Zéro erreur JavaScript et zéro requête externe.
+Preuve : `.superpowers/sdd/2026-10-29-mise-a-jour/resultat.json` ; harnais `verifier.cjs`. Aucun changement applicatif nécessaire.
+Cette vérification complète le profil neuf utilisé pour la publication ; elle ne prouve pas le transfert sur le compte et les appareils réels.
+Retour demandé à Neegan : les photos apparaissent-elles après mise à jour des deux appareils ? Aucune réponse n’est supposée.
 
 **28 octobre 2026 — PHOTOS, DESCRIPTIONS ET TEMPS : PUBLIÉ ET VÉRIFIÉ, 0.21.0.**
 [Spec](docs/superpowers/specs/2026-10-28-interface-visuelle-recettes-design.md) approuvée sur « ok go », branche `interface-visuelle-recettes`, base `d832528`.

@@ -3333,6 +3333,16 @@ R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran so
 
 ### Photos, descriptions et temps (28 octobre 2026 — publié en 0.21.0)
 
+**Complément du 29 octobre — mise à jour installée.** Chrome, profil jetable, même origine locale `/mistu/` :
+`d832528` (0.20.0) → `9faa1bf` (0.21.0), version Réglages vérifiée après rechargement. Recette, version, notes,
+observations, session et empreintes photo restent identiques. Cache 0.21.0-1 seul, six modules présents, contrôle actif.
+Photo personnelle décodée hors ligne, note conservée, cuisine reprise à la seconde étape après rechargement hors ligne.
+Aucune erreur JS/requête externe ; aucune modification applicative. L’onglet resté ouvert conserve son code 0.20 avant
+rechargement malgré activation du nouveau worker. Preuve `.superpowers/sdd/2026-10-29-mise-a-jour/resultat.json`.
+Le premier essai du harnais lisait le cache trop tôt : attente asynchrone Playwright remplacée par un contrôle borné
+qui attend réellement le changement de worker et les six modules. La réception physique entre appareils reste à confirmer.
+
+
 Spec `docs/superpowers/specs/2026-10-28-interface-visuelle-recettes-design.md` approuvée sur « ok go ».
 Branche `interface-visuelle-recettes`, base `d832528`. Publication faite sur « go deploy » : commit de code `af85c6f`,
 intégration en avance rapide dans `main`, push et build GitHub Pages réussis le 28 octobre à 22 h 43 HAE.

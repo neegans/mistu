@@ -76,3 +76,18 @@ Les captures et parcours sont décrits dans [design-qa.md](../../design-qa.md).
 Suite publique **7080/7080** ; cache et six modules vérifiés, photo ajoutée puis décodée hors ligne dans un profil jetable.
 Le contournement ci-dessus décrit le comportement de l’ancienne version 0.20.0.
 Le transfert sur les appareils et le compte de Neegan reste à vérifier ; aucune donnée privée n’a été consultée.
+
+
+## Contrôle de mise à jour — 29 octobre 2026
+
+Le passage d’une installation 0.20.0 contenant déjà des photos et des notes à la 0.21.0 est vérifié dans Chrome, sur une
+même origine locale, avec des données jetables. Les deux photos, les notes et la session de cuisine restent identiques.
+Après rechargement hors ligne, la photo personnelle se décode et la cuisine reprend à la même étape. Cache 0.21.0-1
+actif avec ses six nouveaux modules ; aucune erreur JavaScript ni requête externe.
+
+Une application restée ouverte peut garder son code 0.20.0 même si le nouveau service worker s’est activé. Pour vérifier
+le cas réel : recharger en ligne sur chaque appareil, ouvrir Réglages et lire **Cuisine OS 0.21.0**, puis contrôler le même
+compte et la même adresse `https://neegans.github.io/mistu/`. Prendre une nouvelle photo sur le téléphone, laisser
+l’envoi se terminer, puis ouvrir la recette sur l’ordinateur. Le résultat de cet essai reste à fournir par Neegan.
+
+Preuve technique : `.superpowers/sdd/2026-10-29-mise-a-jour/resultat.json`. Ce contrôle n’accède à aucun compte réel.
