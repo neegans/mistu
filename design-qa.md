@@ -72,4 +72,9 @@ Restent hors de cette preuve : Safari/iPhone physique, formats HEIC/HEIF sur ces
 - Comparaison des trois références aux rendus de l’application.
 - Corrections de densité, taille de photo et commandes, puis nouvelles captures.
 - Parcours principaux, affichages étroits/larges et hors ligne.
-- Publication autorisée sur « go deploy » après cette revue locale ; contrôles publics en cours.
+- Publication réalisée sur « go deploy » : commit `af85c6f`, GitHub Pages en 0.21.0 le 28 octobre à 22 h 43 HAE.
+- Contrôle public : 7080/7080, neuf fichiers identiques, cache actif avec six modules, photo et cuisine hors ligne.
+- Fiche publique contrôlée à 320/390/768/1280 sans débordement ; capture 390 inspectée visuellement.
+
+Preuves publiques dans le même registre : `suite-publique.resultat.json`, `publication.resultat.json`,
+`pages-build-code.json`, `captures-publication/`. Profil jetable sans compte ; limites physiques inchangées.

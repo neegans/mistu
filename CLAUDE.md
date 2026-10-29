@@ -3331,10 +3331,16 @@ DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de
 R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
 404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
 
-### Photos, descriptions et temps (28 octobre 2026 — construit localement en 0.21.0)
+### Photos, descriptions et temps (28 octobre 2026 — publié en 0.21.0)
 
 Spec `docs/superpowers/specs/2026-10-28-interface-visuelle-recettes-design.md` approuvée sur « ok go ».
-Branche `interface-visuelle-recettes`, base `d832528`. Publication autorisée sur « go deploy » ; intégration et contrôles publics en cours.
+Branche `interface-visuelle-recettes`, base `d832528`. Publication faite sur « go deploy » : commit de code `af85c6f`,
+intégration en avance rapide dans `main`, push et build GitHub Pages réussis le 28 octobre à 22 h 43 HAE.
+Public vérifié en **0.21.0**, suite **7080/7080** sans erreur JavaScript ni requête hors origine ; neuf fichiers identiques
+au disque, cache `cuisine-os-v0.21.0-1` actif et contrôlant avec les six modules. Profil jetable sans compte : description
+et photo conservées après rechargement, photo décodée hors ligne, progression cuisine conservée. Fiche sans débordement
+à 320/390/768/1280. Preuves publiques `suite-publique.resultat.json`, `publication.resultat.json` et `pages-build-code.json`
+dans le registre du lot ; aucun appel réel assistant ni accès aux données privées.
 Sources de Neegan conservées dans `docs/lots/2026-10-28-interface-visuelle/`. Plan :
 `docs/superpowers/plans/2026-10-28-interface-visuelle-recettes.md`, revue visuelle : `design-qa.md`.
 

@@ -272,5 +272,7 @@ attendre son apparition, puis vérifier sa disponibilité hors ligne. Les tests 
 4. Appliquer les maquettes au livre, aux informations de recette et au gestionnaire photo.
 5. Réorganiser la cuisine et l’accès aux pages source, puis vérifier les parcours complets et la fidélité visuelle.
 
-**Statut : spec approuvée sur « ok go », construction locale terminée en 0.21.0 ; publication autorisée sur « go deploy ».** La construction suit la relecture prévue dans
+**Statut : spec approuvée sur « ok go », construite et publiée en 0.21.0 sur « go deploy ».** Commit de code `af85c6f`,
+GitHub Pages vérifié le 28 octobre à 22 h 43 HAE ; suite publique 7080/7080 et parcours hors ligne réussis.
+Les limites de la preuve sur appareils physiques restent celles du § 11. La construction suit la relecture prévue dans
 [AGENTS.md](../../../AGENTS.md) : « Spec d’abord […] relue par Neegan, puis construction en petites tâches testées ».

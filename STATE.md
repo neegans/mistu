@@ -1,6 +1,6 @@
-# STATE.md — Cuisine OS (mistu) — 28 octobre 2026 — I3 EN LIGNE, 0.20.0, 6820/6820
+# STATE.md — Cuisine OS (mistu) — 28 octobre 2026 — PHOTOS ET REPÈRES EN LIGNE, 0.21.0, 7080/7080
 
-**28 octobre 2026 — PHOTOS, DESCRIPTIONS ET TEMPS : CONSTRUIT LOCALEMENT, 0.21.0.**
+**28 octobre 2026 — PHOTOS, DESCRIPTIONS ET TEMPS : PUBLIÉ ET VÉRIFIÉ, 0.21.0.**
 [Spec](docs/superpowers/specs/2026-10-28-interface-visuelle-recettes-design.md) approuvée sur « ok go », branche `interface-visuelle-recettes`, base `d832528`.
 [Plan et preuves](docs/superpowers/plans/2026-10-28-interface-visuelle-recettes.md), [revue visuelle](design-qa.md).
 Les cinq fichiers fournis par Neegan restent à l’identique dans `docs/lots/2026-10-28-interface-visuelle/`.
@@ -12,10 +12,18 @@ périmées ne se réactivent pas sur une nouvelle version. Badge et filtre Rapid
 exports partagent cette lecture ; les versions culinaires et plans TM7 restent intacts. Livre en onglets Recettes/Pages source, cuisine
 centrée sur l’étape avec ingrédients repliés et navigation persistante.
 
-Version locale `0.21.0`, cache `cuisine-os-v0.21.0-1`, DB 4. Six modules neufs ; aucun magasin, outil serveur, déploiement de fonction ou SQL.
-**Publication autorisée par Neegan sur « go deploy » ; intégration et contrôles publics en cours.** Le site public reste 0.20.0 tant que la construction Pages n’est pas vérifiée.
+Version publiée `0.21.0`, cache `cuisine-os-v0.21.0-1`, DB 4. Six modules neufs ; aucun magasin, outil serveur, déploiement de fonction ou SQL.
+**Publication faite sur « go deploy » de Neegan.** Commit de code `af85c6f`, intégration en avance rapide dans `main`, push réussi.
+GitHub Pages a construit ce commit le 28 octobre à 22 h 43 HAE (29 octobre à 02 h 43 UTC).
 
-**Validation :** navigateur **7080/7080** (épingle 7079 ; départ 6820, +242 assertions ciblées et +18 contrôles i18n des six modules,
+**Preuves publiques :** [Mistu](https://neegans.github.io/mistu/) en **0.21.0**, suite **7080/7080**, zéro erreur JavaScript et zéro
+requête hors origine. Neuf fichiers publics identiques au disque ; cache `cuisine-os-v0.21.0-1` actif et contrôlant, six modules présents.
+Profil jetable sans compte : description manuelle conservée après rechargement, photo ajoutée à une référence sans version puis décodée
+hors ligne, progression cuisine conservée après ouverture photo et rechargement hors ligne. Fiche sans débordement à 320/390/768/1280.
+Preuves : `.superpowers/sdd/2026-10-28-interface-visuelle/suite-publique.resultat.json`, `publication.resultat.json`,
+`pages-build-code.json` et `captures-publication/`. Aucun accès aux données privées ni appel réel à l’assistant.
+
+**Validation locale :** navigateur **7080/7080** (épingle 7079 ; départ 6820, +242 assertions ciblées et +18 contrôles i18n des six modules,
 aucune assertion retirée), Node **230/230**, migrations `--check` **0**, syntaxe de 119 fichiers JS et `git diff --check` propres.
 Zéro erreur JavaScript et requête hors origine. Suites ciblées : repères 87, photos 48, journal 45, écran repères 39, intégration 23.
 Deux bases et deux vrais moteurs avec serveur/stockage simulés : métadonnées reçues, photo personnelle téléchargée à visibilité et
@@ -27,7 +35,7 @@ sans débordement ; comparaisons aux maquettes dans `design-qa.md`. Preuves igno
 
 **Non prouvé :** vrai appel assistant, Safari/iPhone physique et transfert sur les deux appareils de Neegan. Le
 [diagnostic initial](docs/lots/2026-10-28-photos-mobile-ordinateur.md) prouve un défaut logiciel, pas la cause exclusive du cas réel.
-Prochaine étape après vérification publique : vérifier même version/compte sur mobile et ordinateur, puis photo de plat JPEG et page
+À vérifier sur les appareils de Neegan : même version/compte sur mobile et ordinateur, puis transfert d’une photo de plat JPEG et d’une page
 source au format réellement utilisé. Les chiffres et photos des fixtures ne sont jamais ajoutés aux données de Neegan.
 
 **28 octobre 2026 — LOT I3 « CHEF THERMOMIX » : PUBLIÉ ET VÉRIFIÉ SUR LE SITE PUBLIC.**

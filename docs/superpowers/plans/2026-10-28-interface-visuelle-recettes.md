@@ -18,7 +18,13 @@ Publication autorisée ensuite par Neegan sur « go deploy ».
 
 ## Résultat vérifié
 
-Les six étapes sont terminées. Version `0.21.0`, cache `cuisine-os-v0.21.0-1`, DB 4 ; intégration et contrôles publics en cours.
+Les six étapes sont terminées. Version publiée `0.21.0`, cache `cuisine-os-v0.21.0-1`, DB 4. Commit de code `af85c6f`,
+intégration en avance rapide dans `main`, push et construction Pages réussis le 28 octobre à 22 h 43 HAE.
+
+Contrôles publics : **7080/7080**, zéro erreur JS/requête externe, neuf fichiers identiques, cache actif et contrôlant
+avec les six modules. Profil neuf sans compte : correction et photo conservées, photo décodée hors ligne, progression
+cuisine maintenue après ouverture photo/rechargement hors ligne. Fiche sans débordement à 320/390/768/1280.
+Preuves : `suite-publique.resultat.json`, `publication.resultat.json`, `pages-build-code.json` et `captures-publication/`.
 
 | Contrôle | Résultat lu |
 |---|---|
@@ -45,5 +51,5 @@ Certaines premières preuves ciblées des agents sont aussi dans le registre I3,
 La fixture visuelle utilise uniquement le profil jetable ; ses valeurs et son extrait de photo ne deviennent pas des données de production.
 
 Non prouvé : vrai appel assistant, Safari/iPhone physique, formats de photos réels et transfert sur le compte de Neegan.
-Après vérification publique : recharger les deux appareils sur la même version et le même compte, photographier un plat,
+Sur les appareils de Neegan : recharger les deux appareils sur la même version et le même compte, photographier un plat,
 vérifier son envoi puis son apparition et sa disponibilité hors ligne sur l’ordinateur.

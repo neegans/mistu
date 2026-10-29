@@ -63,7 +63,7 @@ La réception tardive doit actualiser l’image sans perdre la recherche, les fi
 Preuve de réception finale : deux bases simulées, puis mobile réel → ordinateur réel avec une photo de plat JPEG et une page source du
 format réellement utilisé. Aucun essai sur les appareils de Neegan n’a encore été effectué.
 
-## Correction construite après approbation
+## Correction publiée après approbation
 
 Le « ok go » a autorisé le lot local 0.21.0. Les images visibles sont maintenant demandées au moteur sans clic,
 les états distants/erreurs/décodage sont affichés, la photo personnelle reste prioritaire et les Réglages parlent de
@@ -72,5 +72,7 @@ sans téléchargement manuel. Couvertures, pages source, cartes, fiche, repas et
 
 Tests photos 48/48, intégration 23/23, suite globale 7080/7080. Le gestionnaire préserve les autres images et les notes.
 Les captures et parcours sont décrits dans [design-qa.md](../../design-qa.md).
-**Publication autorisée sur « go deploy », en cours de vérification.** Le contournement ci-dessus concerne le site public 0.20.0 avant cette publication.
+**Correction publiée en 0.21.0 sur « go deploy »**, commit `af85c6f`, GitHub Pages construit le 28 octobre à 22 h 43 HAE.
+Suite publique **7080/7080** ; cache et six modules vérifiés, photo ajoutée puis décodée hors ligne dans un profil jetable.
+Le contournement ci-dessus décrit le comportement de l’ancienne version 0.20.0.
 Le transfert sur les appareils et le compte de Neegan reste à vérifier ; aucune donnée privée n’a été consultée.
