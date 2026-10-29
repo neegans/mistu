@@ -87,6 +87,7 @@ export function renderSelecteurScan(model, gestes = {}) {
 const ATTENDUS_IGNORER = ['a_lancer', 'a_verifier', 'echec']; // « Ignorer » n'est jamais offert pendant un vol (§ 3.1 : en_cours → echec seulement)
 const ageTexte = (age) => (age?.unite === 'j' ? t('il y a {n} j', { n: age.n }) : age?.unite === 'h' ? t('il y a {n} h', { n: age.n }) : t('il y a {n} min', { n: age?.n ?? 0 }));
 function titreLigne(l) {
+  if (l.titre.type === 'thermomix') return t('Adaptation Thermomix') + (l.titre.texte ? ` — ${l.titre.texte}` : '');
   if (l.titre.type === 'livre') return t('Livre en préparation') + (l.titre.texte ? ` — ${l.titre.texte}` : '');
   // Lot E (§ 4.6) : « Couverture photographiée », puis le titre lu (borné par lignesImports, rendu en nœud texte).
   if (l.titre.type === 'couverture') return t('Couverture photographiée') + (l.titre.texte ? ` — ${l.titre.texte}` : '');

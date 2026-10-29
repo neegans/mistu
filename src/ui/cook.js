@@ -11,6 +11,9 @@ import { label } from '../core/i18n.js';
 import { qtyEl, section, field, etiquetteIA, estExtractionNonRelue } from './components.js';
 import { estCreationIA, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
 import { deviceId } from './import.js';
+import { estThermomix } from '../domain/thermomix.js';
+import { portionsSession } from '../domain/thermomix-session.js';
+import { panneauGardeThermomix, rappelThermomix } from './thermomix-garde.js';
 import { ouvrirCuissons, noteEnCuisine } from './cuisson.js';
 
 export async function renderCook(params, query, ctx, deps = {}) {
@@ -19,10 +22,12 @@ export async function renderCook(params, query, ctx, deps = {}) {
   const items = session.selected_version_ids.map((vid) => {
     const version = ctx.versionsById.get(vid);
     const recipe = version ? ctx.recipesById.get(version.recipe_id) : null;
-    const servings = session.servings_by_version?.[vid] ?? session.servings ?? version?.servings;
+    const servings = version ? portionsSession(session, version) : null;
     return version && recipe ? { version, recipe, servings, scaled: scaleVersion(version, servings), convention_id: ctx.conventionFor(recipe) } : null;
   }).filter(Boolean);
   if (!items.length) return el('div', { class: 'card' }, t('Version introuvable.'));
+  const blocageThermomix = panneauGardeThermomix(items);
+  if (blocageThermomix) return blocageThermomix;
   let activeIdx = Math.max(0, items.findIndex((it) => it.version.id === (session.active_version_id || session.selected_version_ids[0])));
   const progress = session.progress || {};
   progress.done_step_ids = progress.done_step_ids || [];
@@ -42,6 +47,7 @@ export async function renderCook(params, query, ctx, deps = {}) {
   if (lignees.length) root.append(el('div', { class: 'stack', style: { marginBottom: '.6rem' }, dataset: { role: 'cuisine-ia' } },
     el('div', { class: 'row' }, ...lignees.map(({ it, etiquette }) => (items.length > 1 ? el('span', null, `${it.recipe.display_title || it.recipe.original_title} · `, etiquette) : etiquette))),
     items.some((it) => estCreationIA(it.version)) ? el('div', { class: 'status warn' }, t(AVERTISSEMENT_CREATION_IA)) : null));
+  for (const it of items) { const rappel = rappelThermomix(it.version); if (rappel) root.append(rappel); }
   // D-3 (import ciblé) : tant qu'une version est une extraction de l'assistant non relue, le mode cuisine le dit en tête (les quantités et les
   // étapes viennent d'une lecture à vérifier) ; dans un repas, la recette concernée est nommée.
   const nonRelues = items.filter((it) => estExtractionNonRelue(it.version));
@@ -155,6 +161,7 @@ export async function renderCook(params, query, ctx, deps = {}) {
       el('div', { class: 'row between' }, el('strong', null, `⏱ ${tm.label}${tm.seconds_max ? ` (${t('jusqu’à')} ${describeDuration(tm.seconds_max)})` : ''}`),
         apple ? el('a', { class: 'btn primary', href: shortcutUrl(seconds), onClick: () => request('shortcut') }, t('Lancer la minuterie système')) : null),
       el('div', null, `${t('Dis à Siri')} : « ${siriPhrase(seconds)} » `, el('button', { class: 'btn small', onClick: () => request('siri') }, t('Fait'))),
+      estThermomix(it.version) ? el('small', { class: 'muted' }, t('Durée proposée par l’assistant, à vérifier pendant la cuisson.')) : null,
       stateEl, mirror,
       el('div', { class: 'row' },
         el('button', { class: 'btn small', onClick: () => launch && setState('failed') }, t('Ça n’a pas démarré')),

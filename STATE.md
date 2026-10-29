@@ -1,4 +1,33 @@
-# STATE.md — Cuisine OS (mistu) — 28 octobre 2026 — lot I2 EN LIGNE, 0.19.0, suite publique 6503/6503
+# STATE.md — Cuisine OS (mistu) — 28 octobre 2026 — I3 en publication ; I2 EN LIGNE, 0.19.0, 6503/6503
+
+**28 octobre 2026 — LOT I3 « CHEF THERMOMIX » : CONSTRUIT ET VÉRIFIÉ ; PUBLICATION AUTORISÉE (« promote tout »).**
+[Spec approuvée sur « go »](docs/superpowers/specs/2026-10-28-chef-thermomix-design.md),
+[plan et preuves](docs/superpowers/plans/2026-10-28-chef-thermomix.md). Branche `chef-thermomix`, base `34105d2`.
+Sélection d’étapes → adaptation proposée par l’assistant → comparaison et relecture → nouvelle version, original conservé.
+Brouillon reprenable, questions/refus, limites TM7 NA 120 V, manuel et vapeur seulement, sans chauffe ou 100 °C.
+Les réglages estimés restent liés aux quantités source ; un changement de portions bloque la cuisson et la copie, une correction manuelle
+invalide le plan. Fiche, repas, session reprise, exports JSON-LD/Paprika/HTML et sauvegarde ZIP utilisent le lecteur de plan.
+« Copier pour Cookidoo » fournit titre, ingrédients, étapes et texte complet, avec repli sélectionnable. Aucun envoi au robot.
+
+**État local :** `APP_VERSION 0.20.0`, service worker `cuisine-os-v0.20.0-1`, `DB_VERSION` 4, six modules neufs dans le cache.
+Aucun magasin, outil serveur, déploiement de fonction ni SQL nouveau. **Publication autorisée par Neegan : « promote tout ».**
+Commit, intégration dans `main`, push et vérification GitHub Pages en cours. Le dernier public vérifié reste I2 `0.19.0`.
+
+**Preuves locales :** navigateur **6820/6820** (épingle **6819**, départ I2 **6503/6503**, aucune assertion retirée),
+Node **230/230** en série, migrations `--check` **0**, syntaxe des 36 fichiers JS contrôlée et `git diff --check` propre.
+Zéro erreur JavaScript et zéro requête externe dans la suite. Suites I3 ciblées : domaine **132**, journal **66**, écrans **55**, intégration **52**.
+Navigation réelle : relecture puis conservation, copie complète Cookidoo, rechargement de fiche, lancement et rechargement hors ligne
+du mode cuisine réussis. Cache `0.20.0-1` actif. Captures 320/390/768/1280 pixels sans débordement, fiche anglaise vérifiée.
+Zéro erreur JavaScript et zéro requête externe dans ce parcours ; assistant simulé. Preuves ignorées par Git dans
+`.superpowers/sdd/2026-10-28-chef-thermomix/` (`suite.resultat.json`, `parcours.resultat.json`, captures).
+Revue croisée : contenu des contenants contrôlé avant réglage, anciens blocs liés au texte et aux minuteries, conservation idempotente
+liée au journal exact, portions inconnues conservées et création de session conditionnée en transaction. Les exports globaux refusés
+affichent les versions à revoir avant toute génération de fichier.
+
+**Non prouvé :** réponse d’un vrai appel assistant, usage du TM7, balisage et synchronisation sur le compte Cookidoo canadien,
+Safari/iPhone physique et deux appareils connectés. Recettes créées synchronisables vers TM7 selon la documentation officielle ;
+Recipe Handover / « Send to Thermomix » les exclut. Les réglages offerts dans l’éditeur restent à vérifier sur le compte de Neegan.
+**Suite :** terminer la publication autorisée et les contrôles publics ; puis essai d’une recette sur Cookidoo et TM7.
 
 **28 octobre 2026 — LOT I2 « LIVRE SANS SAISIE, PHOTOS ET NOTES ».** Spec
 [`docs/superpowers/specs/2026-10-28-livre-sans-saisie-design.md`](docs/superpowers/specs/2026-10-28-livre-sans-saisie-design.md)
@@ -23,7 +52,7 @@ et `publication.resultat.json`. Aucun déploiement de fonction ni migration SQL.
 **Non prouvé sur données réelles :** identification de Trinity, recadrage proposé par le modèle, Safari/iPhone physique et transfert entre deux
 appareils connectés. Les tests utilisent des bases jetables et un réseau factice ; aucun appel réel à l’assistant.
 **Suite pour Neegan :** recharger l’application sur tous les appareils pour passer à `0.19.0`, puis jouer ces essais.
-Le lot I3 Thermomix reste séparé, à spécifier puis à relire avant son code.
+Le lot I3 Thermomix est construit localement, séparément de cette publication I2 (voir en tête).
 
 **28 octobre 2026, fin de journée — PASSATION À CODEX (VibeForge).** La suite (lots I2 « livre sans saisie, photos, notes » et I3 « chef
 Thermomix ») est confiée à Codex dans VibeForge. Lire `AGENTS.md` (consignes) puis `docs/lots/2026-10-28-lot-I2-I3.md` (demandes de Neegan,

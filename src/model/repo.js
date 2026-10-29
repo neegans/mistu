@@ -136,10 +136,12 @@ export async function marquerInterrompus(maintenant = Date.now()) {
   let n = 0;
   for (const ligne of await db.byIndex('imports', 'status', 'en_cours')) {
     if (!ligne) continue;
+    if (ligne.kind === 'thermomix' && ligne.device_id !== moi) continue;
     const cle = cleBattement(ligne.id);
     const hb = await db.get('sync_state', cle);
     if (volVivant(ligne, hb, moi, maintenant)) continue;
     const patch = (c) => {
+      if (c.kind === 'thermomix' && c.device_id !== moi) throw new TransitionRefusee('imports', ligne.id, c.status);
       if (volVivant(c, null, moi, maintenant)) throw new TransitionRefusee('imports', ligne.id, c.status); // relu dans la transaction
       return { status: 'echec', erreur: { raison: 'interrompu', extra: {} }, document_id_vol: null };
     };

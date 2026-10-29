@@ -1,13 +1,15 @@
 // Service worker : coquille applicative en cache pour consultation hors connexion des recettes déjà chargées.
 // Les nouvelles demandes IA et les recherches de métadonnées ne fonctionnent pas hors connexion (spec §15).
 importScripts('./sw-rules.js');
-const VERSION = 'cuisine-os-v0.19.0-1';
+const VERSION = 'cuisine-os-v0.20.0-1';
 // Tous les modules de production sont inclus ; tests/ reste chargé à la demande.
 // La complétude de cette liste est vérifiée par tests/sync.js (graphe d'imports depuis src/app.js) : un chemin
 // manquant ferait répondre 404 à cache.addAll et l'installation entière échouerait.
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icons/icon.svg', './icons/apple-touch-icon.png', './sw-rules.js',
   './src/app.js',
+  './src/domain/thermomix.js', './src/domain/thermomix-parcours.js', './src/domain/thermomix-session.js',
+  './src/ui/thermomix.js', './src/ui/cookidoo.js', './src/ui/thermomix-garde.js',
   './src/vendor/supabase-2.117.3.umd.js',
   './src/core/blob-urls.js', './src/core/bornes.js', './src/core/bus.js', './src/core/db.js', './src/core/dom.js', './src/core/hash.js', './src/core/i18n.js', './src/core/ids.js', './src/core/image.js', './src/core/isbn.js', './src/core/lien.js', './src/core/log.js', './src/core/router.js', './src/core/zip.js',
   './src/sync/auth.js', './src/sync/backfill.js', './src/sync/clock.js', './src/sync/config.js', './src/sync/conflits.js', './src/sync/fichiers.js', './src/sync/lots.js', './src/sync/mime.js', './src/sync/moteur.js',

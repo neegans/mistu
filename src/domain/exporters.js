@@ -1,5 +1,7 @@
 // Formats d'échange (spec §31.2) : Recipe/JSON-LD, YAML compatible avec l'import documenté de Paprika, copie HTML lisible.
 // Les durées, portions ou compatibilités inconnues sont omises, jamais fabriquées.
+import { estThermomix, etiquetteThermomix, gardeThermomix, AVERTISSEMENT_TM7 } from './thermomix.js';
+import { EN } from '../i18n/en.js';
 import { formatQuantity } from './quantity.js';
 import { unitLabel } from './units.js';
 import { extFor } from './backup.js';
@@ -22,9 +24,13 @@ function isoDuration(minutes) {
 // « X · statut » s'écrit « X (statut) » dans une phrase —, puis, pour une création, ce que la fiche montre (§ 3.3, C-9), relu et
 // reborné par lireCreation. null pour une recette ordinaire et pour une extraction IA de livre (F6).
 const enParentheses = (etiquette) => etiquette.replace(/ · (.+)$/u, ' ($1)');
-function lignesIA(recipe, version) {
-  const etiquette = etiquetteCreationIA(version, recipe);
+const texteTM = (texte, locale) => locale === 'en' && Object.hasOwn(EN, texte) ? EN[texte] : texte;
+function lignesIA(recipe, version, locale = 'fr') {
+  const garde = gardeThermomix(version);
+  if (!garde.ok) throw new Error('thermomix_invalide');
+  const etiquette = etiquetteThermomix(version) || etiquetteCreationIA(version, recipe);
   if (!etiquette) return null;
+  if (estThermomix(version)) return [texteTM(etiquette, locale) + '.', texteTM(AVERTISSEMENT_TM7, locale)];
   const statut = version?.kind === 'adaptation' && !estCreationIA(version) ? ` (${version.status === 'tested' ? 'testée' : 'proposée'})` : '';
   const c = lireCreation(version);
   return [`${enParentheses(etiquette)}${statut}.`,
@@ -42,8 +48,8 @@ export function toJsonLd(bundle, { locale = 'fr' } = {}) {
   const { recipe, version } = bundle;
   const book = livreDe(recipe, bundle.book);
   const edition = livreDe(recipe, bundle.edition);
-  const ia = lignesIA(recipe, version);
-  const duree = (m) => (estCreationIA(version) ? undefined : isoDuration(m));
+  const ia = lignesIA(recipe, version, locale);
+  const duree = (m) => ((estCreationIA(version) || estThermomix(version)) ? undefined : isoDuration(m));
   const title = recipe.display_title || recipe.original_title;
   const obj = {
     '@context': 'https://schema.org', '@type': 'Recipe', name: title, inLanguage: recipe.original_language || undefined,
@@ -77,8 +83,8 @@ export function toPaprikaYaml(bundles, { locale = 'fr' } = {}) {
   const docs = bundles.map(({ recipe, version, ...b }) => {
     const book = livreDe(recipe, b.book);
     const edition = livreDe(recipe, b.edition);
-    const ia = lignesIA(recipe, version);
-    const sansDurees = estCreationIA(version);
+    const ia = lignesIA(recipe, version, locale);
+    const sansDurees = estCreationIA(version) || estThermomix(version);
     const title = recipe.display_title || recipe.original_title;
     const lines = [`- name: ${yamlStr(title)}`];
     if (version?.servings) lines.push(`  servings: ${yamlStr(`${version.servings} portions`)}`);
@@ -118,9 +124,11 @@ export function toReadableSite(bundles, filesBySha, { locale = 'fr' } = {}) {
   const usedImages = new Map();
   const items = bundles.map(({ recipe, version, pages = [], ...b }) => {
     const book = livreDe(recipe, b.book);
-    const etiquette = etiquetteCreationIA(version, recipe);
-    const ia = lignesIA(recipe, version);
-    const sansDurees = estCreationIA(version);
+    const garde = gardeThermomix(version);
+    if (!garde.ok) throw new Error('thermomix_invalide');
+    const etiquette = estThermomix(version) ? texteTM(etiquetteThermomix(version), locale) : etiquetteCreationIA(version, recipe);
+    const ia = lignesIA(recipe, version, locale);
+    const sansDurees = estCreationIA(version) || estThermomix(version);
     const title = recipe.display_title || recipe.original_title;
     const file = `recipes/${recipe.id}.html`;
     const imgs = [];

@@ -40,6 +40,10 @@ import { runI2LivreTests } from './i2-livre.js';
 import { runI2CuisineTests } from './i2-cuisine.js';
 import { runI2PhotoPageTests } from './i2-photo-page.js';
 import { runI2IntegrationTests } from './i2-integration.js';
+import { runI3ThermomixTests } from './i3-thermomix.js';
+import { runI3ParcoursTests } from './i3-parcours.js';
+import { runI3EcranTests } from './i3-ecran.js';
+import { runI3IntegrationTests } from './i3-integration.js';
 
 const results = [];
 const eq = (a, b, msg) => { const ok = JSON.stringify(a) === JSON.stringify(b); results.push({ ok, msg, got: a, want: b }); };
@@ -268,11 +272,17 @@ for (const [nom, suite] of [['livre', runI2LivreTests], ['cuisine', runI2Cuisine
   catch (error) { ok(false, `Suite I2 ${nom} interrompue : ${error?.message || String(error)}`); }
 }
 
+// --- Lot I3 : domaine TM7, journal, écrans et gardes transversales.
+for (const [nom, suite] of [['domaine', runI3ThermomixTests], ['journal', runI3ParcoursTests], ['écran', runI3EcranTests], ['intégration', runI3IntegrationTests]]) {
+  try { await suite({ eq, ok, close }); }
+  catch (error) { ok(false, `Suite I3 ${nom} interrompue : ${error?.message || String(error)}`); }
+}
+
 // --- Compte total épinglé (F2). Une assertion qui DISPARAÎT — un bloc supprimé, une boucle qui ne tourne plus, une
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 6502,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 6819,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

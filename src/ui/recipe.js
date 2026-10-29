@@ -25,6 +25,10 @@ import { lienSignet } from '../core/lien.js';
 import { capitaliser } from './puces.js';
 import { comparerCuissons, textePersonnel } from '../domain/cuisine-personnelle.js';
 import { ouvrirCuissons, monterNotesPersonnelles, monterMesPhotos, boutonModifierObservation } from './cuisson.js';
+import { estThermomix, gardeThermomix, etiquetteThermomix } from '../domain/thermomix.js';
+import { enregistrerSessionCuisine } from '../domain/thermomix-session.js';
+import { renderCopieCookidoo } from './cookidoo.js';
+import { BLOCAGE_THERMOMIX, rappelThermomix } from './thermomix-garde.js';
 import { panneauPhotoPage } from './photo-page.js';
 
 // S7 : une adresse refusée s'affiche INERTE (jamais un <a>), et BORNÉE — une fiche venue d'une archive ou du
@@ -222,9 +226,10 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     el('summary', null, t('Portions, versions et autres gestes')),
     el('div', { class: 'stack' },
       el('div', { class: 'row between' },
-        versionOptions.length > 1 ? select(versionOptions, version.id, selectVersion) : etiquetteCreationIA(version, recipe) ? versionBadge(version, recipe) : el('span', { class: 'badge original' }, t('Original')),
+        versionOptions.length > 1 ? select(versionOptions, version.id, selectVersion) : (etiquetteThermomix(version) || etiquetteCreationIA(version, recipe)) ? versionBadge(version, recipe) : el('span', { class: 'badge original' }, t('Original')),
         el('div', { class: 'row' },
           el('a', { class: 'btn small', href: lienEdition('adaptation', version.id) }, t('Créer ma version')),
+          version.steps?.length ? el('a', { class: 'btn small', href: `#/recipes/${rid}/thermomix${buildQuery({ v: version.id, servings: state.servings ?? '' })}`, dataset: { role: 'adapter-thermomix' } }, t('Adapter au Thermomix')) : null,
           el('a', { class: 'btn small', href: lienEdition('correction', version.id) }, t('Corriger')),
           // Import ciblé (spec import-cible § 4.1, D-11) : une recette partielle se relit par l'écran déjà rattaché (import à refaire) ; une recette complète n'a pas d'entrée.
           recipe.availability === 'partial' && !recipe.source_url ? el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(recipe.id)}/importer` }, t('Relire les pages')) : null,
@@ -272,7 +277,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   root.append(sectionPlain(t('Versions'), el('ul', { class: 'list' }, ...versions.map((v) => el('li', { class: 'row between' },
     el('div', null, el('div', { class: 'row' }, versionBadge(v, recipe), el('span', { class: 'muted' }, `${label('version_kind', v.kind)} · ${formatDate(v.created_at, { withTime: true })}`), v.verification_state === 'to_verify' ? el('span', { class: 'chip warn' }, t('À vérifier')) : null),
       v.changes ? el('div', { style: { fontSize: '.9rem' } }, v.changes) : null,
-      v.provenance?.generated_by === 'ai' && !estCreationIA(v) ? el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Extraction IA ({m}) — vérifiée à la main ensuite ?', { m: v.provenance.model || 'IA' })) : null),
+      v.provenance?.generated_by === 'ai' && !estCreationIA(v) && !estThermomix(v) ? el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Extraction IA ({m}) — vérifiée à la main ensuite ?', { m: v.provenance.model || 'IA' })) : null),
     el('div', { class: 'row' }, v.id !== version.id ? el('button', { class: 'btn small', onClick: () => selectVersion(v.id) }, t('Afficher')) : el('span', { class: 'chip ok' }, t('affichée')),
       (v.kind === 'adaptation' || v.kind === 'synthesis') && v.status !== 'tested' ? el('button', { class: 'btn small', onClick: async () => { await repo.save('recipe_versions', { ...v, status: 'tested' }); refresh(); } }, t('Marquer testée')) : null))))));
 
@@ -288,8 +293,8 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
 
   // Export
   root.append(el('div', { class: 'row', style: { marginTop: '.5rem' } },
-    el('button', { class: 'btn small', onClick: () => downloadBlob(new Blob([JSON.stringify(toJsonLd({ recipe, version, book, edition }), null, 2)], { type: 'application/ld+json' }), `${slug(recipe.original_title)}.jsonld`) }, t('Exporter JSON-LD')),
-    el('button', { class: 'btn small', onClick: () => downloadBlob(new Blob([toPaprikaYaml([{ recipe, version, book, edition }])], { type: 'text/yaml;charset=utf-8' }), `${slug(recipe.original_title)}.yml`) }, t('Exporter YAML (Paprika)')),
+    el('button', { class: 'btn small', onClick: () => { if (!gardeThermomix(version, state.servings).ok) { dire(t(BLOCAGE_THERMOMIX)); return; } downloadBlob(new Blob([JSON.stringify(toJsonLd({ recipe, version, book, edition }), null, 2)], { type: 'application/ld+json' }), `${slug(recipe.original_title)}.jsonld`); } }, t('Exporter JSON-LD')),
+    el('button', { class: 'btn small', onClick: () => { if (!gardeThermomix(version, state.servings).ok) { dire(t(BLOCAGE_THERMOMIX)); return; } downloadBlob(new Blob([toPaprikaYaml([{ recipe, version, book, edition }])], { type: 'text/yaml;charset=utf-8' }), `${slug(recipe.original_title)}.yml`); } }, t('Exporter YAML (Paprika)')),
     el('span', { class: 'muted', style: { fontSize: '.85rem' } }, t('Version et langue affichées ; inconnues omises.'))));
   // Ronde 1 : la largeur suivie au MONTAGE (suivreLargeur, plus haut), posé APRÈS le dernier await du rendu — le routeur insère la racine juste après.
   suivreLargeur(root, mq, () => { appliquerCorps(); }); // le panneau des autres gestes reste replié à toutes les largeurs (maquettes) : seule la bascule du corps suit la largeur
@@ -299,6 +304,14 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
 
   function drawBody() {
     body.replaceChildren();
+    const lienTM = root.querySelector('[data-role=adapter-thermomix]');
+    if (lienTM) lienTM.href = `#/recipes/${rid}/thermomix${buildQuery({ v: version.id, servings: state.servings ?? '' })}`;
+    const rappelTM = rappelThermomix(version); if (rappelTM) body.append(rappelTM);
+    if (estThermomix(version)) {
+      if (!gardeThermomix(version, state.servings).ok) body.append(el('div', { class: 'status warn', dataset: { role: 'thermomix-portions' } }, t(BLOCAGE_THERMOMIX), el('button', { class: 'btn small', onClick: () => { state.servings = version.servings ?? null; root.querySelector('#servings-val').textContent = state.servings ?? t('inconnues'); drawBody(); } }, t('Revenir aux quantités adaptées'))));
+      body.append(el('details', { class: 'autres-gestes', dataset: { role: 'ouvrir-cookidoo' } },
+        el('summary', null, t('Copier pour Cookidoo')), renderCopieCookidoo({ recipe, version, book, edition }, { ...deps, portions: state.servings })));
+    }
     const scaled = scaleVersion(version, state.servings);
     const translation = state.lang !== 'original' ? ctx.recipe_translations.find((tr) => tr.recipe_version_id === version.id && tr.locale === state.lang) : null;
     const wantsTranslation = state.lang !== 'original' && state.lang !== (recipe.original_language || 'fr');
@@ -343,10 +356,10 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
       const li = el('li', null, el('span', { class: 'step-num' }, String(i + 1)), el('div', { style: { flex: 1 } },
         el('div', { style: { whiteSpace: 'pre-line' }, dataset: { role: 'texte-etape' } }, s.text), // m10 : une étape lue entière garde ses sauts de ligne
         translation?.translated_content?.steps?.[i] ? el('div', { class: 'muted', style: { fontSize: '.9rem' } }, translation.translated_content.steps[i]) : null,
-        ...(s.timers || []).slice(0, 2).map((tm) => timerBlock(tm.seconds, { compact: true, onRequest: (channel) => repo.save('timer_launches', createTimerLaunch({ recipe_version_id: version.id, step_id: s.id, device_id: deviceId(), duration_seconds: tm.seconds, channel })) }))));
+        ...(gardeThermomix(version, state.servings).ok ? s.timers || [] : []).slice(0, 2).map((tm) => timerBlock(tm.seconds, { compact: true, onRequest: (channel) => repo.save('timer_launches', createTimerLaunch({ recipe_version_id: version.id, step_id: s.id, device_id: deviceId(), duration_seconds: tm.seconds, channel })) }))));
       steps.append(li);
     });
-    const preparation = sectionPlain(t('Préparation'), (version.steps || []).length ? steps : el('p', { class: 'muted' }, t('Étapes non numérisées.')), version.notes ? el('p', { class: 'muted' }, version.notes) : null);
+    const preparation = sectionPlain(t('Préparation'), estThermomix(version) ? el('small', { class: 'muted' }, t('Durée proposée par l’assistant, à vérifier pendant la cuisson.')) : null, (version.steps || []).length ? steps : el('p', { class: 'muted' }, t('Étapes non numérisées.')), version.notes ? el('p', { class: 'muted' }, version.notes) : null);
     preparation.dataset.role = 'section-preparation';
     const onglets = segmented([{ value: 'ingredients', label: t('Ingrédients') }, { value: 'preparation', label: t('Préparation') }], state.onglet, (v) => { state.onglet = v; appliquerCorps(); });
     onglets.dataset.role = 'onglets-corps';
@@ -371,9 +384,10 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   }
 
   async function startCooking() {
+    if (!gardeThermomix(version, state.servings).ok) { dire(t(BLOCAGE_THERMOMIX)); return; }
     const session = { id: repo.newId('cs'), recipe_id: recipe.id, meal_id: null, selected_version_ids: [version.id], servings: state.servings, progress: { current_step_id: version.steps?.[0]?.id || null, done_step_ids: [], total_steps: (version.steps || []).length }, started_at: repo.nowIso(), active_device_id: deviceId(), status: 'active', units: state.units, lang: state.lang };
-    await repo.save('cook_sessions', session);
-    navigate(`/cook/${session.id}`);
+    try { await enregistrerSessionCuisine(session, { repo: gestesLecture.repo }); naviguer(`/cook/${session.id}`); }
+    catch { dire(t(BLOCAGE_THERMOMIX)); }
   }
 
   async function makeList() {
@@ -413,7 +427,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     const newVersion = {
       ...structuredClone(version), id: repo.newId('rv'), kind: 'adaptation', parent_version_id: version.id, status: 'proposed', created_at: undefined, updated_at: undefined,
       changes: t('Remplacement : {a} → {b}. {e}', { a: ri.name_text || ri.source_text, b: newLabel, e: effects || '' }).trim(),
-      provenance: { ...(version.provenance || {}), generated_by: 'manual', derived_from: version.id, substitution: true },
+      provenance: { ...(version.provenance || {}), generated_by: 'manual', derived_from: version.id, substitution: true, ...(estThermomix(version) ? { thermomix_invalide: true } : {}) },
     };
     newVersion.ingredients = version.ingredients.map((x) => x.id === ri.id || x.source_text === ri.source_text ? { ...x, id: repo.newId('ri'), ingredient_id: newId, name_text: newLabel, source_text: `${newLabel} (${t('remplace')} : ${x.source_text})`, verification_state: 'verified', substituted_from: x.source_text } : x);
     const sub = { id: repo.newId('sub'), recipe_version_id: newVersion.id, parent_version_id: version.id, ingredient_id: ri.ingredient_id || null, replacement_ingredient_id: newId, replacement_text: newLabel, role: ri.preparation || null, effects: effects || '', state: 'accepted', created_at: repo.nowIso() };

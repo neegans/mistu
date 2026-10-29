@@ -1630,6 +1630,33 @@ Données (JSON, aucun index, aucune migration) : `recipes.printed_pages` ([{ deb
 `imports{kind:'index'}.resultat = { format: 2, pages: [...] }`, `auto_enregistre_at`, `enregistrees`, `decisions` ; `scan_sessions.but` ;
 `source_pages.rotation` (0, 90, 180, 270).
 
+## Chef Thermomix (lot I3, 28 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-28-chef-thermomix-design.md`. Profil TM7 NA 120 V fermé, manuel et vapeur,
+sans chauffe ou 100 °C ; aucun pilotage du robot. `domain/thermomix.js` construit le contexte borné, valide les réponses
+discriminées (proposition/questions/refus), contrôle les actions et fabrique une nouvelle version. Les ingrédients et les étapes
+non sélectionnées sont conservés ; les identifiants d’étapes sont propres à chaque version. Réglages, durées et capacités ne se multiplient pas.
+Le premier segment part de contenants vides ; les préparations établissent leur contenu, contrôlé contre chaque réglage. Les anciens
+blocs restent liés au texte et aux minuteries source, avec leurs conditions et leur langue d’origine.
+
+`thermomix-parcours.js` réutilise `imports.kind = thermomix` et l’outil assistant `creation`, sans nouveau serveur ou magasin.
+Brouillons durables, appels explicitement relancés, conservation atomique conditionnée à la source, tentative et appareil.
+Un autre appareil consulte le brouillon ; sa copie exige la réception de la clôture d’origine. Les versions contiennent leur contexte
+validé, leurs conditions, leurs correspondances et leurs signatures canoniques complètes pour survivre à la purge du journal.
+
+`ui/thermomix.js` expose la sélection, les précisions et la comparaison ; `ui/cookidoo.js` copie des champs/textes avec un repli
+sélectionnable. Le compte Cookidoo n’entre jamais dans Mistu. Un bloc source correspond à un champ d’étape Cookidoo ; les réglages
+non offerts par l’éditeur restent manuels. La synchronisation des Recettes créées est documentée, mais leur parcours sur le TM7
+de Neegan reste à essayer. Aucun message d’envoi au robot n’est affiché.
+
+`thermomix-session.js` applique la garde de quantité avant création de session, avec relecture transactionnelle ; `cook.js` la rejoue
+à la reprise. La fiche, les repas et les exporteurs utilisent le même lecteur de plan. Une édition ou substitution conserve l’ascendance
+IA et invalide les réglages précédents. Les exports JSON-LD/Paprika/HTML conservent réglages et provenance, sans réaffirmer les anciennes
+durées globales. Les exports globaux des Réglages signalent les plans invalides avant toute génération, avec des liens vers les versions
+concernées. Les sauvegardes conservent le plan, qui reste revalidé à la lecture.
+
+Six modules ajoutés au cache, application `0.20.0`, DB 4. Les preuves finales et la distinction local/publié sont dans `STATE.md`.
+
 ## Livre sans saisie, photos et notes (lot I2, 28 octobre 2026)
 
 `ui/livre-sans-saisie.js` porte la route `#/add/livre` ; les imports historiques `couverture` sont délégués à `livre-ajout.js`.

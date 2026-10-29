@@ -201,7 +201,7 @@ export const modeleBorne = (m) => (typeof m === 'string' && m && Array.from(m).l
 // arrive avec le lot B, spec recette-web § 4.7) et les statuts NON terminés. `importOuvert` : une ligne que la section liste (et que la fiche du
 // livre compte — un import web n'y compte jamais : son edition_id est nul, D-B17).
 // `classement` (lot D) : la ligne d'un classement de photos, reprise dans sa séance ; jamais « Relancer » depuis la section.
-export const KINDS_IMPORT = Object.freeze(['recette', 'index', 'web', 'classement', 'couverture', 'livre']);
+export const KINDS_IMPORT = Object.freeze(['recette', 'index', 'web', 'classement', 'couverture', 'livre', 'thermomix']);
 // Les sortes qui portent des PAGES (photos) : les seules que le chemin photo ouvre (repo.ouvrirImport, repo.ajouterPages). Une lecture web naît par
 // demarrerLectureWeb (src/ui/import-web.js), jamais par ce chemin (lot B, P-1).
 // `classement` (lot D) : une ligne de classement porte des photos — `repo.ouvrirImport({ kind: 'classement' })` l'ouvre ; `web` reste hors de cette liste.
@@ -225,6 +225,7 @@ export function cibleReprise(ligne) {
   const id = chaine(ligne?.id);
   if (!id) return null;
   // Vague finale (m4) : l'écran ciblé reçoit aussi LA ligne (?import=) — après synchro, une recette peut avoir un import ouvert par appareil.
+  if (ligne.kind === 'thermomix') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/thermomix?import=${encodeURIComponent(id)}` : null;
   if (ligne.kind === 'recette') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/importer?import=${encodeURIComponent(id)}` : `/recipes/new?import=${encodeURIComponent(id)}`;
   if (ligne.kind === 'index') return chaine(ligne.scan_session_id) ? `/import?session=${encodeURIComponent(ligne.scan_session_id)}&import=${encodeURIComponent(id)}` : null;
   if (ligne.kind === 'web') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/importer?import=${encodeURIComponent(id)}` : null;
@@ -269,13 +270,14 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     const web = i.kind === 'web';
     const couverture = i.kind === 'couverture';
     const livre = i.kind === 'livre';
-    const recetteId = i.kind === 'recette' || web ? chaine(i.recipe_id) : null;
+    const recetteId = i.kind === 'recette' || i.kind === 'thermomix' || web ? chaine(i.recipe_id) : null;
     const recette = recetteId ? recettes.get(recetteId) ?? null : null;
     const referenceAbsente = !!recetteId && !recette;
-    const type = livre ? 'livre' : couverture ? 'couverture' : i.kind === 'classement' ? 'classement' : i.kind === 'index' ? 'index' : web ? 'web' : recetteId ? 'reference' : 'regrouper';
+    const type = i.kind === 'thermomix' ? 'thermomix' : livre ? 'livre' : couverture ? 'couverture' : i.kind === 'classement' ? 'classement' : i.kind === 'index' ? 'index' : web ? 'web' : recetteId ? 'reference' : 'regrouper';
     const cible = cibleReprise(i);
     let gestes;
     if (referenceAbsente) gestes = [];
+    else if (i.kind === 'thermomix') gestes = ['reprendre']; // son écran contrôle appareil, vol, annulation et clôture
     else if (i.status === 'en_cours') gestes = tenu ? ['annuler'] : [];
     else if (livre) gestes = ['reprendre', 'ignorer']; // aucun appel au montage ; la route contrôle disponibilité des octets
     // Lot D (D-D14) : un classement ne se RELANCE jamais depuis Imports. Lot E (D-E14, R-E-13 ; ronde 1 : la même règle, une seule branche) : une couverture

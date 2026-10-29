@@ -14,6 +14,7 @@ import { estCreationIA, etiquetteCreationIA } from '../domain/creation-ia.js';
 import { DIFFICULTES, LIMITES_WEB } from '../domain/recherche-web.js';
 import { pointeurValide } from '../domain/photo-web.js';
 import { photoPrincipale } from '../domain/cuisine-personnelle.js';
+import { estThermomix, etiquetteThermomix } from '../domain/thermomix.js';
 import { icone } from './icones.js';
 
 // classeTitre (lot UI-1, D-UI-3, H-20) : une classe posée sur le h1 — 'titre-fiche' pour une fiche recette ou livre (tâches 3 et 4) ; sans elle, le
@@ -85,7 +86,7 @@ export function lienOrigine(lien) {
 // C-2 / R-CRE-4 : l'étiquette d'une création IA (ou d'une version d'une fiche origine 'ia'), TEXTE de etiquetteCreationIA rendu par t() ;
 // null quand les données ne disent rien d'une création — jamais lue dans source_label.
 export function etiquetteIA(version, recipe = null) {
-  const texte = etiquetteCreationIA(version, recipe);
+  const texte = etiquetteThermomix(version) || etiquetteCreationIA(version, recipe);
   return texte ? el('span', { class: 'badge ai', dataset: { role: 'etiquette-ia' } }, t(texte)) : null;
 }
 
@@ -94,7 +95,7 @@ export function etiquetteIA(version, recipe = null) {
 export function versionBadge(version, recipe = null) {
   if (!version) return null;
   const ia = etiquetteIA(version, recipe);
-  if (ia && estCreationIA(version)) return ia; // l'étiquette porte déjà « testée / non testée »
+  if (ia && (estCreationIA(version) || estThermomix(version))) return ia; // l'étiquette porte déjà « testée / non testée »
   if (ia && version.kind !== 'adaptation' && version.kind !== 'synthesis') return ia;
   if (ia) return el('span', { class: 'row', style: { gap: '.3rem' } }, ia, el('span', { class: 'badge' }, label('version_status', version.status || 'proposed')));
   if (version.kind === 'extraction' || version.kind === 'correction') return el('span', { class: 'badge original' }, t('Original'));
@@ -104,7 +105,7 @@ export function versionBadge(version, recipe = null) {
 }
 
 export function timeText(version) {
-  if (!version || estCreationIA(version)) return ''; // C-6 : la durée d'une création n'est qu'une estimation, dite à part (recipe.js)
+  if (!version || estCreationIA(version) || estThermomix(version)) return ''; // C-6 : la durée d'une création n'est qu'une estimation, dite à part (recipe.js)
   const parts = [];
   const active = version.active_minutes ?? version.prep_minutes;
   if (active != null) parts.push(`${t('actif')} ${formatMinutes(active)}`);
@@ -293,7 +294,7 @@ export function fichierPhoto(recipe, index, fichiers) {
 // tapé dans l'éditeur). T3-R1 (rien d'inventé, I-UI-1) : une préparation connue et une cuisson inconnue (lecture qui n'a vu que « Préparation : 20 min »)
 // ne font PAS une durée de recette ; une partie connue vaut ≥ 0 (une cuisson de 0 est connue : 15 + 0 = 15), une somme nulle vaut null.
 export function dureeTotale(version) {
-  if (!version || estCreationIA(version)) return null;
+  if (!version || estCreationIA(version) || estThermomix(version)) return null;
   const positif = (x) => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : null);
   const connu = (x) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? x : null);
   const total = positif(version.total_minutes);

@@ -73,7 +73,7 @@ export function pastilleCourteModel({ aEnvoyer = 0, connecte = false } = {}) {
 // Écrans où la personne SAISIT : leur état ne vit que dans le DOM — texte tapé, lignes analysées pas encore
 // enregistrées, étape de cuisson en cours, fichiers choisis. Un rendu demandé par le moteur les reconstruirait et
 // emporterait tout cela, sans que personne l'ait demandé. Nommés une fois, ici ; `*` vaut UN segment.
-export const ROUTES_DE_SAISIE = ['/recipes/new', '/recipes/creer', '/recipes/*/edit', '/recipes/*/importer', '/import', '/cook/*', '/add', '/add/livre'];
+export const ROUTES_DE_SAISIE = ['/recipes/new', '/recipes/creer', '/recipes/*/edit', '/recipes/*/importer', '/recipes/*/thermomix', '/import', '/cook/*', '/add', '/add/livre'];
 
 export function estRouteDeSaisie(path) {
   const segments = String(path || '').split('/').filter(Boolean);

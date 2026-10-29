@@ -20,6 +20,7 @@ import { renderSearch } from './ui/search.js';
 import { renderLibrary } from './ui/library.js';
 import { renderBook } from './ui/book.js';
 import { renderDish } from './ui/dish.js';
+import { renderThermomixRoute } from './ui/thermomix.js';
 import { renderRecipe } from './ui/recipe.js';
 import { renderRecipeEdit } from './ui/recipe-edit.js';
 import { renderCook } from './ui/cook.js';
@@ -78,6 +79,7 @@ function registerRoutes() {
   route('/recipes/creer', renderCreerIA); // AVANT /recipes/:id (F1) : sinon « creer » serait lu comme un identifiant de fiche
   route('/recipes/:id', renderRecipe);
   route('/recipes/:id/edit', renderRecipeEdit);
+  route('/recipes/:id/thermomix', renderThermomixRoute);
   route('/recipes/:id/importer', renderImportCible); // import ciblé (lot A, spec § 4.1) : regex ancrée, l'ordre n'importe pas
   route('/cook/:id', renderCook);
   route('/import', renderImport);

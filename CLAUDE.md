@@ -3331,6 +3331,41 @@ DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de
 R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
 404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
 
+### Chef Thermomix (28 octobre 2026, lot I3 — construit localement)
+
+**Autorisation et état.** [Spec révision 1](docs/superpowers/specs/2026-10-28-chef-thermomix-design.md) approuvée par Neegan sur « go » ;
+[plan](docs/superpowers/plans/2026-10-28-chef-thermomix.md). Branche `chef-thermomix`, base `34105d2`, dépôt `~/projects/mistu`, serveur 8102.
+`APP_VERSION 0.20.0`, cache `cuisine-os-v0.20.0-1` (six modules neufs), DB 4. Publication autorisée par Neegan (« promote tout ») : commit, intégration dans `main`, push
+et contrôle Pages en cours ; le dernier public vérifié reste I2 `0.19.0`. Aucun magasin, outil assistant ou changement SQL ; transport par l’outil `creation` existant.
+
+**Comportement.** Adaptation des étapes choisies d’une version précise, ingrédients et autres étapes conservés, nouvelle version IA non testée
+après comparaison et relecture. Profil TM7 NA 120 V fermé : manuel/vapeur, sans chauffe ou 100 °C ; les valeurs nouvelles restent estimées.
+Brouillon durable dans `imports`, questions et refus explicites, aucune relance automatique, écriture conditionnée à la source, tentative,
+appareil et compte. Conservation idempotente liée à l’exacte version du journal. Tous les identifiants d’étapes sont propres à la version.
+
+`domain/thermomix.js` valide le contexte, les actions, les réglages, la capacité et les cumuls ; `thermomix-parcours.js` porte le journal ;
+`thermomix-session.js` conditionne la création de session en transaction. `ui/thermomix.js`, `cookidoo.js` et `thermomix-garde.js` portent les
+écrans. Fiche, repas, cuisine, édition et exporteurs reprennent les mêmes gardes : portions changées bloquées, `null` conservé sans inventer
+un rendement, édition manuelle invalidant le plan, ascendance IA préservée. ZIP restauré validé sans dépendance au journal d’import.
+
+**Revue adverse.** Le contenu réel des contenants est établi par les préparations structurées, à partir d’un montage vide explicite ; une
+référence déclarée dans un réglage ne suffit pas à ajouter un ingrédient. Les blocs hérités gardent leurs conditions et langue, et restent liés
+au texte et aux minuteries source. Tests d’étape ultérieure seule, sélection discontinue, FR→EN→FR, insertion avant un ancien bloc, huile seule
+masquée, durée héritée falsifiée, volume explicite excessif, course d’écriture et reprise inter-appareils simulée.
+
+**Preuves.** Navigateur **6820/6820** (épingle **6819**, départ **6503/6503**, aucune assertion retirée), zéro erreur JavaScript ni requête
+externe ; Node **230/230**, migrations `--check` **0**, syntaxe des 36 fichiers JS et `git diff --check` propres.
+Suites ciblées : domaine **132**, journal **66**, écrans **55**, intégration **52**. Les trois exports des Réglages refusent les plans invalides
+avec message et liens, sans générer de fichier partiel. Dans l’app réelle,
+conservation, copie Cookidoo, rechargement, cuisine hors ligne, cache actif, captures FR 320/390/768/1280 et EN 390 sans débordement.
+Aucun appel réel à l’assistant ; aucun essai physique TM7, Cookidoo canadien, Safari/iPhone ou synchronisation entre deux appareils.
+Registre local ignoré par Git : `.superpowers/sdd/2026-10-28-chef-thermomix/`.
+
+**Cookidoo et suite.** Copie assistée par champ ou texte complet avec repli sélectionnable. Aucun compte Cookidoo manipulé dans Mistu.
+La documentation confirme la synchronisation des Recettes créées vers TM7 et leur exclusion de Recipe Handover. Le balisage effectif des
+modes et du sens inverse reste à vérifier sur le compte canadien ; les consignes restent lisibles et à régler manuellement si nécessaire.
+Publication autorisée sur « promote tout », puis essai d’une recette sur son TM7. Rulings de construction : spec § 11.
+
 ### Livre sans saisie, photos et notes (28 octobre 2026, lot I2)
 
 **Autorisation et état.** Spec `docs/superpowers/specs/2026-10-28-livre-sans-saisie-design.md` approuvée par Neegan (« ok go enchaine »),
@@ -3362,7 +3397,7 @@ Le réglage `sync_activity` continue de concerner l’historique de **consultati
 le contrat de synchronisation existant. La fidélité du modèle sur Trinity, Safari/iPhone physique et deux vrais appareils ne sont pas attestés.
 
 **Gestes de Neegan après publication autorisée.** Actualiser tous les appareils avant les
-essais réels (un ancien client peut perdre les champs nouveaux). Aucune migration ou fonction serveur à appliquer pour I2. I3 attend sa spec.
+essais réels (un ancien client peut perdre les champs nouveaux). Aucune migration ou fonction serveur à appliquer pour I2. I3 est construit localement (section précédente).
 
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 

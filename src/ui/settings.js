@@ -12,6 +12,7 @@ import { referencesFichiers, nomFichier, lireErreursFichiers, MAGASINS_FICHIERS 
 import { createArchive as createArchiveReel, inspectArchive, applyArchive, verifyRestored, compterFichesSynchronisees } from '../domain/backup.js';
 import { syncNow } from '../sync/clock.js';
 import { toJsonLd, toPaprikaYaml, toReadableSite } from '../domain/exporters.js';
+import { gardeThermomix } from '../domain/thermomix.js';
 import { createZip } from '../core/zip.js';
 import { extFor } from '../domain/backup.js';
 import { etatAssistant, sessionValide } from '../domain/passerelle.js';
@@ -34,7 +35,7 @@ const ARCHIVE_FLAG = 'cuisineos.archive_created';
 
 // Injections (lot G, tâche 2) : createArchive, pickFiles (le choix de l’archive à restaurer) et telechargerArchive (l’enregistrement de l’archive
 // créée) — le bilan de création et le vrai rapport d’inspection s’éprouvent sans téléchargement réel dans le Chrome sans tête.
-export async function renderSettings(params, query, ctx, { fetch, createArchive = createArchiveReel, pickFiles: choisirArchive = pickFiles, telechargerArchive = downloadBlob } = {}) {
+export async function renderSettings(params, query, ctx, { fetch, createArchive = createArchiveReel, pickFiles: choisirArchive = pickFiles, telechargerArchive = downloadBlob, telechargerRecettes = downloadBlob } = {}) {
   const s = ctx.settings;
   const root = el('div', null, pageHeader(t('Réglages'), { subtitle: `Cuisine OS ${APP_VERSION}` }));
 
@@ -155,21 +156,38 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     backupStatus, archiveControls, restoreBox));
 
   // Exports
+  const etatExport = el('div', { class: 'stack', role: 'status', 'aria-live': 'polite', dataset: { role: 'etat-export-recettes' } });
+  const preparerExport = async (includeReferences, exporter) => {
+    try {
+      const bundles = exportBundles(ctx, { includeReferences });
+      const invalides = bundles.filter(b => !gardeThermomix(b.version).ok);
+      if (invalides.length) {
+        etatExport.replaceChildren(el('p', { class: 'status warn' }, t('L’export est bloqué : ces recettes contiennent des réglages TM7 à revoir. Aucune recette n’a été exportée.')),
+          ...invalides.map(b => el('a', { class: 'btn link', href: `#/recipes/${encodeURIComponent(b.recipe.id)}?v=${encodeURIComponent(b.version.id)}` },
+            t('Revoir la recette source'), ' — ', b.recipe.display_title || b.recipe.original_title)));
+        return;
+      }
+      etatExport.replaceChildren();
+      await exporter(bundles);
+    } catch {
+      etatExport.replaceChildren(el('p', { class: 'status warn' }, t('L’export n’a pas pu être préparé. Réessaie.')));
+    }
+  };
   root.append(section(t('Exporter des recettes'),
     el('p', { class: 'muted' }, t('Formats d’échange : la version courante de chaque recette disponible, dans sa langue d’origine. Durées ou portions inconnues omises ; provenance et statut d’adaptation dans les champs source/notes.')),
     el('div', { class: 'row' },
-      el('button', { class: 'btn', onClick: () => { const bundles = exportBundles(ctx); downloadBlob(new Blob([JSON.stringify(bundles.map((b) => toJsonLd(b)), null, 2)], { type: 'application/ld+json' }), 'cuisine-os-recettes.jsonld'); } }, t('Recipe / JSON-LD')),
-      el('button', { class: 'btn', onClick: () => { const bundles = exportBundles(ctx); downloadBlob(new Blob([toPaprikaYaml(bundles)], { type: 'text/yaml;charset=utf-8' }), 'cuisine-os-recettes.yml'); } }, t('YAML compatible Paprika')),
-      el('button', { class: 'btn', onClick: async () => {
-        const bundles = exportBundles(ctx, { includeReferences: true }).map((b) => ({ ...b, pages: (b.recipe.source_page_ids || []).map((id) => ctx.pagesById.get(id)).filter(Boolean) }));
+      el('button', { class: 'btn', onClick: () => preparerExport(false, bundles => telechargerRecettes(new Blob([JSON.stringify(bundles.map((b) => toJsonLd(b)), null, 2)], { type: 'application/ld+json' }), 'cuisine-os-recettes.jsonld')) }, t('Recipe / JSON-LD')),
+      el('button', { class: 'btn', onClick: () => preparerExport(false, bundles => telechargerRecettes(new Blob([toPaprikaYaml(bundles)], { type: 'text/yaml;charset=utf-8' }), 'cuisine-os-recettes.yml')) }, t('YAML compatible Paprika')),
+      el('button', { class: 'btn', onClick: () => preparerExport(true, async disponibles => {
+        const bundles = disponibles.map((b) => ({ ...b, pages: (b.recipe.source_page_ids || []).map((id) => ctx.pagesById.get(id)).filter(Boolean) }));
         const shas = new Set(bundles.flatMap((b) => b.pages.map((p) => p.sha256)));
         const filesBySha = new Map();
         for (const sha of shas) { const f = await repo.getFile(sha); if (f) filesBySha.set(sha, f); }
         const site = toReadableSite(bundles, filesBySha, { locale: s.ui_locale });
         const entries = [...site.entries];
         for (const [path, f] of site.images) entries.push({ path, data: new Uint8Array(await f.blob.arrayBuffer()) });
-        downloadBlob(new Blob([createZip(entries)], { type: 'application/zip' }), 'cuisine-os-copie-lisible.zip');
-      } }, t('Créer une copie lisible (HTML)'))),
+        telechargerRecettes(new Blob([createZip(entries)], { type: 'application/zip' }), 'cuisine-os-copie-lisible.zip');
+      }) }, t('Créer une copie lisible (HTML)'))), etatExport,
     el('small', { class: 'muted' }, t('À tester dans les applications cibles (Paprika : Fichier → Importer, YAML). Le HTML se lit hors connexion sans Cuisine OS.'))));
 
   // Assistant IA (Passerelle T4) : plus de configuration ici — la clé vit côté serveur. La section dit si l'assistant est actif pour ce

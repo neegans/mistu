@@ -10,6 +10,9 @@ import { MEAL_ROLES, DIET_TAGS, RECIPE_TYPES } from '../model/schema.js';
 import { pageHeader, section, emptyState, select, field, dietChip, versionBadge, vignettePlat } from './components.js';
 import { libelleSource } from '../core/lien.js';
 import { deviceId } from './import.js';
+import { estThermomix, gardeThermomix } from '../domain/thermomix.js';
+import { portionsRepas, enregistrerSessionCuisine } from '../domain/thermomix-session.js';
+import { BLOCAGE_THERMOMIX, rappelThermomix } from './thermomix-garde.js';
 import { photosPersonnellesParRecette, photoPrincipale } from '../domain/cuisine-personnelle.js';
 
 export async function renderMeals(params, query, ctx) {
@@ -56,7 +59,7 @@ export async function addToMealFlow(ctx, doc, { role = 'accompagnement', mainDoc
   navigate(`/meals/${meal.id}`);
 }
 
-export async function renderMeal(params, query, ctx) {
+export async function renderMeal(params, query, ctx, deps = {}) {
   const meal = ctx.meals.find((m) => m.id === params.id);
   if (!meal) return el('div', { class: 'card' }, t('Repas introuvable.'));
   meal.items = meal.items || [];
@@ -94,11 +97,13 @@ export async function renderMeal(params, query, ctx) {
         vignette ? el('div', { class: 'row top', style: { flex: '1', minWidth: '0' } }, vignette, bloc) : bloc,
         el('div', { class: 'row' },
           select(MEAL_ROLES.map((r) => ({ value: r, label: label('meal_role', r) })), it.role, (v) => { meal.items.find((x) => x.id === it.id).role = v; save(); }),
-          el('input', { type: 'number', min: 1, value: it.servings || meal.servings, style: { width: '80px' }, title: t('Portions de cet élément'), onChange: (e) => { const x = meal.items.find((y) => y.id === it.id); x.servings = Number(e.target.value) || meal.servings; x.servings_custom = true; save(); } }),
+          el('input', { type: 'number', min: 1, value: portionsRepas(it, meal) ?? '', placeholder: t('inconnues'), style: { width: '80px' }, title: t('Portions de cet élément'), onChange: (e) => { const x = meal.items.find((y) => y.id === it.id); x.servings = Number(e.target.value) || meal.servings; x.servings_custom = true; save(); } }),
           el('button', { class: `btn small ${it.locked ? 'active' : ''}`, title: t('Verrouiller ce plat : jamais remplacé automatiquement'), onClick: () => { meal.items.find((x) => x.id === it.id).locked = !it.locked; save(); } }, it.locked ? '🔒' : '🔓'),
           el('button', { class: 'btn small', disabled: it.locked, onClick: () => replaceItem(it) }, t('Remplacer')),
           el('button', { class: 'btn small danger', disabled: it.locked, onClick: async () => { if (await confirmDialog(t('Retirer « {r} » du repas ? Les autres éléments restent.', { r: it.recipe.original_title }), { okLabel: t('Retirer') })) { meal.items = meal.items.filter((x) => x.id !== it.id); save(); } } }, t('Retirer')))),
       !it.version ? el('div', { class: 'status warn' }, t('Référence d’index seulement : ingrédients et durées inconnus.')) : null);
+    const rappelTM = rappelThermomix(it.version); if (rappelTM) card.append(rappelTM);
+    if (!gardeThermomix(it.version, portionsRepas(it, meal)).ok) card.append(el('div', { class: 'status warn', dataset: { role: 'thermomix-portions' } }, t(BLOCAGE_THERMOMIX), el('button', { class: 'btn small', onClick: async () => { const cible = meal.items.find(x => x.id === it.id); cible.servings = it.version.servings ?? null; cible.servings_custom = true; await save(); } }, t('Revenir aux quantités adaptées'))));
     list.append(card);
   }
   root.append(section(t('Mon repas — {n} élément(s)', { n: items.length }), list,
@@ -143,10 +148,17 @@ export async function renderMeal(params, query, ctx) {
     navigate(`/lists/${list.id}`);
   }
   async function startCooking() {
-    const withV = items.filter((it) => it.version);
-    const session = { id: repo.newId('cs'), recipe_id: main?.recipe.id || withV[0].recipe.id, meal_id: meal.id, selected_version_ids: withV.map((it) => it.version.id), servings_by_version: Object.fromEntries(withV.map((it) => [it.version.id, it.servings || meal.servings])), servings: meal.servings, progress: { done_step_ids: [], by_version: {}, total_steps: withV.reduce((n, it) => n + (it.version.steps || []).length, 0) }, started_at: repo.nowIso(), active_device_id: deviceId(), status: 'active', units: ctx.settings.units };
-    await repo.save('cook_sessions', session);
-    navigate(`/cook/${session.id}`);
+    const R = deps.repo ?? repo;
+    try {
+      const actuelle = await R.get('meals', meal.id);
+      if (!actuelle) return;
+      const withV = (await Promise.all((actuelle.items || []).map(async it => ({ ...it, version: it.recipe_version_id ? await R.get('recipe_versions', it.recipe_version_id) : null })))).filter(it => it.version);
+      if (!withV.length) return;
+      if (withV.some(it => !gardeThermomix(it.version, portionsRepas(it, actuelle)).ok)) { (deps.toast ?? toast)(t(BLOCAGE_THERMOMIX)); return; }
+      const session = { id: R.newId('cs'), recipe_id: withV[0].recipe_id, meal_id: meal.id, selected_version_ids: withV.map(it => it.version.id), servings_by_version: Object.fromEntries(withV.map(it => [it.version.id, portionsRepas(it, actuelle)])), servings: actuelle.servings, progress: { done_step_ids: [], by_version: {}, total_steps: withV.reduce((n, it) => n + (it.version.steps || []).length, 0) }, started_at: R.nowIso(), active_device_id: deviceId(), status: 'active', units: ctx.settings.units };
+      await enregistrerSessionCuisine(session, { repo: R });
+      (deps.navigate ?? navigate)(`/cook/${session.id}`);
+    } catch { (deps.toast ?? toast)(t(BLOCAGE_THERMOMIX)); }
   }
   async function feedback() {
     const liked = await chooseDialog(t('Ce repas ?'), [{ value: 'yes', label: t('Excellent — à refaire') }, { value: 'no', label: t('Pas convaincant') }]);

@@ -2523,7 +2523,7 @@ export async function runImportCibleTests({ eq, ok }) {
     const ligneDe = (root, id) => root.querySelector(`[data-role="ligne-import"][data-id="${CSS.escape(id)}"]`);
     try {
       // --- 1. Domaine PUR (§ 4.7) : une lecture web est listée, avec ses gestes ; la table entière.
-      eq(D.KINDS_IMPORT, ['recette', 'index', 'web', 'classement', 'couverture', 'livre'], 'Lots B/D/E/I2 : les sortes du journal comprennent web, classement, couverture et livre');
+      eq(D.KINDS_IMPORT, ['recette', 'index', 'web', 'classement', 'couverture', 'livre', 'thermomix'], 'Lots B/D/E/I2 : les sortes du journal comprennent web, classement, couverture et livre');
       eq(D.KINDS_PAGES, ['recette', 'index', 'classement'], 'lot B (P-1) : KINDS_PAGES — les sortes à pages, seules ouvertes par le chemin photo (« web » listée, jamais ouverte par lui) ; lot D (I-D11) : une ligne de classement porte des photos');
       const ICI = 'doc-ici', MOI = 'dev-ici', AUTRE = 'dev-ailleurs';
       const ilYa = (min) => new Date(Date.parse(NOW) - min * 60000).toISOString();
