@@ -1,6 +1,8 @@
 # Vérification visuelle — photos et repères
 
-**final result: passed**
+**final result: passed — correctifs ciblés du 29 octobre vérifiés localement. La traduction IA intégrale reste hors du périmètre construit.**
+
+Le compte rendu ci-dessous décrit les contrôles du 28 octobre sur données préparées. Il ne suffit pas à valider le parcours d’une recette existante sans description.
 
 Périmètre : intégration des maquettes dans la PWA existante, conformément à la spec approuvée ; aucun compte connecté ni donnée réelle.
 
@@ -78,3 +80,41 @@ Restent hors de cette preuve : Safari/iPhone physique, formats HEIC/HEIF sur ces
 
 Preuves publiques dans le même registre : `suite-publique.resultat.json`, `publication.resultat.json`,
 `pages-build-code.json`, `captures-publication/`. Profil jetable sans compte ; limites physiques inchangées.
+
+
+## Retour mobile du 29 octobre — avant correction
+
+Captures neuves 390 × 844, profil jetable sans compte et recette anglaise sans repères, dans
+`.superpowers/sdd/2026-10-29-mobile-francais/`. Aucun appel réel, zéro erreur JavaScript/requête externe.
+
+1. Livre et fiche (`01-livre-sans-description.png`, `02-fiche-sans-description.png`) : images présentes et état inconnu honnête,
+   mais accès à la description par un lien discret « Modifier les repères ». L’affichage des maquettes n’est pas obtenu pour cette recette.
+2. Informations (`03-ecran-reperes.png`) : bouton IA en haut mais cause du blocage sans compte sous le formulaire ; prochaine action peu claire.
+3. Langue (`04-langues-deployees.png`, `05-apres-fr.png`, `06-traduction-absente.png`) : commande repliée, état visuel Original après FR,
+   absence de traduction effectivement signalée dans le corps. L’éditeur (`07-editeur-traduction.png`) est manuel, sans assistant.
+
+Limites : aucun écran du téléphone de Neegan n’a été capturé ; conformité globale d’accessibilité non évaluée. Les constats portent
+sur les écrans et interactions observés. La clarification description courte / recette intégrale est demandée, sans réponse supposée.
+
+
+## Correctifs vérifiés — 29 octobre, version 0.21.1
+
+Captures neuves dans `.superpowers/sdd/2026-10-29-mobile-francais/apres/`, même fixture sans repères préremplis :
+
+1. **Fiche sans description — corrigée.** `01-fiche-sans-description.png` : action principale explicite, coût, résultat attendu et saisie
+   manuelle expliqués. L’aide est sur sa propre ligne ; la première capture après correction avait un retour de ligne maladroit, corrigé.
+2. **Écran sans compte — corrigé.** `02-editeur-sans-compte.png` : titre « Description en français », bouton désactivé avec raison juste
+   dessous, avant le formulaire et dans la première hauteur d’écran. Pas d’appel à l’ouverture.
+3. **Description enregistrée — vérifiée.** `03-fiche-description-conservee.png` : texte français visible sous le titre après rechargement,
+   action d’actualisation discrète, photo 260 px. Comparaison à 358 px avec la maquette fournie ; les temps et niveaux restent inconnus
+   dans cette fixture, sans reprendre les chiffres illustratifs. Original anglais strictement inchangé.
+4. **Liste du livre — vérifiée.** `04-livre-description.png` : la même description apparaît dans la ligne de recette.
+5. **Lecture FR — corrigée.** `05-fr-selectionne.png` : FR actif ; lien Traduire transmet `locale=fr`, l’éditeur ouvre bien FR.
+6. **Hors ligne — vérifié.** `06-editeur-hors-ligne.png` : raison lisible près du bouton désactivé, description déjà conservée et saisie
+   manuelle disponible après rechargement. Cache 0.21.1-1 actif et contrôlant avec six modules.
+
+Fiches vides/renseignées sans débordement à 320/358/390/768/1280 ; zéro erreur JS/requête externe. La session ne simule pas un résultat
+réel de l’assistant : la description du parcours est saisie manuellement ; l’appel unique et la relecture sont couverts avec réponse injectée.
+Suite 7118/7118 (+38), Node 230/230, 19 JS syntaxiquement valides. Preuves `apres/resultat.json`, `suite.resultat.json`, `node.log`.
+Pas de prétention de conformité d’accessibilité complète, ni de validation sur le téléphone physique de Neegan. La recette intégrale
+reste traduite via l’éditeur manuel ; une demande d’automatisation complète doit être distinguée de la description française courte.

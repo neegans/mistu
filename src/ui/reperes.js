@@ -85,6 +85,7 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   const lien = `/recipes/${encodeURIComponent(recipe.id)}`, retour = lien + buildQuery(versionId ? { v: versionId } : {});
   const root = el('div', { class: 'stack', dataset: { role: 'reperes' } }), proteger = protegerSaisie(root);
   const status = el('p', { class: 'status', role: 'status', 'aria-live': 'polite', dataset: { role: 'etat-reperes' } }), feedback = el('div', { class: 'stack' });
+  const disponibilite = el('p', { class: 'status', role: 'status', 'aria-live': 'polite', dataset: { role: 'disponibilite-assistant' } });
   const comparaison = el('div', { class: 'reperes-comparaison', dataset: { role: 'comparaison-reperes' } });
   const inputs = new Map(), controls = [], confirmations = [];
   const readonly = () => !!row && row.device_id !== repo.deviceId(), terminal = () => !!row && TERMINES.includes(row.status);
@@ -199,20 +200,23 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
     for (const b of confirmations) b.disabled = verrou;
     proposer.disabled = verrou || !sessionLive || !enLigne() || !!volEnCours();
     proposer.textContent = libelleProposer();
+    disponibilite.textContent = !enLigne() ? t('Tu es hors ligne. La saisie manuelle reste disponible.')
+      : !sessionLive ? t('Connecte-toi pour utiliser l’assistant. Les corrections manuelles restent disponibles.') : '';
+    disponibilite.hidden = !disponibilite.textContent;
     manuel.disabled = verrou || !modifies.size; garder.disabled = verrou || row?.status !== 'a_verifier' || !row?.resultat || !relecture;
     garder.hidden = validation.hidden = !row?.resultat; relu.disabled = verrou;
     annuler.hidden = !tenue; annuler.disabled = !busy || !tenue;
     ignorer.disabled = busy || saving || readonly() || terminal() || row?.status === 'en_cours';
     actualiser.hidden = !row || (!readonly() && row.status !== 'en_cours'); copier.hidden = !row || !terminal();
   }
-  root.append(pageHeader(t('Repères de la recette'), { subtitle: recipe.original_title, back: { href: retour, label: t('Recette') } }),
-    el('p', { class: 'muted' }, t('La description reste en français. Tes corrections sont conservées lors des prochaines propositions.')),
+  root.append(pageHeader(t('Description en français'), { subtitle: recipe.original_title, back: { href: retour, label: t('Recette') } }),
+    el('p', { class: 'muted' }, t('Une courte description en français pour comprendre le plat, avec son niveau et ses temps.')),
+    el('p', { class: 'muted' }, t('Demande une proposition à relire ou saisis tes informations. Tes corrections sont conservées lors des prochaines propositions.')),
     !version ? el('p', { class: 'status' }, t('Cette référence peut recevoir une description. Importe les étapes pour renseigner la difficulté et les durées.')) : el('details', null, el('summary', null, t('Version affichée utilisée pour ces informations')), el('ul', null, ...contexte.source.ingredients.map(s => el('li', null, s))), el('ol', null, ...contexte.source.etapes.map(s => el('li', null, s)))),
-    el('div', { class: 'actions' }, proposer, annuler), formulaire, comparaison, validation, el('div', { class: 'actions' }, manuel, garder, ignorer, actualiser, copier), status, feedback);
+    el('div', { class: 'actions' }, proposer, annuler), disponibilite, status, feedback, formulaire, comparaison, validation, el('div', { class: 'actions' }, manuel, garder, ignorer, actualiser, copier));
   if (row?.resultat) remplirProposition();
   if (readonly()) message(t('Ce brouillon se modifie sur l’appareil qui l’a créé.'));
   else if (row?.validation_erreur) message(texteErreurReperes({ code: row.validation_erreur }));
   else if (row?.erreur) message(texteErreurReperes(row.erreur));
-  else if (!sessionLive) message(t('Connecte-toi pour utiliser l’assistant. Les corrections manuelles restent disponibles.'));
   synchroniser(); return root;
 }

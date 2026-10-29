@@ -276,3 +276,24 @@ attendre son apparition, puis vérifier sa disponibilité hors ligne. Les tests 
 GitHub Pages vérifié le 28 octobre à 22 h 43 HAE ; suite publique 7080/7080 et parcours hors ligne réussis.
 Les limites de la preuve sur appareils physiques restent celles du § 11. La construction suit la relecture prévue dans
 [AGENTS.md](../../../AGENTS.md) : « Spec d’abord […] relue par Neegan, puis construction en petites tâches testées ».
+
+
+## 13. Correctifs de réception mobile — 29 octobre 2026
+
+Neegan confirme que les photos du mobile apparaissent maintenant sur l’ordinateur, puis signale ne pas voir les changements
+attendus sur mobile et ne pas trouver le « français simple ». La courte description française du § 4 reste le périmètre retenu
+en attendant de préciser s’il parle aussi des ingrédients et étapes. Aucun nouveau circuit de traduction IA n’est ajouté.
+
+Écarts reproduits sur une recette existante sans repères : seul « Modifier les repères » mène au bouton promis au § 7 ; le motif
+« sans compte » du bouton désactivé apparaît sous le long formulaire. La recette avec données préparées dans les premières captures
+ne couvrait pas assez cet état. Correction du parcours déjà approuvé : accès Compléter/Actualiser visible sous la description,
+aide nommant description française, niveau et temps, coût d’un appel, possibilité de saisie manuelle ; raison d’indisponibilité
+et état de l’appel près du bouton sur l’écran suivant. Ouvrir ce parcours ne déclenche aucun appel ; relecture avant conservation.
+
+Deux défauts du parcours de traduction manuel sont traités sans en changer la fonction : FR/EN doit refléter le choix affiché,
+et le lien Traduire doit transmettre la langue choisie à l’éditeur (FR pour un original italien demandé en français). Une langue
+source inconnue ne prouve pas qu’une traduction FR existe. Les anciennes adresses gardent leur comportement par défaut ; seuls
+FR et EN sont admis comme langues cibles. Les ingrédients, étapes, quantités et versions source ne sont pas réécrits.
+
+Réception : capture mobile avant/après avec recette sans description, compte absent et état hors ligne, appel injecté unique puis
+relecture/conservation, réouverture fiche/livre, langues FR/EN et édition en bonne langue. Pas d’appel réel ni de données privées.

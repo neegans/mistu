@@ -13,6 +13,29 @@ export async function runVisuelIntegrationTests({ eq, ok }) {
     eq(root.querySelector('[data-role=gerer-photo]')?.getAttribute('href'), '#/recipes/visuel-r/photo', 'Visuel : gestion photo depuis une ligne du livre');
     ok(root.textContent.includes('Description à compléter') && root.textContent.includes('Niveau à estimer') && root.textContent.includes('Temps à estimer'), 'Visuel : repères inconnus nommés sans inventer de données');
   });
+  await run('accès à la description française', async () => {
+    const { resumeReperes } = await import('../src/ui/reperes-affichage.js');
+    const { construireContexteReperes, fabriquerCorrectionsReperes, fusionnerReperes } = await import('../src/domain/reperes.js');
+    const vide = resumeReperes(recipe, version, { detail: true, modifier: true });
+    const action = vide.querySelector('[data-role=modifier-reperes]');
+    eq(action?.textContent, 'Compléter les informations — 1 appel', 'Description : fiche ancienne propose explicitement de compléter les informations');
+    eq(action?.getAttribute('href'), '#/recipes/visuel-r/reperes?v=visuel-v', 'Description : accès conserve la version affichée');
+    ok(action && !action.closest('details') && (action.compareDocumentPosition(vide.querySelector('.reperes-badges')) & Node.DOCUMENT_POSITION_FOLLOWING), 'Description : action visible sous le texte, avant les badges et détails repliables');
+    ok(vide.textContent.includes('Une courte description en français') && vide.textContent.includes('saisie manuelle sans compte'), 'Description : accès explique le résultat français et la possibilité sans compte');
+    const contexte = construireContexteReperes({ recipe, version });
+    const avec = { ...recipe, reperes: fusionnerReperes(null, { corrections: fabriquerCorrectionsReperes({ description_fr: { texte: 'Ma description française.' } }, contexte, '2026-10-29T12:00:00Z') }) };
+    const renseigne = resumeReperes(avec, version, { detail: true, modifier: true });
+    eq(renseigne.querySelector('[data-role=modifier-reperes]').textContent, 'Actualiser les informations — 1 appel', 'Description : informations présentes proposent Actualiser');
+    eq(renseigne.querySelector('.description-recette').textContent, 'Ma description française.', 'Description : nouvelle action préserve la correction existante');
+    ok((renseigne.querySelector('.details-reperes').compareDocumentPosition(renseigne.querySelector('[data-role=modifier-reperes]')) & Node.DOCUMENT_POSITION_FOLLOWING)
+      && !renseigne.textContent.includes('Une courte description en français'), 'Description : informations renseignées gardent un accès après les détails, sans aide répétée');
+    avec.reperes = fusionnerReperes(avec.reperes, { corrections: fabriquerCorrectionsReperes({ description_fr: null }, contexte, '2026-10-29T12:01:00Z') });
+    const efface = resumeReperes(avec, version, { modifier: true });
+    eq([efface.querySelector('.description-recette').textContent, efface.querySelector('[data-role=modifier-reperes]').textContent], ['Description à compléter', 'Actualiser les informations — 1 appel'], 'Description : effacement manuel reste inconnu et peut être actualisé volontairement');
+    const reference = resumeReperes({ ...recipe, availability: 'reference_only', current_version_id: null }, null, { modifier: true });
+    eq(reference.querySelector('[data-role=modifier-reperes]').getAttribute('href'), '#/recipes/visuel-r/reperes', 'Description : référence sans version garde son accès propre');
+    eq(resumeReperes(recipe, version).querySelector('[data-role=modifier-reperes]'), null, 'Description : résumé de liste ne duplique pas les commandes de fiche');
+  });
   await run('photo personnelle distante', async () => {
     const { fichierPhoto } = await import('../src/ui/components.js');
     const { photosPersonnellesParRecette } = await import('../src/domain/cuisine-personnelle.js');

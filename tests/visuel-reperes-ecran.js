@@ -9,12 +9,20 @@ export async function runVisuelReperesEcranTests({ eq, ok }) {
   const run = async (nom, fn) => { try { await withRepo(fn); } catch (e) { ok(false, `Repères écran — ${nom} : ${e.stack || e.message}`); } };
   try {
     await run('saisie manuelle hors ligne et reprise', async repo => {
-      await seedReperes(repo); let calls = 0; const deps = depsDe(repo, { sessionAssistant: async () => null, enLigne: () => false, fetch: async () => { calls++; } });
+      await seedReperes(repo); let calls = 0, online = false; const deps = depsDe(repo, { sessionAssistant: async () => null, enLigne: () => online, fetch: async () => { calls++; } });
       let root = await renderReperesRoute({ id: 'r-reperes' }, { v: 'v-reperes' }, {}, deps); document.body.append(root);
       try {
         eq(calls, 0, 'Repères écran : aucun appel à ouverture');
         eq(root.querySelector('header > a').getAttribute('href'), '#/recipes/r-reperes?v=v-reperes', 'Repères écran : retour à la version affichée sans adresse indéfinie');
         eq(root.querySelector('[data-role=proposer-reperes]').disabled, true, 'Repères écran : appel indisponible hors ligne');
+        eq(root.querySelector('h1').textContent, 'Description en français', 'Repères écran : titre court indique ce que la personne va compléter');
+        const indisponible = root.querySelector('[data-role=disponibilite-assistant]');
+        eq(indisponible?.textContent, 'Tu es hors ligne. La saisie manuelle reste disponible.', 'Repères écran : raison hors ligne visible près du bouton');
+        ok(indisponible && (indisponible.compareDocumentPosition(root.querySelector('.reperes-formulaire')) & Node.DOCUMENT_POSITION_FOLLOWING), 'Repères écran : raison visible avant le long formulaire');
+        online = true; window.dispatchEvent(new Event('online'));
+        eq(indisponible?.textContent, 'Connecte-toi pour utiliser l’assistant. Les corrections manuelles restent disponibles.', 'Repères écran : retour en ligne sans compte explique la connexion nécessaire');
+        eq(root.querySelector('[name=description_fr]').disabled, false, 'Repères écran : description modifiable sans compte malgré assistant indisponible');
+        online = false; window.dispatchEvent(new Event('offline'));
         input(root.querySelector('[name=description_fr]'), 'Mes tomates mijotées.'); await root.attendreEcritures();
         const importId = root.etatRoute().importId; ok(!!importId, 'Repères écran : saisie durable'); root.dispose(); root.remove();
         root = await renderReperesRoute({ id: 'r-reperes' }, { import: importId }, {}, deps); document.body.append(root);
@@ -22,6 +30,21 @@ export async function runVisuelReperesEcranTests({ eq, ok }) {
         root.querySelector('[data-role=enregistrer-reperes]').click(); await root.attendreEcritures();
         eq((await repo.get('recipes', 'r-reperes')).reperes.corrections.description_fr.valeur.texte, 'Mes tomates mijotées.', 'Repères écran : correction écrite hors ligne');
         eq((await repo.get('imports', importId)).status, 'enregistre', 'Repères écran : saisie réellement conservée'); eq(calls, 0, 'Repères écran : manuel sans assistant');
+      } finally { root.dispose(); root.remove(); }
+    });
+    await run('retour en ligne sans appel automatique', async repo => {
+      await seedReperes(repo); let online = false, calls = 0;
+      const root = await renderReperesRoute({ id: 'r-reperes' }, {}, {}, depsDe(repo, { enLigne: () => online, fetch: async () => { calls++; return reponseAssistantReperes(reponseReperesTest()); } })); document.body.append(root);
+      try {
+        const bouton = root.querySelector('[data-role=proposer-reperes]'), raison = root.querySelector('[data-role=disponibilite-assistant]');
+        eq([bouton.disabled, raison?.hidden], [true, false], 'Repères écran : compte connecté hors ligne garde une raison affichée');
+        bouton.click(); await root.attendreEcritures();
+        eq(calls, 0, 'Repères écran : bouton indisponible ne lance pas de requête');
+        online = true; window.dispatchEvent(new Event('online'));
+        eq([bouton.disabled, raison?.hidden], [false, true], 'Repères écran : retour en ligne rend le bouton disponible et retire la raison obsolète');
+        eq(calls, 0, 'Repères écran : retour en ligne ne déclenche aucun appel');
+        online = false; window.dispatchEvent(new Event('offline'));
+        eq([bouton.disabled, raison?.hidden], [true, false], 'Repères écran : nouvelle perte réseau réaffiche la raison');
       } finally { root.dispose(); root.remove(); }
     });
     await run('appel explicite et relecture', async repo => {

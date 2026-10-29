@@ -75,7 +75,7 @@ export async function renderRecipeEdit(params, query, ctx) {
     printed_page: recipe?.printed_page ?? pages.find((p) => p.printed_page)?.printed_page ?? '', source_label: recipe?.source_label || '',
     servings: base?.servings ?? '', prep: base?.prep_minutes ?? '', cook: base?.cook_minutes ?? '', active: base?.active_minutes ?? '', total: base?.total_minutes ?? '',
     ingredientsText: (base?.ingredients || []).map((i) => i.source_text).join('\n'), stepsText: joindreEtapes(base?.steps || []),
-    notes: base?.notes || '', changes: '', status: 'proposed', translationLocale: f_defaultTranslation(recipe), aiUsed: false, aiModel: null,
+    notes: base?.notes || '', changes: '', status: 'proposed', translationLocale: ['fr', 'en'].includes(query.locale) ? query.locale : f_defaultTranslation(recipe), aiUsed: false, aiModel: null,
   };
   if (kind === 'adaptation') { f.changes = ''; }
   let parsedLines = (base?.ingredients || []).map((i) => ({ ...i, id: repo.newId('ri') }));

@@ -3331,6 +3331,29 @@ DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de
 R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
 404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
 
+### Correctifs français sur mobile (29 octobre 2026 — 0.21.1, publication en préparation)
+
+Après confirmation de la réception des photos, Neegan signale ne pas voir les changements attendus sur mobile ni le « français simple ».
+L’annonce précédente de conformité était trop large : les maquettes ont une description renseignée, alors que les anciennes recettes
+restent vides et n’offraient qu’un lien « Modifier les repères ». Les captures neuves sans repères confirment ce défaut de découverte.
+
+Correction conforme au parcours explicite approuvé : accès principal Compléter/Actualiser sous la description absente, aide sur la
+courte description française/niveau/temps et coût d’un appel ; après renseignement, action discrète après les détails. Écran « Description
+en français », motif connexion/hors ligne et état de l’opération au-dessus du formulaire. Aucun appel automatique ; saisie manuelle,
+proposition, relecture et conservation restent distinctes. Aucune nouvelle traduction IA des ingrédients ou étapes.
+
+Deux bugs du parcours de traduction manuel corrigés : sélection FR/EN reflétée dans le contrôle de la fiche ; langue choisie transmise
+au lien Traduire puis validée dans l’éditeur. Seuls `fr` et `en` sont admis, ancienne adresse sans langue inchangée. Une langue source
+inconnue ne masque plus l’absence de traduction FR. Versions culinaires, quantités et original préservés.
+
+Branche `correctifs-francais-mobile`, base `801b115`, `APP_VERSION 0.21.1`, cache `cuisine-os-v0.21.1-1`, DB 4. Aucun module, magasin,
+serveur ou SQL ajouté. Tests rouges constatés, puis **7118/7118** (épingle 7117, +38, aucune assertion retirée), Node **230/230**,
+migrations `--check` 0, syntaxe de 19 fichiers JS et `diff --check` propres. Zéro erreur JavaScript/requête externe.
+Suites ciblées : intégration 33, écran repères 49, Carnet 300. Registre `.superpowers/sdd/2026-10-29-mobile-francais/`.
+Parcours local réel : description manuelle conservée après rechargement dans fiche et livre, original anglais intact, FR actif et
+éditeur FR ; cache 0.21.1-1 avec six modules, saisie hors ligne disponible. Captures sans débordement à 320/358/390/768/1280.
+Les données et images de démonstration restent dans un profil jetable ; aucun appel réel assistant ni accès aux données privées.
+
 ### Photos, descriptions et temps (28 octobre 2026 — publié en 0.21.0)
 
 **Complément du 29 octobre — mise à jour installée.** Chrome, profil jetable, même origine locale `/mistu/` :

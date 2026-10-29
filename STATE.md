@@ -1,5 +1,17 @@
 # STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — PHOTOS ET REPÈRES EN LIGNE, 0.21.0, 7080/7080
 
+**29 octobre 2026 — RETOUR MOBILE : CORRECTIFS 0.21.1 CONSTRUITS, PUBLICATION EN PRÉPARATION.**
+Neegan confirme la réception des photos mobile → ordinateur. Il signale ensuite ne pas voir les changements de présentation
+et ne pas trouver le « français simple ». La réception du lot visuel est donc rouverte. Captures neuves : recette sans repères
+montrant « Description à compléter », accès indirect à l’assistant et motif de connexion sous le long formulaire ; sélecteur de
+langue ne reflétant pas FR choisi. Le lien Traduire perd aussi la langue cible. Correctifs bornés décrits au § 13 de la spec.
+Branche `correctifs-francais-mobile`, base `801b115` ; public encore 0.21.0. Accès principal à la description française, motif de
+connexion/hors ligne près du bouton, sélection FR/EN cohérente et langue cible transmise à l’éditeur corrigés. La traduction IA
+intégrale n’est pas construite ni annoncée comme livrée ; le parcours de traduction des ingrédients/étapes reste manuel.
+Version locale 0.21.1, cache `cuisine-os-v0.21.1-1`, DB 4. **7118/7118** tests (épingle 7117 ; +38 sans retrait), Node **230/230**,
+migrations `--check` 0, syntaxe de 19 fichiers JS et diff propres. Ciblés : intégration 33, écran repères 49, Carnet 300.
+Preuves : `.superpowers/sdd/2026-10-29-mobile-francais/`. Captures locales vérifiées à 320/358/390/768/1280 : description conservée après rechargement, visible dans le livre, original anglais intact, FR actif, éditeur FR et saisie hors ligne. Cache 0.21.1-1 actif, six modules ; contrôles publics à finaliser.
+
 **29 octobre 2026 — MISE À JOUR D’UNE INSTALLATION 0.20.0 VÉRIFIÉE.**
 Sur une même origine locale `/mistu/`, Chrome en profil jetable passe du commit publié `d832528` au commit `9faa1bf`.
 Avant rechargement, l’onglet garde bien son code 0.20.0 même après activation du nouveau service worker ; après rechargement en ligne,
@@ -8,7 +20,7 @@ Seul le cache `cuisine-os-v0.21.0-1` reste, actif et contrôlant avec les six mo
 prioritaire décodée, note affichée, cuisine reprise à la seconde étape. Zéro erreur JavaScript et zéro requête externe.
 Preuve : `.superpowers/sdd/2026-10-29-mise-a-jour/resultat.json` ; harnais `verifier.cjs`. Aucun changement applicatif nécessaire.
 Cette vérification complète le profil neuf utilisé pour la publication ; elle ne prouve pas le transfert sur le compte et les appareils réels.
-Retour demandé à Neegan : les photos apparaissent-elles après mise à jour des deux appareils ? Aucune réponse n’est supposée.
+Retour reçu de Neegan le 29 octobre : oui, les photos apparaissent maintenant sur l’ordinateur. Les formats et appareils exacts ne sont pas documentés.
 
 **28 octobre 2026 — PHOTOS, DESCRIPTIONS ET TEMPS : PUBLIÉ ET VÉRIFIÉ, 0.21.0.**
 [Spec](docs/superpowers/specs/2026-10-28-interface-visuelle-recettes-design.md) approuvée sur « ok go », branche `interface-visuelle-recettes`, base `d832528`.

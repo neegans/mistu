@@ -82,7 +82,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   if (!recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
   // Ronde 1 : l'identifiant d'une fiche reçue ou restaurée peut porter « & », « ? » ou « # » — les adresses l'encodent (le geste ouvert est celui annoncé).
   const rid = encodeURIComponent(recipe.id);
-  const lienEdition = (kind, v) => `#/recipes/${rid}/edit${buildQuery({ kind, v })}`;
+  const lienEdition = (kind, v, locale) => `#/recipes/${rid}/edit${buildQuery({ kind, v, locale })}`;
   // Lot B (§ 4.1, § 4.5) : une fiche à adresse lisible porte « Voir la page d’origine » partout (I-B5, D-UI-10) ; la lecture par l'assistant a besoin de la session.
   const lienFiche = recipe.source_url ? lienSignet(recipe.source_url) : null;
   const lisibleParLAssistant = !!lienFiche?.ok && lienFiche.href.startsWith('https:');
@@ -225,6 +225,13 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // « Portions, versions et autres gestes » (D-UI-6, § 13 point 4) : TOUT l'ancien contenu de la carte des contrôles et de la rangée d'actions, sauf
   // « Commencer à cuisiner » et le « Corriger » de tête — replié sous 760 px, ouvert au-dessus (le matchMedia, relu sur change) ; jamais « Réglages »
   // (l'app a déjà un écran de ce nom). L'Export reste en bas de la fiche, hors du details (H-3).
+  const langues = [{ value: 'original', label: t('Original') }, { value: 'fr', label: 'FR' }, { value: 'en', label: 'EN' }];
+  const langueLecture = segmented(langues, state.lang, (valeur) => {
+    state.lang = valeur;
+    // Le corps se redessine, mais ce contrôle reste monté dans le volet : son état doit suivre la lecture.
+    for (const [i, bouton] of [...langueLecture.children].entries()) bouton.classList.toggle('active', langues[i].value === valeur);
+    drawBody();
+  });
   const autresGestes = el('details', { class: 'autres-gestes', open: false, dataset: { role: 'autres-gestes' } },
     el('summary', null, t('Portions, versions et autres gestes')),
     el('div', { class: 'stack' },
@@ -244,7 +251,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
           el('strong', { id: 'servings-val' }, state.servings ?? t('inconnues')),
           el('button', { class: 'btn small', onClick: () => setServings((state.servings || 0) + 1) }, '+'))),
         el('label', { class: 'field' }, el('span', null, t('Unités')), segmented([{ value: 'original', label: t('Original') }, { value: 'metric', label: t('Métrique') }, { value: 'us', label: 'US' }], state.units, (v) => { state.units = v; drawBody(); })),
-        el('label', { class: 'field' }, el('span', null, t('Langue de lecture')), segmented([{ value: 'original', label: t('Original') }, { value: 'fr', label: 'FR' }, { value: 'en', label: 'EN' }], state.lang, (v) => { state.lang = v; drawBody(); }))),
+        el('label', { class: 'field' }, el('span', null, t('Langue de lecture')), langueLecture)),
       // N-5 : une création IA s'adapte par l'assistant (version enfant, original intact) ; les puces V1 s'effacent devant ce geste réel.
       estUneCreation
         ? el('div', { class: 'row' }, el('a', { class: 'btn small', href: `#/recipes/creer${buildQuery({ adapter: version.id })}`, dataset: { role: 'adapter-ia' } }, t('Adapter avec l’IA')))
@@ -317,7 +324,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     }
     const scaled = scaleVersion(version, state.servings);
     const translation = state.lang !== 'original' ? ctx.recipe_translations.find((tr) => tr.recipe_version_id === version.id && tr.locale === state.lang) : null;
-    const wantsTranslation = state.lang !== 'original' && state.lang !== (recipe.original_language || 'fr');
+    const wantsTranslation = state.lang !== 'original' && state.lang !== recipe.original_language;
     const ctxQty = { system: state.units, locale: state.lang === 'original' ? (recipe.original_language || 'fr') : state.lang, convention_id: conventionId, readingLocale: state.lang, originalLocale: recipe.original_language || 'fr', showSource: true };
     const ingList = el('ul', { class: 'list plain coches' });
     scaled.ingredients.forEach((ri, i) => {
@@ -349,7 +356,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     const ingredients = sectionPlain(`${t('Ingrédients')}${scaled.ok && scaled.factor !== 1 ? ` — ${t('recalculés pour {n} portions', { n: state.servings })}` : version.servings ? ` — ${t('{n} portions', { n: version.servings })}` : ''}`,
       el('div', { class: 'row between' }, el('span', { class: 'muted' }, timeText(version, recipe)), dietSel),
       assessment ? el('div', { style: { margin: '.4rem 0' } }, dietChip(assessment), assessment.unknown.length ? el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `${t('Inconnus')} : ${assessment.unknown.join(', ')}`) : null) : null,
-      wantsTranslation && !translation ? el('div', { class: 'status warn' }, t('Aucune traduction {l} pour cette version.', { l: state.lang.toUpperCase() }), el('a', { class: 'btn small', href: lienEdition('translation', version.id) }, t('Traduire'))) : null,
+      wantsTranslation && !translation ? el('div', { class: 'status warn' }, t('Aucune traduction {l} pour cette version.', { l: state.lang.toUpperCase() }), el('a', { class: 'btn small', href: lienEdition('translation', version.id, state.lang) }, t('Traduire'))) : null,
       translation ? el('div', { class: 'row' }, el('span', { class: 'badge' }, t('Traduction')), el('span', { class: 'muted' }, translation.translated_content.title || '')) : null,
       ingList, ...scaled.notes.map((n) => el('small', { class: 'muted', style: { display: 'block' } }, n)),
       !conventionId && scaled.ingredients.some((i) => ['cup', 'tbsp', 'tsp', 'fl_oz'].includes(i.unit_id)) ? el('div', { class: 'status warn', style: { marginTop: '.5rem' } }, t('Tasses/cuillères : convention non confirmée pour cette édition — quantités d’origine affichées.'), edition ? el('a', { class: 'btn small', href: `#/books/${edition.id}` }, t('Préciser')) : null) : null);
