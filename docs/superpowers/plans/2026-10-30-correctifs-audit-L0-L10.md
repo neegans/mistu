@@ -60,14 +60,14 @@
 - Modifier : `src/model/repo.js:180-194` (`purgerImportsAnciens`) ; `src/sync/pull.js` (relance ciblée, voir étape 4)
 - Créer : `tests/audit-purge-imports.js` ; importer dans `tests/tests.js`
 
-- [ ] **Étape 1 : tests rouges** (fixture `withRepo` de la suite, horloge injectée 40 jours plus tard) :
+- [x] **Étape 1 : tests rouges** (fixture `withRepo` de la suite, horloge injectée 40 jours plus tard) :
   - `audit B2 : un fragment d'index enregistre n'est pas purgé` : manifeste `index_storage.role:'page_manifest'` + fragment `role:'result_fragment'` (forme de `src/domain/index-stockage.js:135-142`), `status:'enregistre'`, `updated_at` à −40 j ; un import ordinaire `kind:'recette'` `status:'ignore'` −40 j → après `purgerImportsAnciens(maintenant)` : les deux lignes gérées existent, l'ordinaire n'existe plus, `outbox` ne contient aucune entrée `op:'delete'` pour les gérées.
   - `audit B2 : un journal de traduction n'est pas purgé` : ligne `kind:'traduction'` `status:'enregistre'` −40 j → conservée.
   - `audit B2 : estImportGere` : table de 8 lignes (6 vraies, 2 fausses dont `kind:'recette'` et `kind:'index'` sans `index_storage`).
-- [ ] **Étape 2 : rouge constaté** (lignes gérées supprimées).
-- [ ] **Étape 3 : implémenter** `estImportGere` et filtrer `vieilles` dans `purgerImportsAnciens` : `if (estImportGere(ligne)) continue;`.
-- [ ] **Étape 4 : réparation des appareils déjà touchés** : à `repo.init()`, une passe unique (garde `sync_state` clé `reparation_imports_geres`, origine `device`) retire de la file les entrées `op:'delete'` en quarantaine `last_error:'forme'` dont le `payload` est un import géré, puis remet le curseur `cursor:imports` à `0` pour que la prochaine réception ramène les lignes du serveur (les fiches locales plus récentes gagnent par I7). Test : fixture avec une telle entrée + curseur à 50 → après `init()` : entrée retirée, curseur 0, garde posée ; second `init()` : rien ne bouge.
-- [ ] **Étape 5 : suite verte, commit** `fix(imports): epargner les lignes gerees a la purge de 30 jours et relancer leur reception (audit B2)`.
+- [x] **Étape 2 : rouge constaté** (lignes gérées supprimées).
+- [x] **Étape 3 : implémenter** `estImportGere` et filtrer `vieilles` dans `purgerImportsAnciens` : `if (estImportGere(ligne)) continue;`.
+- [x] **Étape 4 : réparation des appareils déjà touchés** : à `repo.init()`, une passe unique (garde `sync_state` clé `reparation_imports_geres`, origine `device`) retire de la file les entrées `op:'delete'` en quarantaine `last_error:'forme'` dont le `payload` est un import géré, puis remet le curseur `cursor:imports` à `0` pour que la prochaine réception ramène les lignes du serveur (les fiches locales plus récentes gagnent par I7). Test : fixture avec une telle entrée + curseur à 50 → après `init()` : entrée retirée, curseur 0, garde posée ; second `init()` : rien ne bouge.
+- [x] **Étape 5 : suite verte, commit** `fix(imports): epargner les lignes gerees a la purge de 30 jours et relancer leur reception (audit B2)`.
 
 ### Tâche 3 : Un conflit de cycle n'est jamais écrasé (B3)
 

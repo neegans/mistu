@@ -13,6 +13,7 @@ import { fusionEdition, CLE_EDITION_CONFIRMEE } from './cycle-edition.js';
 import { estCommandeSources, ciblesCommandeSources, CLE_SOURCE_CONFIRMEE } from './commandes-sources.js';
 import {estCommandeProtegee,ciblesCommandeProtegee,estLectureTraductionSignee,estPhaseJournalTraduction} from './commandes-traduction.js';
 import {estLigneCuisine,validerMinuteurCuisine,validerSessionCuisine} from '../domain/cuisine-format.js';
+import {CLE_REPARATION_IMPORTS_GERES} from '../domain/imports-geres.js';
 
 // R-L3-12 : les versions AVANT les recettes. Le pointeur d'une recette reçue désigne presque toujours une version
 // créée par le même geste, sur l'autre appareil : lue après la recette, elle serait encore inconnue ici et chaque
@@ -146,8 +147,7 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
     return { id: `recipes:${ligne.id}`, store: 'recipes', record_id: ligne.id, local: locale, server: { data: ligne.data, updated_at: ligne.updated_at, deleted_at: null }, at: new Date().toISOString(), kind: 'version' };
   }
 
-  async function appliquerPage(table, lignes, bilan, curseur, tentative = 0) {
-    const owner=getUserId();
+  async function appliquerPage(table, lignes, bilan, curseur, tentative = 0, reparationImports = null, owner = getUserId()) {
     const commandesSources=rows=>rows.filter(e=>(estCommandeProtegee(e)||estPhaseJournalTraduction(e))&&(e.user_id==null||e.user_id===owner));
     const fileSources=commandesSources(await db.getAll('outbox'));
     const signatureFile=JSON.stringify(stable(fileSources));
@@ -281,9 +281,10 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
     const dernier = Math.max(...lignes.map((l) => l.server_seq));
     (puts.sync_state ||= []).push({ key: `cursor:${table}`, value: Math.max(curseur, dernier) });
     try {
-      await db.mutate({ puts, deletes, origin: 'remote', conditions: { ...(fusions.size ? { [table]: [...fusions.values()] } : {}), outbox:[gardeFile], sync_state: [gardeCompteCycle(owner,getUserId), ...confirmations.values()] } });
+      await db.mutate({ puts, deletes, origin: 'remote', conditions: { ...(fusions.size ? { [table]: [...fusions.values()] } : {}), outbox:[gardeFile], sync_state: [gardeCompteCycle(owner,getUserId),
+        ...(table==='imports'?[{key:CLE_REPARATION_IMPORTS_GERES,fusion:courante=>{if(JSON.stringify(stable(courante??null))!==JSON.stringify(stable(reparationImports)))throw Object.assign(new Error('Réparation des imports modifiée pendant la réception'),{code:'SYNC_IMPORTS_REPAIR_CHANGED'});return null;}}]:[]),...confirmations.values()] } });
     } catch (error) {
-      if (['SYNC_CONFIRMATION_CHANGED','SYNC_SOURCE_CHANGED'].includes(error.code) && tentative < 3) return appliquerPage(table, lignes, bilan, curseur, tentative + 1);
+      if (['SYNC_CONFIRMATION_CHANGED','SYNC_SOURCE_CHANGED'].includes(error.code) && tentative < 3) return appliquerPage(table, lignes, bilan, curseur, tentative + 1,reparationImports,owner);
       throw error;
     }
     bilan.recues += recues;
@@ -297,14 +298,29 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
     const liste = tables();
     for (const [i, table] of liste.entries()) {
       surProgression({ phase: 'reception', table, n: i + 1, total: liste.length });
+      // Capturer la garde AVANT le curseur : une réparation à partir de cet instant invalide la page en vol.
+      // Sinon une ancienne réponse partie de50 pourrait remettre80 après le reset0 et perdre les fragments à relire.
+      let reparationImports=table==='imports'?(await db.get('sync_state',CLE_REPARATION_IMPORTS_GERES))??null:null,reprisesImports=0;
       let curseur = (await db.get('sync_state', `cursor:${table}`))?.value || 0;
       for (;;) {
         const owner=getUserId();
         const { lignes, erreur } = await transport.lire(table, curseur, limite);
         if(getUserId()!==owner) {bilan.erreur={type:'auth',status:null};return bilan;}
         if (erreur) { bilan.erreur = erreur; logError('sync.pull', { table, reason: erreur.type, status: erreur.status }); return bilan; }
-        if (!lignes.length) break;
-        const r = await appliquerPage(table, lignes, bilan, curseur);
+        let r;
+        try{
+          const reparationCourante=table==='imports'?(await db.get('sync_state',CLE_REPARATION_IMPORTS_GERES))??null:null;
+          if(getUserId()!==owner){bilan.erreur={type:'auth',status:null};return bilan;}
+          if(table==='imports'&&JSON.stringify(stable(reparationCourante))!==JSON.stringify(stable(reparationImports)))throw Object.assign(new Error('Réparation des imports modifiée pendant la réception'),{code:'SYNC_IMPORTS_REPAIR_CHANGED'});
+          if (!lignes.length) break;
+          r = await appliquerPage(table, lignes, bilan, curseur,0,reparationImports,owner);
+        }catch(e){
+          if(e?.code!=='SYNC_IMPORTS_REPAIR_CHANGED'||reprisesImports>=2)throw e;
+          if(getUserId()!==owner){bilan.erreur={type:'auth',status:null};return bilan;}
+          reprisesImports++;reparationImports=(await db.get('sync_state',CLE_REPARATION_IMPORTS_GERES))??null;
+          curseur=(await db.get('sync_state','cursor:imports'))?.value||0;
+          if(getUserId()!==owner){bilan.erreur={type:'auth',status:null};return bilan;}continue;
+        }
         if (r.erreur) { bilan.erreur = r.erreur; logError('sync.pull.forme', { table }); return bilan; }
         // Une page courte ne clôt PAS la table : la suivante est demandée, et c'est une page vide qui arrête. Et le
         // curseur doit avancer — un serveur qui renverrait la même page ferait tourner cette boucle sans fin.

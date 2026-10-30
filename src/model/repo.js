@@ -29,6 +29,7 @@ import { lireCycleRecette, memeCycleRecette, estRecetteAutonome, identifiantCycl
 import { lireCycleEdition, lireEtatRecette, memeCycleEdition, memeExceptionEdition, exceptionEditionValide, MAGASINS_BILAN_LIVRE, calculerBilanLivre } from '../domain/cycle-edition.js';
 import { preparerLotSources } from '../sync/lot-sources.js';
 import { estCleEditeur, validerLigneEditeur, verifierQuotaEditeur, estRecuEditeur, LIMITES_BROUILLONS, ErreurBrouillon } from '../domain/brouillons-format.js';
+import {estImportGere,CLE_REPARATION_IMPORTS_GERES} from '../domain/imports-geres.js';
 
 // Base de l'application. Liaison vivante : bindDatabase ne sert qu'aux tests, pour travailler sur une base jetable.
 export let db = new Database(DB_NAME, DB_VERSION, STORES);
@@ -94,6 +95,9 @@ export async function init() {
   await effacerCleLocale();
   await purgerFilesEnFile();
   await convertirRemoteBooleen();
+  // Une autre fenêtre peut finir la réparation ou avancer la réception pendant cette passe.
+  // Seuls ces refus de concurrence sont rejouables au prochain démarrage ; le stockage reste une erreur réelle.
+  try { await reparerImportsGeres(); } catch(e) { if(!REFUS_REPARATION_IMPORTS.has(e?.code))throw e; }
   await marquerInterrompus();
   await purgerImportsAnciens();
 }
@@ -177,9 +181,10 @@ export async function marquerInterrompus(maintenant = Date.now()) {
 // jamais purgé (il attend un geste) ; une date illisible ne l'est pas non plus (rien d'inventé). provenance.import_id est un pointeur souple : les
 // versions qui nomment une ligne purgée restent intactes.
 export const RETENTION_IMPORTS_MS = 30 * 24 * 3600 * 1000;
-async function purgerImportsAnciens(maintenant = Date.now()) {
+export async function purgerImportsAnciens(maintenant = Date.now()) {
   const vieilles = [];
   for (const statut of IMPORTS_TERMINES) for (const ligne of await db.byIndex('imports', 'status', statut)) {
+    if(estImportGere(ligne))continue;
     const quand = Date.parse(typeof ligne?.updated_at === 'string' ? ligne.updated_at : '');
     if (Number.isFinite(quand) && maintenant - quand > RETENTION_IMPORTS_MS) vieilles.push(ligne);
   }
@@ -187,10 +192,41 @@ async function purgerImportsAnciens(maintenant = Date.now()) {
   const copies = Object.create(null); // une clé homonyme d'une propriété native reste une clé (comme removeMany)
   for (const ligne of vieilles) copies[ligne.id] = ligne;
   try {
-    await db.mutate({ deletes: { imports: vieilles.map((l) => l.id) }, payloads: { imports: copies }, origin: 'local', conditions: { imports: vieilles.map((l) => ({ key: l.id, attendus: [...IMPORTS_TERMINES] })) } });
+    await db.mutate({ deletes: { imports: vieilles.map((l) => l.id) }, payloads: { imports: copies }, origin: 'local', conditions: { imports: vieilles.map((l) => ({ key:l.id,fusion:courante=>{
+      // Le corps et sa date relus sont aussi ceux capturés pour la tombale. Une évolution depuis la sélection
+      // (notamment un marqueur géré ajouté ou une écriture récente) annule toute cette passe.
+      if(!courante||estImportGere(courante)||!IMPORTS_TERMINES.includes(courante.status)||JSON.stringify(courante)!==JSON.stringify(l))throw new TransitionRefusee('imports',l.id,courante?.status);
+      return null;
+    }})) } });
   } catch (e) { if (e instanceof TransitionRefusee) return 0; throw e; }
   emit('change', { store: 'imports' });
   return vieilles.length;
+}
+
+const REFUS_REPARATION_IMPORTS=new Set(['IMPORTS_REPAIR_BASE_CHANGED','IMPORTS_REPAIR_ACCOUNT_CHANGED','IMPORTS_REPAIR_LIBRARY_CHANGED','IMPORTS_REPAIR_GUARD_CHANGED','IMPORTS_REPAIR_CURSOR_CHANGED','IMPORTS_REPAIR_OUTBOX_CHANGED']);
+const refusReparationImports=code=>{throw Object.assign(new Error(code),{code});};
+// Les anciennes purges emportaient leur copie entière dans payload : aucune réponse n'est supprimée ici.
+// La remise à zéro ramène aussi les fragments dont la personne a déjà abandonné la tombale en quarantaine.
+export async function reparerImportsGeres(){
+  const base=db,verifierBase=()=>{if(db!==base)refusReparationImports('IMPORTS_REPAIR_BASE_CHANGED');};
+  const dejaFaite=await base.get('sync_state',CLE_REPARATION_IMPORTS_GERES);verifierBase();
+  if(dejaFaite?.value===1)return 0;
+  const snapshot=await base.getSnapshot(['sync_state','outbox']);verifierBase();
+  const etat=new Map(snapshot.sync_state.map(r=>[r.key,r])),garde=etat.get(CLE_REPARATION_IMPORTS_GERES);
+  if(garde?.value===1)return 0;
+  const owner=etat.get('user_id')?.value??null,epoch=etat.get('editor_library_epoch:v1'),curseur=etat.get('cursor:imports');
+  const egaux=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
+  const interdit=e=>e.store==='imports'&&e.op==='delete'&&estImportGere(e.payload)&&(e.user_id==null||e.user_id===owner)&&(e.payload.owner_id==null||e.payload.owner_id===owner)&&(!e.quarantined_at||e.last_error==='forme');
+  const seqs=snapshot.outbox.filter(interdit).map(e=>e.seq);
+  const exacte=(attendue,code)=>courante=>{verifierBase();if(!egaux(courante,attendue))refusReparationImports(code);return null;};
+  await base.mutate({origin:'device',puts:{sync_state:[{key:CLE_REPARATION_IMPORTS_GERES,value:1},{key:'cursor:imports',value:0}]},deletes:seqs.length?{outbox:seqs}:{},conditions:{
+    sync_state:[{key:'user_id',fusion:courante=>{verifierBase();if((courante?.value??null)!==owner)refusReparationImports('IMPORTS_REPAIR_ACCOUNT_CHANGED');return null;}},
+      {key:'editor_library_epoch:v1',fusion:exacte(epoch,'IMPORTS_REPAIR_LIBRARY_CHANGED')},
+      {key:CLE_REPARATION_IMPORTS_GERES,fusion:exacte(garde,'IMPORTS_REPAIR_GUARD_CHANGED')},
+      {key:'cursor:imports',fusion:exacte(curseur,'IMPORTS_REPAIR_CURSOR_CHANGED')}],
+    outbox:[{toutes:true,verifier:rows=>{verifierBase();if(!egaux(rows,snapshot.outbox))refusReparationImports('IMPORTS_REPAIR_OUTBOX_CHANGED');}}]
+  }});
+  return seqs.length;
 }
 
 // Passe unique (spec assistant-par-le-compte § 5.6, S1/F3/F4) : l'ancien réglage settings.llm devient la ligne
