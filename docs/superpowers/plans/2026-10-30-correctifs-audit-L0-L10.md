@@ -10,6 +10,8 @@
 
 **Spec (la source des constats) :** `docs/audits/2026-10-30-audit-codex-L0-L10/rapport-audit.md` ; lentilles dans `docs/audits/2026-10-30-audit-codex-L0-L10/lentilles/` ; preuves exécutées dans `…/preuves/`.
 
+**Note de version :** les `fichier:ligne` de l'audit et de ce plan sont ceux du commit `247b2e5`. Trois commits ont suivi (`7696ed6` détection des mises à jour depuis les fenêtres ouvertes, `90f1deb` traduction française guidée, `3063376` docs) et touchent `src/core/livraison.js`, `src/ui/mise-a-jour.js`, `src/app.js`, `src/ui/recipe.js`, `src/ui/settings.js`, `src/domain/*traduction*`, `tests/tests.js` : relocaliser par le NOM de la fonction ou l'extrait cité, pas par le numéro de ligne, et revérifier d'abord si `7696ed6` ferme déjà une partie de la tâche 6 (course `updatefound`) avant de la refaire. Ce lot n'a pas été audité.
+
 ## Contraintes globales (reprises d'`AGENTS.md`, qui fait foi)
 - Rien d'inventé ; une réponse du modèle est une donnée hostile ; l'original d'une recette n'est jamais réécrit ; un état d'écran reflète un événement réel.
 - Un test observe un comportement, jamais une chaîne du source. Chaque garde corrigée a un test qui rougit si on retire la garde, avec un MOTIF EXACT (modèle : `tests/correctifs-thermomix-securite.js:14`, aide `motif`), jamais un `refuse` qui accepte n'importe quelle exception.
