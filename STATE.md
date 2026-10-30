@@ -1,6 +1,6 @@
-# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L6 REÇU LOCALEMENT, L5 EN LIGNE
+# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L6 PUBLIÉ, 0.28.0 EN LIGNE
 
-**L6 — Groupes d’ingrédients et recette en français : réception locale terminée, publication en préparation.**
+**L6 — Groupes d’ingrédients et recette en français : publié et vérifié.**
 [Spec](docs/superpowers/specs/2026-10-29-l6-ingredients-groupes-traductions-design.md),
 [protocole](docs/superpowers/specs/2026-10-29-l6-protocole-traductions.md),
 [rapport](docs/superpowers/plans/2026-10-29-l6-ingredients-groupes-traductions.md).
@@ -12,9 +12,17 @@ Versions sources protégées, phases de journal exactes, archive5 et restauratio
 PostgreSQL UTF8 neuf0001→0011 : L5 **327 contrôles**, L6 **212 contrôles** + **132 contrôles ACL** et écriture réelle sous authenticated ; bornes4JS supplémentaires.
 Concurrence réelle :16 contrôles L6 +10 L5 ; deux moteurs avec PostgreSQL :30 contrôles,12 RPC, confirmation perdue/rejeu, archive puis second appareil, zéro écho.
 Parcours Chrome : lecture15 mesures/28 gestes, éditeur7 mesures/20 gestes, deux onglets, quota, texte récupéré et rechargements réellement hors ligne ;12 nouveaux modules en cache.
-Cible **0.28.0**, cache `cuisine-os-v0.28.0-1`, DB6, archive5 ; migration0011 additive,0001–0010 inchangées. **Aucune migration0011 distante appliquée à ce reçu.**
+Cible **0.28.0**, cache `cuisine-os-v0.28.0-1`, DB6, archive5 ; migration0011 additive,0001–0010 inchangées. SQL0011 appliqué une seule fois à mitsu le30octobre à **00 h16 HAE (04:16:09UTC)**, sous transaction gardée.
 Aucun compte privé, appel assistant réel ni essai physique iPhone/Safari/TM7. Nouveau geste d’import d’un ancien ZIP peut refuser une divergence après restauration ; comparer, sans falsifier les reçus.
-L7/L8/L9/L10 ont des propositions/revues préparatoires distinctes ; **L7–L10 et E1 restent à terminer**. La version publique reste0.27.0 jusqu’au reçu de publication ci-dessous.
+L7/L8/L9/L10 ont des propositions/revues préparatoires distinctes ; **L7–L10 et E1 restent à terminer**. La version publique est **0.28.0**.
+
+**Publication L6 reçue.** Code **`87855c4`** poussé par avance rapide dans main ; Pages construit le30octobre à **00 h17 HAE (04:17:27UTC)**.
+**96 fichiers** publics identiques ; suite publique **10161/10161**, zéro erreur JavaScript/requête extérieure.
+Parcours publics lecture15/28 et éditeur7/20 : français, deux onglets, quota/récupération, photo/notes et rechargements réellement hors ligne ;12 modules en cache unique0.28.0-1.
+Catalogue distant :48 corps de fonctions/droits clients conformes,3 nouveaux triggers/RLS et2 tables privées L5 inchangées.
+Les48 écarts de droits service_role sont les ACL par défaut du rôle serveur privilégié ; ni anon ni authenticated n’en hérite. Aucune réapplication ni correctif SQL nécessaire.
+SHA2560011 : `6a5930a9782507212860a1f323afc838f14bf8f0ba678b8706681cb31ad12336`. Capacité `recipe_language:1` confirmée ; aucune donnée métier serveur consultée ou modifiée.
+L7 reprend après ce reçu ; **L7–L10 et E1 restent à réaliser**.
 
 **L5 — Sources et index : publié et vérifié.**
 [Spec](docs/superpowers/specs/2026-10-29-l5-sources-index-design.md), [rapport](docs/superpowers/plans/2026-10-29-l5-sources-index.md).

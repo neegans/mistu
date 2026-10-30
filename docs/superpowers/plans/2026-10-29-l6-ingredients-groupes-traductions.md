@@ -125,3 +125,16 @@ Parcours de la vraie application : **15 mesures/28 gestes** de lecture, **7 mesu
 Aucun fournisseur payé ni compte privé utilisé ; pas d’iPhone/Safari physique, de voix audible ou de Thermomix réel testé. La qualité linguistique d’une réponse future ne découle pas de la validation de son format. Les captures et révisions historiques sont conservées : un nouveau geste d’import du même ancien ZIP après restauration fraîche peut refuser une divergence, sans convertir artificiellement ses reçus historiques en preuve actuelle.
 
 Preuves et scripts dans `.superpowers/sdd/2026-10-29-l6/`, rapports A/B/C et journaux SQL séparés. Migration0011 et publication0.28.0 encore non appliquées au moment de ce reçu local. L7–L10 et E1 restent à réaliser.
+
+
+## 7. Publication vérifiée — 30 octobre 2026
+
+SQL0011 appliqué une seule fois à mitsu le30octobre **04:16:09.297107UTC (00 h16 HAE)**, après contrôle des sept fonctions de base et sous transaction gardée. SHA256 `6a5930a9782507212860a1f323afc838f14bf8f0ba678b8706681cb31ad12336`. Sauvegarde physique existante confirmée ; aucune donnée métier ni compte privé utilisé.
+
+Catalogue distant conforme au serveur local reçu : **48 fonctions** (corps, sécurité, search_path et droits clients), **3 nouveaux triggers/RLS**, **2 tables privées L5** inchangées. Les48 écarts service_role correspondent aux droits par défaut Supabase du rôle serveur ; aucun des deux rôles clients n’en hérite. Pas de réapplication ou patch SQL. Capacités finales confirmées : recipe_lifecycle,edition_lifecycle,source_batches,source_revisions,recipe_language à1.
+
+Code **87855c4d74674b919d94d7120fdc41f7fef5022a**, avance rapide main puis push. GitHub Pages construit à **04:17:27UTC (00 h17 HAE)**. **96/96 fichiers publics** identiques. Suite publique **10161/10161**, zéro erreur JavaScript et zéro requête extérieure au site pendant les tests.
+
+Parcours publics de la vraie application : **15 mesures/28 gestes** de lecture et **7 mesures/20 gestes** d’éditeur. Photo/note, français, portions, voix injectée, deux onglets, récupération du texte, quota puis réessai, publication et rechargements vraiment hors ligne conservés ;12 nouveaux modules dans le cache unique `cuisine-os-v0.28.0-1`. Les limites matérielles/linguistiques du reçu local restent exactes.
+
+Preuves : production-application.json, catalogue-comparaison.json, privileges-serveur.json, pages-public-b.json, publication-fichiers.json, suite-publique.resultat.json, lecture-publique/resultat.json et editeur-public/resultat.json. L6 est publié et reçu ; **L7–L10 et E1 restent à terminer**.
