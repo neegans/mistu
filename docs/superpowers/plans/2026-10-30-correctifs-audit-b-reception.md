@@ -1,6 +1,6 @@
 # Correctifs de l’audit — lot B
 
-Référence : [plan fourni par Neegan](2026-10-30-correctifs-audit-L0-L10.md), tâches6 et7 ; lentille [livraison](../../audits/2026-10-30-audit-codex-L0-L10/lentilles/livraison.md). Branche `correctifs-audit-b`, base `8fd8ed2` (reçu de publication A). Autorisation : « go et enchaine ». A a été publié ; B est construit localement, avec publication séparée selon le plan. Baseline11913 tests navigateur ; APP_VERSION0.32.2, DB6/archive7 inchangés.
+Référence : [plan fourni par Neegan](2026-10-30-correctifs-audit-L0-L10.md), tâches6 et7 ; lentille [livraison](../../audits/2026-10-30-audit-codex-L0-L10/lentilles/livraison.md). Branche `correctifs-audit-b`, base `8fd8ed2` (reçu de publication A). Autorisation : « go et enchaine ». B a ensuite été publié sur le « go » explicite de Neegan ; réception publique ci-dessous. Baseline11913 tests navigateur ; APP_VERSION0.32.2, DB6/archive7 inchangés.
 
 ## Tâche 6 — démarrage
 
@@ -58,3 +58,14 @@ Limites : Chrome local, profils et bibliothèques jetables, API de persistance s
 Livraison locale **0.32.2-2**, **212 fichiers / 3 655 921 octets**, manifeste SHA256 `533f888d39e4a03d255f9652acffe540cc0a0a1428b556822a991808e7b53d39`. Générateurs livraison et migrations, syntaxe et diff conformes. APP_VERSION **0.32.2**, DB6/archive7 inchangés ; aucun SQL ni déploiement de la fonction assistant.
 
 **A reste publié en 0.32.1-5. B est reçu localement, pas publié.** Le prochain geste est la promotion en avance rapide et la publication de B après le « go » explicite par lot demandé dans le plan, puis sa réception publique. Les lots C à G restent à exécuter ; la migration 0014 du lot C devra être écrite et testée sans application distante.
+
+
+## Publication reçue
+
+Neegan a autorisé « go » après présentation du lot B complet. Le code `32dc3de844b8da38ac2c9c40a8c546f4259da6f1` a été promu par avance rapide et poussé sur `main`. GitHub Pages a terminé la construction le **30 octobre 2026 à 20:31:25 UTC (16 h 31 HAE)**. **0.32.2-2 est en ligne.**
+
+Les **251 fichiers publics** contrôlés correspondent au commit : octets, SHA256 et MIME attendus. La suite publique exécute **12063/12063 tests**, sans erreur JavaScript ni requête extérieure. Les parcours publics indépendants réussissent **105/105 contrôles** : quatre replis FR/EN, cinq réponses simulées de persistance et une utilisation de l’API native, deux onglets, diagnostic copié, bibliothèque et note conservées après recharge réellement hors ligne. Le cache contient les **212 ressources** exactes de la livraison. Six mesures et treize captures relues, largeurs 390 et 1280 sans débordement.
+
+Sur ce profil jetable Chrome, l’API native de persistance répond **false** : la valeur est gardée en base et affichée « non », après recharge et hors ligne. Ce reçu ne revendique donc pas une protection accordée par le navigateur. Les autres scénarios restent explicitement simulés. Aucun compte privé, appel payé ou appareil physique iPhone/Safari n’a été utilisé.
+
+Preuves : `.superpowers/sdd/2026-10-30-audit-b/publication-fichiers.json`, `suite-publique.log`, `public/public.resultat.json`, `public.log` et captures dans `public/`. Le lot B est clos ; le lot C peut être construit. La migration 0014 sera écrite et éprouvée localement, sans application distante.
