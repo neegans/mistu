@@ -57,3 +57,11 @@ Parcours sur la vraie route de cuisine, profil Chrome neuf et base jetable : **2
 Bilan navigateur : **11913/11913**, soit **+229** depuis11684 :35+86+43+31+34. Aucune assertion existante supprimée dans ce lot ; les épingles de version et l’attente du motif exact de changement de compte ont été ajustées. Ce constat porte sur ce lot seulement et ne remplace pas le relevé historique des scénarios modifiés dans l’audit. Node271/271 couvre les outils ; les parcours décrits ci-dessus couvrent l’application.
 
 **Aucun push, aucune migration SQL ni modification serveur.** Dernière livraison publique reçue :0.32.0-7. Le lot A attend le « go » explicite par lot prévu par le plan avant promotion/publication. Les lotsB àG restent à exécuter ; la migration0014 du lotC sera écrite seulement. Les essais sont locaux, avec transports simulés lorsque nécessaire : aucun compte privé, appel assistant payé, essai physique iPhone/Safari ou alarme système n’est revendiqué.
+
+## Publication du lot A — 30 octobre 2026
+
+Autorisation de Neegan : « go et enchaine ». Main promue par avance rapide au commit **243266bee80d41af9685cb10eab0f77baf7414fa** et poussée. GitHub Pages a terminé à **19:22:35 UTC (15 h22 HAE)**, livraison **0.32.1-5**. **247 fichiers publics conformes** au commit, empreintes et MIME contrôlés. Une première comparaison partie pendant la construction lisait encore l’ancienne livraison ; elle a été conservée séparément, puis la comparaison entière rejouée après l’état `built`.
+
+Suite publique **11913/11913**, aucune erreur JavaScript/requête extérieure. Parcours cuisine public **29/29**,4 mesures et captures320/390/1280 puis hors ligne390 relues : version choisie, suivi5400s, quota réel simulé au commit, réessai, deux onglets et reprise hors ligne avec note/étape/échéance conservées. Cache public et manifeste exacts `5f24df4ab32bb6e0362fdd458ee5ed6ea915cfff487a080b2ddb6751652a3cd2`. Preuves `publication-fichiers.json`, `suite-publique.log`, `parcours-cuisine-public/` dans le dossier local de réception du lot. Aucun compte privé ni appel assistant payé.
+
+**Lot A publié et reçu.** Aucun SQL ni redéploiement de la fonction assistant. La poursuite demandée porte maintenant sur le lotB ; son éventuelle publication gardera la règle du « go » par lot.
