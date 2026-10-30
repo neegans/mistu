@@ -7,6 +7,12 @@
 import { cleDe } from './lots.js';
 import { fusionnerFichier } from './fichiers.js';
 
+// La première copie d'un conflit de cycle reste récupérable jusqu'au geste explicite de la personne.
+// Relire dans la transaction protège aussi un conflit arrivé depuis la préparation de la réponse/page.
+export function protegerConflitsCycle(conflits) {
+  return [...new Map(conflits.map(c=>[c.id,c])).values()].map(c=>({key:c.id,fusion:courant=>courant?.kind==='cycle'?null:c}));
+}
+
 export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = {}, conflitsRenvoyes = new Set() }) {
   const seqsParCle = new Map();
   for (const seq of lot.seqs) {
@@ -63,7 +69,9 @@ export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = 
     if (!seqs.length) continue; // R-L3-8
     if(r.reason==='cycle') {
       for(const seq of seqs) quarantaine.push({seq,motif:'cycle'});
-      conflits.push({id:k,store:r.store,record_id:r.id,local:fichesLocales[k]??null,server:r.server||null,at,kind:'cycle'});
+      // Le composeur dédoublonne avec la plus grande séquence ; seqs[0] peut désigner une édition plus ancienne.
+      const entree=entreesParSeq.get(Math.max(...seqs));
+      conflits.push({id:k,store:r.store,record_id:r.id,local:entree?.snapshot??fichesLocales[k]??null,server:r.server||null,at,kind:'cycle'});
       continue;
     }
     if (r.reason === 'conflit') {

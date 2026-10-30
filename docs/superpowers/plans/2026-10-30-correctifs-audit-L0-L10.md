@@ -75,13 +75,13 @@
 - Modifier : `src/sync/push.js:133-138` (écriture de `effets.conflits`), `src/sync/reponses.js:64-67`, `src/sync/outbox.js:60` (instantané)
 - Modifier : `tests/l1-corbeille-sync.js` (ajout d'un scénario)
 
-- [ ] **Étape 1 : tests rouges** dans `tests/l1-corbeille-sync.js` (transport factice en mode `serveur`, fixtures existantes du fichier) :
+- [x] **Étape 1 : tests rouges** dans `tests/l1-corbeille-sync.js` (transport factice en mode `serveur`, fixtures existantes du fichier) :
   - `audit B3 : un refus cycle ne remplace pas le conflit existant` : conflit `recipes:r9` `kind:'cycle'` déjà présent avec `local.title:'Edite hors ligne'` ; le serveur rejette le `put` en `cycle` → après `appliquerReponse`, `(await db.get('sync_conflicts','recipes:r9')).local.title` vaut encore `'Edite hors ligne'`.
   - `audit B3 : le put de recipes emporte un instantane` : après `repo.save` d'une recette, l'entrée `outbox` `store:'recipes'` porte `snapshot` égal à la fiche écrite.
   - `audit B3 : sans conflit existant, le refus cycle journalise l'instantane` : pas de conflit préalable, `fichesLocales[k]` déjà remplacé par la copie serveur → le conflit créé a `local` = `snapshot` de l'entrée.
-- [ ] **Étape 2 : rouge constaté.**
-- [ ] **Étape 3 : implémenter** : (a) `outbox.js:60` ajoute `'recipes'` et `'book_editions'` à la liste des magasins dont le `put` emporte `snapshot` ; (b) `reponses.js:66` : `local: entree.snapshot ?? fichesLocales[k] ?? null` (l'entrée se retrouve par `seqs[0]`) ; (c) `push.js:136` : ne garder dans `puts.sync_conflicts` que les conflits dont `await db.get('sync_conflicts', c.id)` est absent OU dont le `kind` existant n'est pas `cycle` — relecture dans la transaction par une condition `sync_conflicts: [{ key: c.id, fusion: courant => courant?.kind === 'cycle' ? courant : nouveau }]` (même mécanique que `push.js:121`).
-- [ ] **Étape 4 : suite verte, commit** `fix(sync): conserver le conflit de cycle et l'instantane du put refuse (audit B3)`.
+- [x] **Étape 2 : rouge constaté.**
+- [x] **Étape 3 : implémenter** : (a) `outbox.js:60` ajoute `'recipes'` et `'book_editions'` à la liste des magasins dont le `put` emporte `snapshot` ; (b) `reponses.js:66` : `local: entree.snapshot ?? fichesLocales[k] ?? null` (l'entrée se retrouve par `seqs[0]`) ; (c) `push.js:136` : ne garder dans `puts.sync_conflicts` que les conflits dont `await db.get('sync_conflicts', c.id)` est absent OU dont le `kind` existant n'est pas `cycle` — relecture dans la transaction par une condition `sync_conflicts: [{ key: c.id, fusion: courant => courant?.kind === 'cycle' ? courant : nouveau }]` (même mécanique que `push.js:121`).
+- [x] **Étape 4 : suite verte, commit** `fix(sync): conserver le conflit de cycle et l'instantane du put refuse (audit B3)`.
 
 ### Tâche 4 : Minuteries « 1 h 30 à 180 °C » (sûreté)
 

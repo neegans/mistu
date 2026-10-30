@@ -14,6 +14,7 @@ import { estCommandeSources, ciblesCommandeSources, CLE_SOURCE_CONFIRMEE } from 
 import {estCommandeProtegee,ciblesCommandeProtegee,estLectureTraductionSignee,estPhaseJournalTraduction} from './commandes-traduction.js';
 import {estLigneCuisine,validerMinuteurCuisine,validerSessionCuisine} from '../domain/cuisine-format.js';
 import {CLE_REPARATION_IMPORTS_GERES} from '../domain/imports-geres.js';
+import {protegerConflitsCycle} from './reponses.js';
 
 // R-L3-12 : les versions AVANT les recettes. Le pointeur d'une recette reçue désigne presque toujours une version
 // créée par le même geste, sur l'autre appareil : lue après la recette, elle serait encore inconnue ici et chaque
@@ -272,7 +273,6 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       // ne la verrait pas (c'est voulu : rien d'autre dans cette page ne doit repartir).
       if (decision === 'conflit_renvoyer') refile.push(remiseEnFile(table, ligne, locale));
     }
-    if (conflits.length) puts.sync_conflicts = conflits;
     if (refile.length) (puts.outbox ||= []).push(...refile);
     // Curseur atomique : il part dans la MÊME transaction que les écritures de sa page. Une page refusée plus haut
     // n'arrive jamais ici, donc rien n'est écrit et le curseur ne bouge pas : la page sera relue telle quelle. Et il
@@ -281,7 +281,7 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
     const dernier = Math.max(...lignes.map((l) => l.server_seq));
     (puts.sync_state ||= []).push({ key: `cursor:${table}`, value: Math.max(curseur, dernier) });
     try {
-      await db.mutate({ puts, deletes, origin: 'remote', conditions: { ...(fusions.size ? { [table]: [...fusions.values()] } : {}), outbox:[gardeFile], sync_state: [gardeCompteCycle(owner,getUserId),
+      await db.mutate({ puts, deletes, origin: 'remote', conditions: { ...(fusions.size ? { [table]: [...fusions.values()] } : {}), ...(conflits.length?{sync_conflicts:protegerConflitsCycle(conflits)}:{}), outbox:[gardeFile], sync_state: [gardeCompteCycle(owner,getUserId),
         ...(table==='imports'?[{key:CLE_REPARATION_IMPORTS_GERES,fusion:courante=>{if(JSON.stringify(stable(courante??null))!==JSON.stringify(stable(reparationImports)))throw Object.assign(new Error('Réparation des imports modifiée pendant la réception'),{code:'SYNC_IMPORTS_REPAIR_CHANGED'});return null;}}]:[]),...confirmations.values()] } });
     } catch (error) {
       if (['SYNC_CONFIRMATION_CHANGED','SYNC_SOURCE_CHANGED'].includes(error.code) && tentative < 3) return appliquerPage(table, lignes, bilan, curseur, tentative + 1,reparationImports,owner);

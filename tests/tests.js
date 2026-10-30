@@ -1,3 +1,4 @@
+import {runAuditCycleConflitsTests} from './audit-cycle-conflits.js';
 import {runAuditPurgeImportsTests} from './audit-purge-imports.js';
 import {runAuditConflitsTests} from './audit-conflits.js';
 import {runL10DiagnosticActualisationTests} from './l10-diagnostic.js';
@@ -695,7 +696,8 @@ try { await runL7MinuteursEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7Min
 try { await runL7VoixTests({eq,ok}); } catch (e) { ok(false, 'runL7VoixTests : ' + (e.stack || e)); }
 try { await runAuditConflitsTests({eq,ok}); } catch (e) { ok(false, 'runAuditConflitsTests : ' + (e.stack || e)); }
 try { await runAuditPurgeImportsTests({eq,ok}); } catch (e) { ok(false, 'runAuditPurgeImportsTests : ' + (e.stack || e)); }
-eq(results.length, 11804,'compte d’assertions : une assertion qui disparait est un rouge');
+try { await runAuditCycleConflitsTests({eq,ok}); } catch (e) { ok(false, 'runAuditCycleConflitsTests : ' + (e.stack || e)); }
+eq(results.length, 11847,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

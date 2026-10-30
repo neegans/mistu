@@ -57,7 +57,7 @@ export function installCapture(db, { getUserId = () => null, isActivitySynced = 
         if (groupes.has(`${store}:${id}`)) continue;
         if (lifecycle && store===cible.store && id===cible.id) continue;
         const ctx=contexte(store,id);
-        rows.push({ user_id, store, id, op: 'put', updated_at: r.updated_at || null, tries: 0,...ctx,...((ctx.edition_contexts||['recipe_versions','source_pages','source_documents','scan_sessions','cook_sessions','timer_launches','cook_history','inventory'].includes(store)||estLectureSourceSignee(store,r))?{snapshot:structuredClone(r)}:{}),...(archive_import?{archive_import:true}:{}) });
+        rows.push({ user_id, store, id, op: 'put', updated_at: r.updated_at || null, tries: 0,...ctx,...((ctx.edition_contexts||['recipes','book_editions','recipe_versions','source_pages','source_documents','scan_sessions','cook_sessions','timer_launches','cook_history','inventory'].includes(store)||estLectureSourceSignee(store,r))?{snapshot:structuredClone(r)}:{}),...(archive_import?{archive_import:true}:{}) });
       }
     }
     for (const [store, keys] of Object.entries(deletes)) {

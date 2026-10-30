@@ -11,7 +11,7 @@ import {canoniqueSources} from '../domain/sources-format.js';
 import { estLotSources } from './lot-sources.js';
 import { composerLots, cleDe } from './lots.js';
 import { fileDe } from './outbox.js';
-import { appliquerReponse } from './reponses.js';
+import { appliquerReponse, protegerConflitsCycle } from './reponses.js';
 import { conditionFichier } from './fichiers.js';
 import { appliquerHeureServeur, reculMs } from './clock.js';
 import { logError } from '../core/log.js';
@@ -81,19 +81,19 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     if (seqs.length) await db.mutate({ deletes: { outbox: seqs }, origin: 'remote' });
   }
 
-  async function appliquer(lot, reponse, entreesParSeq) {
+  async function appliquer(lot, reponse, entreesParSeq, tentative=0, owner=getUserId()) {
     if(estCommandeProtegee(lot.elements[0]))return appliquerSourcesL5(lot,reponse,entreesParSeq);
     if(lot.seqs.some(seq=>estPhaseJournalTraduction(entreesParSeq.get(seq))))return appliquerJournalTraduction(lot,reponse,entreesParSeq);
     if (estLotSources(lot.elements[0])) return appliquerSources(lot, reponse, entreesParSeq);
     if(lot.elements[0]?.op==='lifecycle') return appliquerCommande(lot,reponse,entreesParSeq);
-    const owner=getUserId();
     // Lectures AVANT la transaction : la version locale d'un conflit est celle du moment où la réponse arrive, et
     // c'est elle qui décide si un ajustement a le droit de réécrire la fiche (R-L3-7).
     const fichesLocales = {};
     for (const e of lot.elements) fichesLocales[cleDe(e)] = (await db.get(e.store, e.id)) ?? null;
     // R-L3-29 : les clés dont le conflit est « renvoyé » (§ 5.5). Le journal est lu EN UNE fois : les conflits sont
     // peu nombreux par conception (purgés à 30 jours), et une lecture par élément en ferait 500 de plus par lot.
-    const conflitsRenvoyes = new Set((await db.getAll('sync_conflicts')).filter((c) => c?.renvoye).map((c) => c.id));
+    const renvoyes = new Map((await db.getAll('sync_conflicts')).filter(c=>c?.renvoye&&c.kind!=='cycle').map(c=>[c.id,c]));
+    const conflitsRenvoyes = new Set(renvoyes.keys());
     const fermetures = new Map();
     for (const e of lot.elements) {
       if (e.store !== 'imports' || e.deleted) continue;
@@ -132,16 +132,24 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
       }}))};
       delete puts[store];
     }
-    if (effets.conflits.length) puts.sync_conflicts = effets.conflits;
+    if (effets.conflits.length) conditions={...(conditions||{}),sync_conflicts:protegerConflitsCycle(effets.conflits)};
     if (effets.quarantaine.length) {
       (puts.outbox ||= []).push(...effets.quarantaine.map(({ seq, motif }) => ({ ...entreesParSeq.get(seq), quarantined_at: new Date(maintenant()).toISOString(), last_error: motif })));
     }
     // origin 'remote' : rien de ceci ne repart vers le serveur (réécriture d'un ajustement, journal, quarantaine).
     const deletes = {};
     if (effets.retirer.length) deletes.outbox = effets.retirer;
-    if (effets.retirerConflits.length) deletes.sync_conflicts = effets.retirerConflits; // R-L3-29, même transaction
+    if (effets.retirerConflits.length) {
+      deletes.sync_conflicts = effets.retirerConflits;
+      // Une suppression intervient après les fusions : un cycle apparu depuis la lecture impose une reprise.
+      conditions={...(conditions||{}),sync_conflicts:[...(conditions?.sync_conflicts||[]),...effets.retirerConflits.map(key=>({key,fusion:courant=>{
+        if(JSON.stringify(courant??null)!==JSON.stringify(renvoyes.get(key)??null))throw Object.assign(new Error('Conflit modifié pendant l’accusé'),{code:'SYNC_CONFLICT_CHANGED'});
+        return null;
+      }}))]};
+    }
     conditions={...(conditions||{}),sync_state:[gardeCompteCycle(owner,getUserId)]};
-    await db.mutate({ puts, deletes, origin: 'remote', conditions });
+    try {await db.mutate({ puts, deletes, origin: 'remote', conditions });}
+    catch(error){if(error.code==='SYNC_CONFLICT_CHANGED'&&tentative<3)return appliquer(lot,reponse,entreesParSeq,tentative+1,owner);throw error;}
     return effets;
   }
 
@@ -215,7 +223,7 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
       puts.outbox = file.filter(e => e.seq >= entree.seq && cibleCommune(e, entree)).map(e => ({ ...e, lifecycle_blocked: true, last_error: 'cycle' }));
       effets.conflits.push({ id: `source_batch:${c.operation_id}`, store: c.store, record_id: c.id, local: c,
         server: refus.server || null, edition_server: refus.edition_server || null, at: reponse.server_time || new Date().toISOString(), kind: 'cycle' });
-      puts.sync_conflicts = effets.conflits;
+      conditions.sync_conflicts = protegerConflitsCycle(effets.conflits);
     }
     await db.mutate({ puts, deletes, conditions, origin: 'remote' });
     return effets;
@@ -244,14 +252,12 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
         else if(e) {
           (puts.outbox ||= []).push({...e,lifecycle_blocked:true,last_error:'cycle',payload:c.seed});
           effets.conflits.push({id:`recipes:${c.id}`,store:'recipes',record_id:c.id,local:c.seed,server:serveur,at:reponse.server_time||new Date().toISOString(),kind:'cycle'});
-          puts.sync_conflicts=effets.conflits;
         }
       }
       deletes.outbox=effets.retirer;
     } else {
       puts.outbox=file.map(e=>({...e,lifecycle_blocked:true,last_error:'cycle'}));
       effets.conflits.push({id:`recipes:${c.id}`,store:'recipes',record_id:c.id,local:locale,server:serveur||null,at:reponse.server_time||new Date().toISOString(),kind:'cycle'});
-      puts.sync_conflicts=effets.conflits;
     }
     if(serveur?.data?.id===c.id&&lireCycleRecette(serveur.data).etat!=='invalide') {
       const data={...serveur.data,updated_at:serveur.updated_at};
@@ -259,7 +265,7 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
       const restants=ack?file.filter(e=>e.seq!==entree.seq):[];
       conditions={recipes:[{key:c.id,fusion:current=>idCycle(current)!==idCycle(locale)?current:fusionCycle(current,data,restants).row}]};
     }
-    conditions={...(conditions||{}),sync_state:[gardeCompteCycle(owner,getUserId)]};
+    conditions={...(conditions||{}),sync_state:[gardeCompteCycle(owner,getUserId)],...(effets.conflits.length?{sync_conflicts:protegerConflitsCycle(effets.conflits)}:{})};
     await db.mutate({puts,deletes,conditions,origin:'remote'});
     return effets;
   }
@@ -281,7 +287,7 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     else {
       puts.outbox=file.filter(e=>e.seq>=entree.seq&&cibleCommune(e,entree)).map(e=>({...e,lifecycle_blocked:true,last_error:'cycle'}));
       effets.conflits.push({id:`${store}:${c.id}`,store,record_id:c.id,local:locale,server:refus.server||null,edition_server:refus.edition_server||null,at:reponse.server_time||new Date().toISOString(),kind:'cycle'});
-      puts.sync_conflicts=effets.conflits;
+      conditions.sync_conflicts=protegerConflitsCycle(effets.conflits);
     }
     const confirmer=async(s,id,serveur)=>{
       if(!valide(serveur,s,id))return;
