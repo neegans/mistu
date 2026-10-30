@@ -569,3 +569,16 @@ Aucun échange HTTP authentifié n’est revendiqué. Les preuves mutantes sont 
 Ancien deadlock et tombales reproduits puis fermés et contre-vérifiés ; aucune preuve de mutation exécutée sur la production.
 La sérialisation des écritures est par propriétaire ; les groupes de nouvelles sources sont atomiques, l’envoi initial d’une bibliothèque reste progressif.
 Traces : `.superpowers/sdd/2026-10-29-l2-publication/serveur/`. Aucun redéploiement de la fonction assistant.
+
+## Migration `0010_sources_index.sql` — appliquée le 29 octobre 2026
+
+Autorisation persistante de poursuivre et publier. Code `66734c5`, application 0.27.0.
+Sauvegarde physique du 29 octobre à 06:29 UTC observée terminée. Les cinq fonctions de base concordaient avec0009 et aucune fonction L5 n’existait.
+Application unique via CLI Management API, transaction gardée et délais bornés, le30octobre à02:44:37 UTC (29octobre22 h44 HAE).
+SHA-256 : `7314afe7c0a177328dfb2c0618af65d26d1cb84a6328624d21016268815fd9fb`.
+
+Après application, comparaison en lecture seule :56 fonctions avec corps, SECDEF, search_path, propriétaire relatif et droits clients PUBLIC/anon/authenticated exacts ; cinq triggers activés avec RLS ; deux tables privées sans accès anon/authenticated. Les54 différences service_execute sont les grants par défaut du rôle serveur service_role, observés dans pg_default_acl. Ce rôle a BYPASSRLS ; ni anon ni authenticated n’en hérite. Différence d’environnement relue, sans modification du SQL ni réapplication. Les catalogues ne sont pas entièrement identiques.
+
+Capacités vérifiées dans la transaction d’application : recipe_lifecycle1, edition_lifecycle1, source_batches1, source_revisions1. Aucun contenu métier consulté ou modifié, aucun JWT utilisateur emprunté. Les preuves mutantes sont locales :327 assertions PostgreSQL UTF8, dix contrôles à deux connexions,369 vecteurs JS/SQL concordants et deux vrais moteurs avec confirmation perdue/rejeu et file inversée. Aucun essai HTTP authentifié sur appareil privé revendiqué.
+
+Traces : `.superpowers/sdd/2026-10-29-l5/production-application.json`, `catalogue-reception.json`, `privileges-serveur.json`. Aucun redéploiement de la fonction assistant.

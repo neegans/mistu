@@ -1,6 +1,6 @@
-# STATE.md — Cuisine OS (Mistu) — 29 octobre 2026 — L5 REÇU LOCALEMENT, 0.26.0 EN LIGNE
+# STATE.md — Cuisine OS (Mistu) — 29 octobre 2026 — L5 PUBLIÉ, 0.27.0 EN LIGNE
 
-**L5 — Sources et index : réception locale terminée, publication autorisée en préparation.**
+**L5 — Sources et index : publié et vérifié.**
 [Spec](docs/superpowers/specs/2026-10-29-l5-sources-index-design.md), [rapport](docs/superpowers/plans/2026-10-29-l5-sources-index.md).
 Branche `l5-sources-index`, base publique `db085ee`, contrat `7c34255`. Revue technique, sans attribuer une relecture personnelle à Neegan.
 Révisions de photos immuables, sélection et historique séparés, rattachement par copie exacte ; anciennes recettes et réponses payées conservées.
@@ -11,7 +11,13 @@ PostgreSQL UTF8 neuf0001→0010 : **327 assertions**,10 contrôles avec deux con
 Deux vrais moteurs,1002 pages sur deux séances, file inversée, confirmation perdue/rejeu exact, second moteur1009 lignes puis aucune boucle d’écho.
 Parcours Chrome16+12 mesures ; rechargement réellement hors ligne, images et historique conservés,12 nouveaux modules en cache unique.
 Cible **0.27.0**, cache `cuisine-os-v0.27.0-1`, DB6, archive4 ; migration additive0010 uniquement,0001–0009 inchangées.
-Aucun SQL0010 ni code L5 publié à ce point. Précontrôle distant limité aux métadonnées ; aucun compte privé ni appel assistant réel.
+SQL0010 appliqué une seule fois à mitsu le 29 octobre à **22 h 44 HAE (30 octobre 02:44:37 UTC)**, sous transaction gardée.
+Catalogue distant : 56 corps et droits clients conformes, cinq triggers/RLS et deux tables privées conformes.
+Seuls écarts locaux/distants : droits par défaut de service_role, rôle serveur privilégié dont aucun rôle client n’hérite ; aucun correctif SQL requis.
+Code **66734c5** poussé par avance rapide dans main ; Pages construit à **22 h 50 HAE (02:50:20 UTC)**.
+**72 fichiers** publics identiques, suite publique **9472/9472**, zéro erreur JavaScript/requête extérieure.
+Parcours publics **16+12 mesures** : sources, comparaison après refus simulé, photos/historique après rechargement hors ligne ; douze modules en cache unique.
+Précontrôles distants limités aux métadonnées ; aucun compte privé, contenu de recette serveur ni appel assistant réel.
 Pas d’essai physique iPhone/Safari/TM7. L6 est en revue de contrat ; **L6–L10 et E1 restent à réaliser**.
 
 **L4 — Éditeurs et brouillons : publié et vérifié.**

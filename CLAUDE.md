@@ -3710,3 +3710,8 @@ Deux moteurs réels avec RPC locale :1002 pages/deux séances, file inversée, c
 Parcours Chrome16+12 mesures,12 modules en cache unique, photos et historique après rechargement hors ligne.
 Aucun appel assistant réel, compte privé, recette serveur ou JWT utilisateur consulté ; aucune preuve physique iPhone/Safari/TM7.
 Publication autorisée mais pas encore effectuée dans ce reçu local. L6–L10/E1 restent à réaliser.
+
+**L5 publié et reçu.** SQL0010 appliqué une seule fois à mitsu le29octobre22 h44 HAE (30octobre02:44:37UTC), sous transaction gardée.
+56 fonctions et droits clients conformes, cinq triggers/RLS et deux tables privées conformes. Les54 différences de droits service_role proviennent des ACL par défaut Supabase, mesurées ; aucun client n’hérite de ce rôle serveur privilégié. Aucun patch ni réapplication.
+Code66734c5 poussé par avance rapide dans main ; Pages construit à22 h50 HAE (02:50:20UTC).72 fichiers publics identiques, suite publique9472/9472, zéro erreur JavaScript/requête extérieure.
+Parcours publics16+12 mesures, douze modules en cache unique0.27.0-1, images/historique et comparaison conservés après recharge hors ligne. Rapports et reçu SQL dans le dossier L5 ; aucun compte privé, contenu métier serveur ou appel assistant réel. L6–L10/E1 restent à réaliser.
