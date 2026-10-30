@@ -162,7 +162,7 @@ export async function runL2SyncRepriseTests({ eq, ok }) {
       eq(lots.flatMap(x => x.rows).filter(r => r.op === 'lifecycle' && r.store === 'recipes').length, 0, 'L2 volume : aucune commande de cycle enfant en cascade');
       eq(await (await b.get('files', sha)).blob.text(), await photo.text(), 'L2 volume : photo réellement transférée au second appareil');
       const archive = await inspectArchive(await (await createArchive(a)).blob.arrayBuffer());
-      ok(archive.ok && archive.manifest.format_version === 6, 'L2 volume : archive6 du groupe entier valide');
+      ok(archive.ok && archive.manifest.format_version === 7, 'L2 volume : archive7 du groupe entier valide');
       await poser(b, 'volume-restore-b', 'restore'); await mb.executer();
       installCapture(c, { getUserId: () => null }); await applyArchive(c, archive); await user(c); installCapture(c, { getUserId: () => 'u' });
       const mc = moteur(c); await mc.executer(); await ma.executer();

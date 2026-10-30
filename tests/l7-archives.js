@@ -23,7 +23,7 @@ async function transformer(archive,changer){
 }
 export async function runL7ArchivesTests({eq,ok}){
  let archive,source;await withDatabase(async db=>{source=await fixture(db);archive=await createArchive(db);});
- eq(archive.manifest.format_version,6,'L7 archive : format6 annoncé pour les échéances persistantes');
+ eq(archive.manifest.format_version,7,'L7 archive : format7 annoncé pour les échéances persistantes');
  const inspection=await inspectArchive(await archive.blob.arrayBuffer());eq(inspection.errors,[],'L7 archive : forme valide inspectée');
  await withDatabase(async db=>{
   const alteree=clone(inspection);alteree.payload.stores.timer_launches.find(x=>x.id===source.timer.id).mirror.deadline_at=at;

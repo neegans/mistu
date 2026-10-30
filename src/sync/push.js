@@ -1,3 +1,5 @@
+import {estCommandeInventaire,idsVersionsSourcesInventaire,idsHistoriquesSourcesInventaire} from './commandes-inventaire.js';
+import {validerLotInventaire,lireRecuInventaire} from '../domain/inventaire-format.js';
 import {estCommandeSources,ciblesCommandeSources,CLE_SOURCE_CONFIRMEE} from './commandes-sources.js';
 import {estCommandeProtegee,ciblesCommandeProtegee,estCommandeTraduction,idsVersionsSourcesTraduction,estPhaseJournalTraduction} from './commandes-traduction.js';
 import {estCommandeCuisine,idsVersionsSourcesCuisine,idsHistoriquesSourcesCuisine} from './commandes-cuisine.js';
@@ -161,22 +163,24 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     const effets={retirer:[],reecrire:{},conflits:[],quarantaine:[],retirerConflits:[]};if(!entree)return effets;
     const match=r=>r.store===c.store&&r.id===c.id&&r.operation_id===c.operation_id&&r.payload_sha256===c.payload_sha256;
     const ack=(reponse.accepted||[]).find(match),refus=(reponse.rejected||[]).find(match);if(!ack&&!refus)return effets;
+    if(estCommandeInventaire(c)&&refus?.server&&(!Number.isSafeInteger(refus.server.server_seq)||refus.server.server_seq<0))return effets;
     const puts={},deletes={},conditions={sync_state:[gardeCompteCycle(owner,getUserId)],outbox:[{key:entree.seq,fusion:r=>{if(JSON.stringify(r)!==JSON.stringify(entree))throw Error('Intention source modifiée pendant envoi');return null;}}]};
     if(ack){
       const attendus=c.op==='source_transfer'?(c.phase==='part'?c.rows.map(r=>({store:r.store,id:r.id})):c.phase==='finish'?[{store:c.store,id:c.id}]:[]):ciblesCommandeProtegee(c),rows=ack.server_rows;
       if(!Array.isArray(rows)||rows.length!==attendus.length||new Set(rows.map(cleDe)).size!==rows.length||rows.some(r=>!attendus.some(a=>cleDe(a)===cleDe(r))||r.deleted_at||r.data?.id!==r.id||!Number.isFinite(Date.parse(r.updated_at))||!Number.isFinite(r.server_seq)))return effets;
       if(estCommandeCuisine(c)&&rows.some(r=>!(r.store==='timer_launches'?validerMinuteurCuisine(r.data):validerSessionCuisine(r.data)).ok||!lireRecuCuisine(r.data,c)))return effets;
+      if(estCommandeInventaire(c)&&rows.some(r=>!Number.isSafeInteger(r.server_seq)||r.server_seq<0||!validerLotInventaire(r.data).ok||!lireRecuInventaire(r.data,c)))return effets;
       for(const r of rows){const key=CLE_SOURCE_CONFIRMEE(r.store,r.id);conditions.sync_state.push({key,fusion:current=>current?.value?.user_id===owner&&current.value.server_seq>r.server_seq?null:{key,value:{user_id:owner,data:r.data,server_seq:r.server_seq,updated_at:r.updated_at,deleted_at:null}}});}
-      if(estCommandeCuisine(c)){
+      if(estCommandeCuisine(c)||estCommandeInventaire(c)){
         const file=await fileDe(db,owner),signature=JSON.stringify(file);
         conditions.outbox.push({toutes:true,verifier:rows=>{if(JSON.stringify(rows.filter(e=>e.user_id==null||e.user_id===owner))!==signature)throw Error('File de cuisine changée pendant accusé');}});
-        for(const r of rows){const pending=file.some(e=>e.seq!==entree.seq&&estCommandeCuisine(e)&&e.store===r.store&&e.id===r.id);if(pending)continue;const locale=await db.get(r.store,r.id),cle=CLE_SOURCE_CONFIRMEE(r.store,r.id);(conditions[r.store]||=[]).push({key:r.id,fusion:(current,lecture)=>{if(lecture('sync_state',cle)?.value?.server_seq>r.server_seq)return null;if(canoniqueSources(current??null)!==canoniqueSources(locale??null))throw Error('Cuisine changée pendant accusé');return r.data;}});}
+        for(const r of rows){const pending=file.some(e=>e.seq!==entree.seq&&(estCommandeCuisine(e)||estCommandeInventaire(e))&&e.store===r.store&&e.id===r.id);if(pending)continue;const locale=await db.get(r.store,r.id),cle=CLE_SOURCE_CONFIRMEE(r.store,r.id);(conditions[r.store]||=[]).push({key:r.id,fusion:(current,lecture)=>{if(lecture('sync_state',cle)?.value?.server_seq>r.server_seq)return null;if(canoniqueSources(current??null)!==canoniqueSources(locale??null))throw Error('Cuisine changée pendant accusé');return r.data;}});}
       }
       deletes.outbox=[entree.seq];effets.retirer=[entree.seq];
     }else{
       const file=await fileDe(db,owner),cles=new Set(ciblesCommandeProtegee(c).map(cleDe));
       puts.outbox=file.filter(e=>e.seq>=entree.seq&&(e.seq===entree.seq||estCommandeProtegee(e)&&ciblesCommandeProtegee(e.payload).some(r=>cles.has(cleDe(r))))).map(e=>({...e,lifecycle_blocked:true,last_error:refus.reason||'source_changed'}));
-      const kind=estCommandeCuisine(c)?'cooking':estCommandeTraduction(c)?'translation':'source';
+      const kind=estCommandeInventaire(c)?'inventory':estCommandeCuisine(c)?'cooking':estCommandeTraduction(c)?'translation':'source';
       const conflit={id:kind+':'+c.operation_id,store:c.store,record_id:c.id,operation_id:c.operation_id,user_id:owner,local:c,server:refus.server||null,reason:refus.reason||'source_changed',at:reponse.server_time||new Date().toISOString(),kind};puts.sync_conflicts=[conflit];effets.conflits=[conflit];
       const serveur=refus.server;if(serveur?.data?.id===c.id&&Number.isFinite(serveur.server_seq)){const key=CLE_SOURCE_CONFIRMEE(c.store,c.id);conditions.sync_state.push({key,fusion:current=>current?.value?.user_id===owner&&current.value.server_seq>serveur.server_seq?null:{key,value:{user_id:owner,data:serveur.data,server_seq:serveur.server_seq,updated_at:serveur.updated_at,deleted_at:serveur.deleted_at??null}}});}
     }
@@ -387,6 +391,10 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     const bilan = { envoyes: 0, ajustes: 0, conflits: 0, quarantaine: 0, retenues: 0, abandonnees: 0, recul: null, erreur: null, pause: false, attenteConnexion: false };
     const file = await lireFile();
     if (!file.length) return bilan;
+    if(file.some(estCommandeInventaire)){
+      const owner=getUserId(),key='inventory-capability:'+owner,cached=await db.get('sync_state',key);
+      if(cached?.value?.protocol!==1){const r=typeof transport.capacites==='function'?await transport.capacites():null;if(r?.erreur||r?.capacites?.inventory_changes!==1){bilan.erreur=r?.erreur||{type:'incompatible'};return bilan;}await db.mutate({origin:'remote',puts:{sync_state:[{key,value:{protocol:1}}]},conditions:{sync_state:[gardeCompteCycle(owner,getUserId)]}});}
+    }
     if(file.some(estCommandeCuisine)){
       const owner=getUserId(),key='cooking-capability:'+owner,cached=await db.get('sync_state',key);
       if(cached?.value?.protocol!==1){const r=typeof transport.capacites==='function'?await transport.capacites():null;if(r?.erreur||r?.capacites?.cooking_persistence!==1){bilan.erreur=r?.erreur||{type:'incompatible'};return bilan;}await db.mutate({origin:'remote',puts:{sync_state:[{key,value:{protocol:1}}]},conditions:{sync_state:[gardeCompteCycle(owner,getUserId)]}});}
@@ -400,8 +408,8 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
       if(cached?.value?.protocol!==1){const r=typeof transport.capacites==='function'?await transport.capacites():null;if(r?.erreur||r?.capacites?.recipe_language!==1){bilan.erreur=r?.erreur||{type:'incompatible'};return bilan;}await db.mutate({origin:'remote',puts:{sync_state:[{key,value:{protocol:1}}]},conditions:{sync_state:[gardeCompteCycle(owner,getUserId)]}});}
     }
     const entreesParSeq = new Map(file.map((e) => [e.seq, e]));
-    const sources=await db.getSnapshot(['imports','recipe_translations','cook_sessions','timer_launches','cook_history']);
-    const { lots, retenues, abandonnees } = await composerLots(file, (store, id) => db.get(store, id),{versionsSources:new Set([...idsVersionsSourcesTraduction(sources,file),...idsVersionsSourcesCuisine(sources,file)]),historiquesSources:idsHistoriquesSourcesCuisine(sources,file)});
+    const sources=await db.getSnapshot(['imports','recipe_translations','cook_sessions','timer_launches','cook_history','inventory']);
+    const { lots, retenues, abandonnees } = await composerLots(file, (store, id) => db.get(store, id),{versionsSources:new Set([...idsVersionsSourcesTraduction(sources,file),...idsVersionsSourcesCuisine(sources,file),...idsVersionsSourcesInventaire(sources,file)]),historiquesSources:new Set([...idsHistoriquesSourcesCuisine(sources,file),...idsHistoriquesSourcesInventaire(sources,file)])});
     bilan.retenues = retenues.length;
     bilan.abandonnees = abandonnees.length;
     await marquerRetenues(retenues, entreesParSeq);

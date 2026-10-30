@@ -1,6 +1,6 @@
 # L8 — Plan de construction et de réception
 
-**30 octobre 2026 — contrat fermé, construction à commencer.** [Spec](../specs/2026-10-29-l8-repas-inventaire-design.md), [protocole et API](../specs/2026-10-30-l8-protocole-inventaire.md). Base publique L7 :0.29.0/DB6/archive6, code8fb0784/reçu f7e836a,10653/10653 tests publics. Cible0.30.0/DB6/archive7, SQL0013 additive et inventory_changes1. Revue technique A/B/C/root terminée, poursuite autorisée ; aucune relecture personnelle attribuée à Neegan. Aucun code ni résultat de test L8 à ce point.
+**30 octobre 2026 — contrat construit, réception locale terminée.** [Spec](../specs/2026-10-29-l8-repas-inventaire-design.md), [protocole et API](../specs/2026-10-30-l8-protocole-inventaire.md). Base publique L7 :0.29.0/DB6/archive6, code8fb0784/reçu f7e836a,10653/10653 tests publics. Cible0.30.0/DB6/archive7, SQL0013 additive et inventory_changes1. Revue technique A/B/C/root terminée, poursuite autorisée ; aucune relecture personnelle attribuée à Neegan. Les résultats observés sont consignés au §7 ; la publication reste distincte.
 
 ## 1. État de départ et décisions à fermer
 
@@ -114,9 +114,26 @@ Captures320/390/768/1280px et texte200 %, mobile en portrait et ordinateur ; lis
 - Publication seulement après réception et autorisation d’intégration. Si SQL neuf : capacité/guards vérifiés avant activation client. Vérifier ensuite Pages réellement construit, fichiers identiques, suite et parcours publics en profil isolé.
 - Les essais physiques iPhone/Safari et une utilisation réelle en épicerie restent à réaliser ou à citer comme limites ; l’émulation de largeur ne les remplace pas.
 
-Preuves futures : `.superpowers/sdd/2026-10-30-l8/`. À cette étape, seuls le présent plan et la spec sont produits ; L8 n’est pas commencé ni livré.
+Preuves : `.superpowers/sdd/2026-10-30-l8/`. Le contrat initial a précédé le code ; réception observée au §7.
 
 
 ## 6. Répartition fermée avant construction
 
 L’annexe de protocole§9–10 fait autorité sur les fichiers et signatures. A possède domaine/commandes/publication SQL/dépôt, B repas/courses, C inventaire/restes/backup/relations. Root possède canon/gardes SQL et preuves ACL/composition, CSS/navigation/i18n/version/cache/runner et livraison. Aucun fichier partagé n’est modifié en parallèle sans attribution explicite. La synchronisation pourra être transférée de A vers B après son volet UI, avec notification explicite.
+
+
+## 7. Réception locale du 30 octobre
+
+**L8 — repas, courses et inventaire : réception locale terminée, publication en préparation.**
+[Spec](../specs/2026-10-29-l8-repas-inventaire-design.md), [protocole](../specs/2026-10-30-l8-protocole-inventaire.md), [rapport](2026-10-29-l8-repas-inventaire.md).
+Branche l8-repas-inventaire, contrat1c42241 ; base L7 code8fb0784/reçu f7e836a. Revues A/B/C/root ; aucune relecture personnelle attribuée à Neegan.
+Envies et jours sans heure, courses à convention conservée et révision explicite ; stock confirmé, consommation/fin/annulation conditionnées et restes liés à la cuisson exacte.
+**0.30.0**, cache0.30.0-1, DB6/archive7, SQL0013 additive avec inventory_changes1. Public encore0.29.0 à ce reçu.
+**11083/11083** navigateur (épingle11082, +430 depuis L7, aucun scénario retiré), zéro erreur JavaScript/requête extérieure ; Node232/232, générateur0, syntaxe89 fichiers et diff propres.
+PostgreSQL UTF8 neuf0001→0013 :201 vecteurs JS/SQL,17 refus causaux/5legacy/21 anciens RPC,175 publication,26 sources,140 ACL et écriture authenticated ; bornes6JS/4SQL, réserve23500 octets sous32768.
+Concurrence35 contrôles avec deux connexions ; deux moteurs42 contrôles/15RPC, confirmation perdue/rejeu courant, refus récupéré, archive/bootstrap et deux passes sans écho. Régressions SQL antérieures21 scripts verts.
+Chrome : inventaire11 mesures/33 gestes et repas8/28, deux onglets, rechargements réellement hors ligne,14 modules en cache unique. Captures relues ; les défauts de navigation globale à texte200% sont consignés pour L9.
+Les courses gardent leur arbitrage par ligne entre appareils ; la fusion de cases prouvée ici concerne deux onglets partageant la même base. Aucun calcul automatique de quantité, consommation ou durée de conservation.
+Aucun compte privé/appel assistant réel ni essai physique iPhone/Safari/TM7. Publication autorisée par les demandes de poursuite/déploiement. **L9–L10 et E1 restent à terminer.**
+
+Les rapports A/B/C et les journaux root sont conservés dans le dossier de preuves. La transaction de livraison0013 a été répétée sur une base locale0001→0012 ; un second passage est refusé avant toute modification. Le SHA256 du SQL reçu est `02f0390bed59a9297e3c2138679512a26c64e8acebd7b961128ca454eaa6be3b`. La publication distante n’est pas encore déclarée à ce reçu.

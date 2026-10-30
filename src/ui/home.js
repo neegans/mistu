@@ -20,6 +20,8 @@ import { recipeCard, section, sectionPlain, grilleCartes, pageHeader, emptyState
 import { creerServiceCuisine } from '../domain/cuisine-persistance.js';
 import { projeterSuiviMinuteur } from '../domain/cuisine-format.js';
 import { getSyncGeneration } from './state.js';
+import { projeterLotInventaire } from '../domain/inventaire-persistance.js';
+import { quantiteInventaire, dateLotInventaire } from './inventaire-texte.js';
 
 // `deps.repo` : le sac injecté des routes (la suite y compte la passe getFiles) ; l'app ne passe rien (route('/', renderHome) : trois arguments) et le
 // module sert. T5 ronde 1 : Redécouvrir écrit par ce MÊME sac (rediscoverCard), jamais par le module en dehors de lui.
@@ -86,11 +88,19 @@ export async function renderHome(params, query, ctx, { repo: depot = repo, servi
   }
 
   // Ingrédients à utiliser (inventaire)
-  const soon = ctx.inventory.filter((i) => i.use_by && (Date.parse(i.use_by) - Date.now()) < 4 * 86400000).sort((a, b) => a.use_by.localeCompare(b.use_by)).slice(0, 5);
+  const jourLocal = d => `${String(d.getFullYear()).padStart(4,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const instant = new Date(maintenant()), aujourdhui = jourLocal(instant), limite = new Date(instant);
+  limite.setDate(limite.getDate()+4);
+  const soon = ctx.inventory.map(lot => {
+    const p = projeterLotInventaire({lot}, {aujourdhui}), date = p.dates.use_by;
+    const ancienne = date.origine === 'legacy' ? new Date(date.valeur) : null;
+    const jour = date.origine === 'civil' ? date.valeur : ancienne && Number.isFinite(ancienne.getTime()) ? jourLocal(ancienne) : null;
+    return {p,date,jour};
+  }).filter(x => x.p.etat !== 'finished' && x.jour && x.jour < jourLocal(limite)).sort((a,b) => a.jour.localeCompare(b.jour)).slice(0,5);
   if (soon.length) {
-    root.append(sectionPlain(t('À utiliser en priorité'), el('ul', { class: 'list' }, ...soon.map((i) => el('li', { class: 'row between' },
-      el('span', null, `${i.label}${i.quantity_text ? ` — ${i.quantity_text}` : ''}`),
-      el('span', { class: `chip ${Date.parse(i.use_by) < Date.now() ? 'danger' : 'warn'}` }, `${t('à consommer avant le')} ${formatDate(i.use_by)}`)))),
+    root.append(sectionPlain(t('À utiliser en priorité'), el('ul', { class: 'list' }, ...soon.map(({p,date,jour}) => el('li', { class: 'row between' },
+      el('span', null, `${p.label || t('Lot sans nom')} — ${quantiteInventaire(p)}`),
+      el('span', { class: `chip ${jour < aujourdhui ? 'danger' : 'warn'}` }, `${t('à consommer avant le')} ${dateLotInventaire(date)}`)))),
       el('a', { class: 'btn small', href: '#/kitchen?tab=inventory' }, t('Voir l’inventaire'))));
   }
 

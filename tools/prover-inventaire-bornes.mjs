@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {validerLotInventaire,ajouterRecuInventaire,LIMITES_INVENTAIRE} from '../src/domain/inventaire-format.js';
+import {verifierReserveInventaire} from '../src/domain/inventaire-mutations.js';
+import {octetsJsonbSources} from '../src/domain/sources-format.js';
+const q=s=>"'"+s.replaceAll("'","''")+"'",j=x=>q(JSON.stringify(x))+'::jsonb',op='iv_op_'+'a'.repeat(64),hash='b'.repeat(64);
+const row={id:'borne',stock:{format:1,unit:'portion',initial:1000,remaining:999.999999,state:'available'},stock_revision:op,stock_last_action:null,stock_receipts:[],stock_receipt_floor:0,extension:''};
+const exact={...row,extension:'a'.repeat(524288-octetsJsonbSources(row))},over={...exact,extension:exact.extension+'a'};
+assert.equal(octetsJsonbSources(exact),524288);assert.equal(validerLotInventaire(exact).ok,true);assert.equal(validerLotInventaire(over).ok,false);
+const legacy={id:'borne',extension:''},reserved={...legacy,extension:'a'.repeat(524288-LIMITES_INVENTAIRE.reserve-octetsJsonbSources(legacy))};
+assert.doesNotThrow(()=>verifierReserveInventaire(reserved));assert.throws(()=>verifierReserveInventaire({...reserved,extension:reserved.extension+'a'}),e=>e.code==='bornes');
+let expanded={...row,stock_last_action:{operation_id:op,type:'undo',at:'9999-12-31T23:59:59.999Z',before:{format:1,unit:'kg',initial:1e9,remaining:999999999.999999,state:'available'},after:{format:1,unit:'kg',initial:1e9,remaining:1e9,state:'available'},undo_of:'iv_op_'+'c'.repeat(64)}};
+for(let i=0;i<128;i++)expanded=ajouterRecuInventaire(expanded,{operation_id:'iv_op_'+i.toString(16).padStart(64,'0'),payload_sha256:hash});
+const growth=octetsJsonbSources(expanded)-octetsJsonbSources({id:row.id,extension:row.extension});assert(growth<LIMITES_INVENTAIRE.reserve);
+let sql=`\\set ON_ERROR_STOP on\nbegin;create function pg_temp.assert_boundary(got boolean,label text)returns void language plpgsql as $$begin if got is distinct from true then raise exception '%',label;end if;end$$;\n`;
+for(const[label,expr]of [['512Kio exact',`public.l8_valid_inventory(${j(exact)})`],['512Kio+1 refusé',`not public.l8_valid_inventory(${j(over)})`],['128 reçus et dernière action',`public.l8_valid_inventory(${j(expanded)})`],['taille JSONB identique',`octet_length(${j(expanded)}::text)=${octetsJsonbSources(expanded)}`]])sql+=`select pg_temp.assert_boundary(${expr},${q(label)});\n`;
+sql+=`rollback;select '6 contrôles JS + 4 SQL ; réserve mesurée ${growth} octets <32768' as bilan;\n`;process.stdout.write(sql);

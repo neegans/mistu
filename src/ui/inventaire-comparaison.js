@@ -1,0 +1,19 @@
+import {el,downloadBlob} from '../core/dom.js';
+import {t} from '../core/i18n.js';
+import {resumeLotInventaire,texteErreurInventaire} from './inventaire-texte.js';
+export function creerComparaisonInventaire({service,portee,estCourante=()=>true,onConserve}){
+ const root=el('section',{class:'inventaire-comparaison stack'}),message=el('p',{role:'status',hidden:true}),liste=el('div',{class:'stack'}),detail=el('div',{class:'stack'}),copies=el('div',{class:'stack'});root.append(message,liste,detail,copies);let detruit=false,occupe=false;
+ const valide=()=>!detruit&&estCourante(),erreur=r=>{if(valide()){message.hidden=false;message.textContent=texteErreurInventaire(r);}};
+ async function comparer(id){if(occupe||!valide())return;occupe=true;try{const r=await service.capturerComparaison({portee,id});if(!valide())return;if(r.issue!=='ok'){erreur(r);return;}
+  const a=r.affiche,panneau=el('div',{class:'card stack'},el('h3',null,t('Comparer les quantités conservées')),el('p',null,t('{n} modifications en attente sont concernées.',{n:a.nombre_commandes})));
+  for(const[nom,copie]of[[t('Copie sur cet appareil'),a.locale],[t('État confirmé reçu'),a.confirmee]]){panneau.append(el('h4',null,nom),copie?resumeLotInventaire(copie.projection):el('p',null,t('Aucun lot dans cette copie.')));const last=copie?.affiche?.lot?.stock_last_action;if(last)panneau.append(el('p',null,t('Dernier mouvement : {action}, le {date}',{action:({consume:t('Utiliser une quantité'),finish:t('Tout consommé'),undo:t('Annulation')})[last.type]||t('Mouvement'),date:last.at})));}
+  panneau.append(el('p',null,t('La copie locale restera récupérable. Aucune quantité ne sera utilisée à nouveau.')));
+  const annuler=el('button',{class:'btn',type:'button',onClick:()=>{if(!occupe)detail.replaceChildren();}},t('Annuler'));
+  const garder=el('button',{class:'btn primary',type:'button',dataset:{role:'garder-stock-confirme'},onClick:()=>{void(async()=>{if(occupe||!valide())return;occupe=true;garder.disabled=true;annuler.disabled=true;try{const x=await service.garderConfirme({comparaison:r.comparaison});if(!valide())return;if(!['conserve','deja_conserve'].includes(x.issue)){erreur(x);return;}detail.replaceChildren();message.hidden=false;message.textContent=t('État confirmé utilisé. La copie locale reste récupérable.');try{await actualiser();await onConserve?.(x);}catch{message.textContent=t('Ton choix est conservé. Rouvre l’inventaire pour actualiser son affichage.');}}catch{erreur({});}finally{occupe=false;garder.disabled=false;annuler.disabled=false;}})();}},t('Utiliser le stock confirmé'));
+  panneau.append(el('div',{class:'row'},annuler,garder));detail.replaceChildren(panneau);
+ }catch{erreur({});}finally{occupe=false;}}
+ async function actualiser(){try{const[a,b]=await Promise.all([service.lireConflits({portee}),service.lireRecuperations({portee})]);if(!valide())return;if(a.issue!=='ok'||b.issue!=='ok'){erreur(a.issue!=='ok'?a:b);return;}liste.replaceChildren(...a.conflits.map(c=>el('div',{class:'status warn'},el('p',null,t('Une modification de stock attend ta comparaison.')),el('button',{class:'btn',type:'button',dataset:{role:'comparer-stock'},onClick:()=>{void comparer(c.id);}},t('Comparer le stock')))));
+  copies.replaceChildren(...b.recuperations.map(c=>el('div',{class:'card stack'},el('strong',null,c.label||t('Lot sans nom')),el('p',null,t('Copie locale conservée le {date}',{date:c.at})),el('button',{class:'btn',type:'button',onClick:()=>{void(async()=>{try{const r=await service.exporterRecuperation({portee,id:c.id});if(!valide())return;if(r.issue!=='ok'){erreur(r);return;}downloadBlob(new Blob([r.texte],{type:'application/json'}),r.nomFichier);}catch{erreur({});}})();}},t('Télécharger la copie locale')))));
+ }catch{erreur({});}}
+ root.actualiser=actualiser;root.dispose=()=>{detruit=true;};return root;
+}

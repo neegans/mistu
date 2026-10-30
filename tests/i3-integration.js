@@ -109,14 +109,14 @@ export async function runI3IntegrationTests({ eq, ok }) {
     const root = await renderMeal({ id: meal.id }, {}, await getData(true), { repo, toast: x => messages.push(x), navigate: x => routes.push(x) });
     document.body.append(root);
     try {
-      const lancer = [...root.querySelectorAll('button')].find(b => b.textContent === 'Commencer la préparation');
+      const lancer = [...root.querySelectorAll('button')].find(b => b.textContent === 'Cuisiner ensemble');
       lancer.click(); await attendre(() => messages.length);
       eq((await repo.all('cook_sessions')).length, 0, 'I3 : repas refuse portions divergentes');
       await repo.save('meals', { ...meal, items: [{ ...meal.items[0], servings: 4, servings_custom: true }] });
       // Le départ porte la copie affichée : une modification distante exige une relecture explicite.
       const relu = await renderMeal({ id: meal.id }, {}, await getData(true), {repo,toast:x=>messages.push(x),navigate:x=>routes.push(x)});
       document.body.append(relu);
-      [...relu.querySelectorAll('button')].find(b=>b.textContent==='Commencer la préparation').click();
+      [...relu.querySelectorAll('button')].find(b=>b.textContent==='Cuisiner ensemble').click();
       await attendre(() => routes.length); relu.dispose?.(); relu.remove();
       const session = (await repo.all('cook_sessions'))[0];
       eq(session.servings_by_version[f.version.id], 4, 'I3 : lancement utilise le repas explicitement relu avec ses quantités affichées');

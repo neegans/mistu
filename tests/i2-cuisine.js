@@ -131,9 +131,11 @@ export async function runI2CuisineTests({ eq, ok }) {
       [...dlg.querySelectorAll('button')].find(b => b.textContent === 'Enregistrer').click();
       await attendre(async () => (await repo.get('cook_sessions', session.id)).status === 'done');
       eq((await repo.all('cook_history')).filter(row => row.cook_session_id === session.id).map(row => row.notes).sort(), ['La soupe', 'Le pain'], 'I2 parcours DOM conserve les observations par recette');
+      await attendre(() => document.querySelector('[data-role=restes-cuisson]'));
+      document.querySelector('[data-role=fermer-restes]').click();
       await attendre(() => sorties.length === 1);
       eq(document.querySelector('[data-role=dialogue-cuissons]'), null, 'I2 bilan fermé après écriture réelle');
-    } finally { for (const cuisine of scene.querySelectorAll('.mode-cuisine')) cuisine.dispose?.(); scene.remove(); for (const dlg of document.querySelectorAll('[data-role=dialogue-cuissons], [data-role=dialogue-note]')) dlg.remove(); reinitialiserPhotoPlat(); }
+    } finally { for (const cuisine of scene.querySelectorAll('.mode-cuisine')) cuisine.dispose?.(); scene.remove(); for (const dlg of document.querySelectorAll('[data-role=dialogue-cuissons], [data-role=dialogue-note], [data-role=restes-cuisson]')) dlg.remove(); reinitialiserPhotoPlat(); }
   }));
   await run('saisie conservée, confirmation et échec atomique', () => withRepo(async repo => {
     const { ouvrirTextePersonnel, creerFormulaireCuisson, enregistrerCuissons } = await import('../src/ui/cuisson.js');

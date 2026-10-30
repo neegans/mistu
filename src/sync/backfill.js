@@ -1,3 +1,7 @@
+import {egalesCopiesInventaire} from '../domain/comparaison-inventaire.js';
+import {preparerInventaireArchive} from '../domain/inventaire-archive.js';
+import {estCommandeInventaire} from './commandes-inventaire.js';
+import {estLotProtege} from '../domain/inventaire-format.js';
 import {estLectureSourceSignee} from './lots.js';
 import {preparerPremiereLiaisonTransfert} from '../domain/transfert-premiere-liaison.js';
 import {preparerSourcesArchive} from '../domain/transferts-source.js';
@@ -119,6 +123,17 @@ export async function envoiInitial({ db, getUserId, isActivitySynced = () => fal
       for(const store of ['cook_sessions','timer_launches','recipes','recipe_versions','book_editions'])conditions[store]=[{toutes:true,verifier:rows=>{if(!egaux(rows,snapshot[store]||[]))throw Error('Cuisine initiale modifiée');}}];
       await db.mutate({origin:'device',puts:{...preparee.batch,outbox:preparee.cooking_commands.map(c=>({user_id,store:c.store,id:c.id,op:c.op,payload:c,tries:0}))},deletes:{outbox:anciens.map(e=>e.seq)},conditions});
       snapshot=await db.getSnapshot();file=(snapshot.outbox||[]).filter(e=>estDeCeCompte(e,user_id));
+    }
+  }
+  if(tables.length){
+    const couverts=new Set(file.filter(estCommandeInventaire).map(e=>e.id)),confirme=id=>(snapshot.sync_state||[]).some(r=>r.key===CLE_SOURCE_CONFIRMEE('inventory',id)&&r.value?.user_id===user_id&&r.value.data);
+    const inventory=(snapshot.inventory||[]).filter(r=>estLotProtege(r)&&!couverts.has(r.id)&&!confirme(r.id));
+    if(inventory.length){
+      const ids=new Set(inventory.map(r=>r.id)),base={...snapshot,inventory:(snapshot.inventory||[]).filter(r=>!ids.has(r.id))};
+      const p=await preparerInventaireArchive({batch:{inventory},snapshot:base,owner_id:user_id,purpose:'bootstrap'}),anciens=file.filter(e=>e.op==='put'&&e.store==='inventory'&&ids.has(e.id));
+      const egaux=egalesCopiesInventaire,conditions={sync_state:[gardeCompteCycle(user_id,getUserId)],outbox:[{toutes:true,verifier:rows=>{if(!egaux(rows.filter(e=>estDeCeCompte(e,user_id)),file))throw Error('File inventaire modifiée');}}]};
+      for(const store of ['inventory','recipes','recipe_versions','book_editions','cook_history'])conditions[store]=[{toutes:true,verifier:rows=>{if(!egaux(rows,snapshot[store]||[]))throw Error('Inventaire initial modifié');}}];
+      await db.mutate({origin:'device',puts:{...p.batch,outbox:p.inventory_commands.map(c=>({user_id,store:c.store,id:c.id,op:c.op,payload:c,tries:0}))},deletes:{outbox:anciens.map(e=>e.seq)},conditions});snapshot=await db.getSnapshot();file=(snapshot.outbox||[]).filter(e=>estDeCeCompte(e,user_id));
     }
   }
   // Une intention déjà capturée garde son contenu et sa base, même incomplète : jamais de second put rebasé.

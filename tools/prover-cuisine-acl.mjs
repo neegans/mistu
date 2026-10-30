@@ -1,10 +1,12 @@
 // Composition complète 0001→0012, sans réinstaller un module isolé avant ce contrôle.
 process.stdout.write(String.raw`\set ON_ERROR_STOP on
 begin;
-do $$declare f record;expected boolean;n integer:=0;begin
+do $$declare f record;expected boolean;expected_execute boolean;n integer:=0;begin
  for f in select p.oid,p.oid::regprocedure as signature,p.prosecdef,p.proowner,p.proconfig,p.proname,p.proacl from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'l7_%' loop
   expected:=f.signature::text in ('l7_validate_cooking_write(text,jsonb,jsonb)','l7_apply_cooking_command(jsonb)');
-  if has_function_privilege('authenticated',f.oid,'execute') is distinct from expected then raise exception 'ACL authenticated incorrecte : %',f.signature;end if;
+  -- L8 conserve le dispatcher L7 sous cet alias invoker ; il ne devient pas un helper élevé.
+  expected_execute:=expected or f.signature::text='l7_sync_push_v2(jsonb)';
+  if has_function_privilege('authenticated',f.oid,'execute') is distinct from expected_execute then raise exception 'ACL authenticated incorrecte : %',f.signature;end if;
   if has_function_privilege('anon',f.oid,'execute') or exists(select 1 from aclexplode(coalesce(f.proacl,acldefault('f',f.proowner))) a where a.grantee=0 and a.privilege_type='EXECUTE') then raise exception 'ACL anonyme/publique : %',f.signature;end if;
   if f.prosecdef is distinct from expected then raise exception 'Élévation inattendue : %',f.signature;end if;
   if f.proconfig is null or not ('search_path=""'=any(f.proconfig) or 'search_path='=any(f.proconfig)) then raise exception 'search_path non fermé : % %',f.signature,f.proconfig;end if;

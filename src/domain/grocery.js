@@ -4,12 +4,13 @@ import { scaleVersion } from './scaling.js';
 import { unitFactor, dimensionOf, unitLabel, getUnit } from './units.js';
 import { formatNumber, formatQuantity, isNumeric } from './quantity.js';
 import { normalizeText } from './units.js';
+import { snapshotConvention } from './repas-courses.js';
 
 // items: [{ version, servings, title, convention_id }]
 export function buildShoppingList(items, ingredientsById, { locale = 'fr' } = {}) {
   const groups = new Map(); // clé : ingredient_id ou name:<texte normalisé>
   for (const it of items) {
-    const scaled = scaleVersion(it.version, it.servings || it.version.servings);
+    const scaled = scaleVersion(it.version, Object.hasOwn(it,'servings') ? it.servings : it.version.servings);
     for (const ri of scaled.ingredients) {
       // N-9 : seule une ligne vérifiée se regroupe par identité ; une ligne non vérifiée, par le texte écrit (l'identité n'est que proposée).
       const identite = ri.ingredient_id && ri.verification_state === 'verified' ? ri.ingredient_id : null;
@@ -26,7 +27,7 @@ export function buildShoppingList(items, ingredientsById, { locale = 'fr' } = {}
       g.entries.push({
         recipe_title: it.title, source_text: ri.source_text, quantity: ri.quantity, unit_id: ri.unit_id, optional: !!ri.optional,
         display: `${formatQuantity(ri.quantity, { locale })} ${ri.unit_id ? unitLabel(ri.unit_id, locale) : ri.unit_text || ''}`.trim(),
-        scaled: !!ri.scaled, convention_id: it.convention_id || null,
+        scaled: !!ri.scaled, documentaire: !scaled.ok, recipe_id:it.version.recipe_id, recipe_version_id:it.version.id, servings:it.servings??null, convention_id: it.convention_id || null, ...(Object.hasOwn(it,'convention_snapshot')?{convention_snapshot:snapshotConvention(it.convention_snapshot)}:{}),
       });
     }
   }
@@ -37,11 +38,13 @@ export function buildShoppingList(items, ingredientsById, { locale = 'fr' } = {}
 function consolidate(group, locale) {
   const buckets = new Map(); // dimension|unit -> { value, unit_id, entries }
   for (const e of group.entries) {
+    if (e.documentaire) { group.notes.push(`${e.recipe_title} : ${e.display || e.source_text} — Quantités d’origine, portions non ajustées`); continue; }
     if (!isNumeric(e.quantity) || !e.unit_id) { group.notes.push(`${e.recipe_title} : ${e.display || e.source_text} (non additionnable)`); continue; }
     const dim = dimensionOf(e.unit_id);
     const value = typeof e.quantity.value === 'number' ? e.quantity.value : e.quantity.max; // plage : borne haute pour les achats
     if (dim === 'mass' || dim === 'volume') {
-      const f = unitFactor(e.unit_id, e.convention_id);
+      const unit=getUnit(e.unit_id),snapshot=e.convention_snapshot;
+      const f = unit?.convention_dependent&&Object.hasOwn(e,'convention_snapshot') ? snapshot?.values?.[e.unit_id] ? {factor:snapshot.values[e.unit_id]} : {error:'convention_required'} : unitFactor(e.unit_id, e.convention_id);
       if (f.error) { group.notes.push(`${e.recipe_title} : ${e.display} — ${f.error === 'convention_required' ? 'convention de mesure non confirmée' : 'unité non convertible'}`); continue; }
       const key = dim;
       const b = buckets.get(key) || { value: 0, unit_id: dim === 'mass' ? 'g' : 'ml', dim, n: 0 };

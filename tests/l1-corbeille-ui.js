@@ -165,7 +165,7 @@ export async function runL1CorbeilleUiTests({eq,ok}) {
         await mettreALaCorbeille(r);const avant=await repo.get('recipes',r.id);
         fiche.querySelector('button[title=Favori]').click();await attendre(()=>messages.length===1);
         eq(await repo.get('recipes',r.id),avant,'L1 ancien favori : refus sans restauration ni modification');
-        bouton(repas,'Liste de courses commune').click();await attendre(()=>messages.length===2);
+        bouton(repas,'Voir mes courses').click();await attendre(()=>messages.length===2);
         eq(await repo.all('shopping_lists'),[],'L1 ancien repas : aucune nouvelle liste avec cible retirée');
       }finally{nettoyer();repas.dispose?.();}
     }));
@@ -245,7 +245,10 @@ export async function runL1CorbeilleUiTests({eq,ok}) {
       const repas=await renderMeal({id:m.id},{},ctx,{refresh:()=>{}}),d2=monter(repas);
       try {const champ=repas.querySelector('input[type=number]');champ.value='3';champ.dispatchEvent(new Event('change'));await new Promise(r=>setTimeout(r,60));eq((await repo.get('meals',m.id)).servings,3,'L1 repas historique : les portions du repas restent modifiables');}finally{d2();}
       const cuisine=await renderKitchen({},{tab:'inventory'},ctx),d3=monter(cuisine);
-      try {bouton(cuisine,'−1 portion').click();await new Promise(r=>setTimeout(r,60));eq((await repo.get('inventory','inv-h')).portions,2,'L1 inventaire historique : consommer une portion reste possible');}finally{d3();}
+      try {
+        cuisine.querySelector('[data-role=modifier-lot]').click();await attendre(()=>document.querySelector('[data-role=formulaire-lot]'));let d=document.querySelector('[data-role=formulaire-lot]');d.querySelector('[data-role=enregistrer-lot]').click();await attendre(()=>!d.isConnected);await attendre(()=>cuisine.querySelector('[data-role=consommer-lot]'));eq((await repo.get('inventory','inv-h')).stock.remaining,3,'L1 inventaire historique : adoption explicite après retrait sans consommation');
+        cuisine.querySelector('[data-role=consommer-lot]').click();d=document.querySelector('[data-role=mouvement-lot]');d.querySelector('[name=amount]').value='1';const b=d.querySelector('[data-role=confirmer-mouvement]');b.click();await attendre(()=>b.textContent==='Confirmer'&&!b.disabled);b.click();await attendre(()=>!d.isConnected);eq((await repo.get('inventory','inv-h')).stock.remaining,2,'L1 inventaire historique : consommer une portion reste possible');
+      }finally{for(const d of document.querySelectorAll('[data-role=formulaire-lot],[data-role=mouvement-lot]'))d.dispatchEvent(new Event('cancel',{cancelable:true}));d3();}
     }));
     await run('copie de conflit de cycle',async()=>{
       const S=await import('../src/ui/settings.js');

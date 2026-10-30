@@ -3,11 +3,11 @@
 
 export const DB_NAME = 'cuisine-os';
 export const DB_VERSION = 6;
-export const APP_VERSION = '0.29.0';
+export const APP_VERSION = '0.30.0';
 
 export const ARCHIVE_FORMAT = 'cuisine-os-archive';
-export const ARCHIVE_FORMAT_VERSION = 6;
-export const SUPPORTED_ARCHIVE_VERSIONS = [1, 2, 3, 4, 5, 6];
+export const ARCHIVE_FORMAT_VERSION = 7;
+export const SUPPORTED_ARCHIVE_VERSIONS = [1, 2, 3, 4, 5, 6, 7];
 
 export const STORES = {
   books:               { keyPath: 'id', indexes: [] },
@@ -130,6 +130,7 @@ export const RELATIONS = [
   ['inventory', 'ingredient_id', 'ingredients'],
   ['inventory', 'source_recipe_version_id', 'recipe_versions'],
   ['inventory', 'source_recipe_id', 'recipes'],
+  ['inventory', 'source_cook_history_id', 'cook_history'],
   ['meals', 'items[].recipe_id', 'recipes'],
   ['meals', 'items[].recipe_version_id', 'recipe_versions'],
   ['meal_feedback', 'meal_id', 'meals'],

@@ -1,3 +1,38 @@
+import {runL8InventaireComparaisonRejeuTests} from './l8-inventaire-comparaison.js';
+import {runL8InventaireReglagesTests} from './l8-inventaire-reglages.js';
+import {runL8SyncAdoptionTests} from './l8-sync.js';
+import {runL8SyncBornesTests} from './l8-sync.js';
+import {runL8InventaireRejeuTransactionsTests} from './l8-inventaire-transactions.js';
+import {runL8CoursesGestesTests} from './l8-repas-courses.js';
+import {runL8SyncConflitsTests} from './l8-sync.js';
+import {runL8InventaireTransactionsTests} from './l8-inventaire-transactions.js';
+import {runL8CoursesAttenteTests} from './l8-repas-courses.js';
+import {runL8RepasBornesTests} from './l8-repas-courses.js';
+import {runL8SyncTests} from './l8-sync.js';
+import {runL8SyncReceptionTests} from './l8-sync.js';
+import {runL8SyncAccuseTests} from './l8-sync.js';
+import {runL8SyncSourcesTests} from './l8-sync.js';
+import {runL8InventaireCopiesTests} from './l8-inventaire-comparaison.js';
+import {runL8ArchivesTests} from './l8-archives.js';
+import {runL8InventaireAccueilTests} from './l8-inventaire-accueil.js';
+import {runL8InventaireComparaisonTests} from './l8-inventaire-comparaison.js';
+import {runL8InventaireDepotEcranTests} from './l8-inventaire-depot-ecran.js';
+import {runL8InventaireMemoireTests} from './l8-inventaire-persistance.js';
+import {runL8RepasConcurrenceTests} from './l8-repas-courses.js';
+import {runL8CoursesComparaisonTests} from './l8-repas-courses.js';
+import {runL8InventaireArchiveTests} from './l8-inventaire-archive.js';
+import {runL8InventaireEcranTests} from './l8-inventaire-ecran.js';
+import {runL8InventaireFormatTests} from './l8-inventaire-format.js';
+import {runL8InventaireMutationsTests} from './l8-inventaire-mutations.js';
+import {runL8InventairePersistanceTests} from './l8-inventaire-persistance.js';
+import {runL8InventaireLegacyTests} from './l8-inventaire-persistance.js';
+import {runL8InventaireProjectionTests} from './l8-inventaire-projection.js';
+import {runL8CoursesQuantitesTests} from './l8-repas-courses.js';
+import {runL8RepasModeleTests} from './l8-repas-courses.js';
+import {runL8RepasEcranTests} from './l8-repas-courses.js';
+import {runL8CoursesEcranTests} from './l8-repas-courses.js';
+import {runL8EnviesTests} from './l8-repas-courses.js';
+import {runL8RestesTests} from './l8-restes.js';
 import {runL7CuisineVolumesTests} from './l7-cuisine-volumes.js';
 import {runL7SyncFinTests} from './l7-sync.js';
 import {runL7ArchivesTests} from './l7-archives.js';
@@ -533,6 +568,41 @@ try { await runL7SyncReceptionTests({eq,ok}); } catch (e) { ok(false, 'runL7Sync
 try { await runL7SyncAccuseTests({eq,ok}); } catch (e) { ok(false, 'runL7SyncAccuseTests : ' + (e.stack || e)); }
 try { await runL7CuisineVolumesTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineVolumesTests : ' + (e.stack || e)); }
 try { await runL7SyncFinTests({eq,ok}); } catch (e) { ok(false, 'runL7SyncFinTests : ' + (e.stack || e)); }
+try { await runL8InventaireArchiveTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireArchiveTests : ' + (e.stack || e)); }
+try { await runL8InventaireEcranTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireEcranTests : ' + (e.stack || e)); }
+try { await runL8InventaireFormatTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireFormatTests : ' + (e.stack || e)); }
+try { await runL8InventaireMutationsTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireMutationsTests : ' + (e.stack || e)); }
+try { await runL8InventairePersistanceTests({eq,ok}); } catch (e) { ok(false, 'runL8InventairePersistanceTests : ' + (e.stack || e)); }
+try { await runL8InventaireLegacyTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireLegacyTests : ' + (e.stack || e)); }
+try { await runL8InventaireProjectionTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireProjectionTests : ' + (e.stack || e)); }
+try { await runL8CoursesQuantitesTests({eq,ok}); } catch (e) { ok(false, 'runL8CoursesQuantitesTests : ' + (e.stack || e)); }
+try { await runL8RepasModeleTests({eq,ok}); } catch (e) { ok(false, 'runL8RepasModeleTests : ' + (e.stack || e)); }
+try { await runL8RepasEcranTests({eq,ok}); } catch (e) { ok(false, 'runL8RepasEcranTests : ' + (e.stack || e)); }
+try { await runL8CoursesEcranTests({eq,ok}); } catch (e) { ok(false, 'runL8CoursesEcranTests : ' + (e.stack || e)); }
+try { await runL8EnviesTests({eq,ok}); } catch (e) { ok(false, 'runL8EnviesTests : ' + (e.stack || e)); }
+try { await runL8RestesTests({eq,ok}); } catch (e) { ok(false, 'runL8RestesTests : ' + (e.stack || e)); }
+try { await runL8ArchivesTests({eq,ok}); } catch (e) { ok(false, 'runL8ArchivesTests : ' + (e.stack || e)); }
+try { await runL8InventaireAccueilTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireAccueilTests : ' + (e.stack || e)); }
+try { await runL8InventaireComparaisonTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireComparaisonTests : ' + (e.stack || e)); }
+try { await runL8InventaireDepotEcranTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireDepotEcranTests : ' + (e.stack || e)); }
+try { await runL8InventaireMemoireTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireMemoireTests : ' + (e.stack || e)); }
+try { await runL8RepasConcurrenceTests({eq,ok}); } catch (e) { ok(false, 'runL8RepasConcurrenceTests : ' + (e.stack || e)); }
+try { await runL8CoursesComparaisonTests({eq,ok}); } catch (e) { ok(false, 'runL8CoursesComparaisonTests : ' + (e.stack || e)); }
+try { await runL8InventaireCopiesTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireCopiesTests : ' + (e.stack || e)); }
+try { await runL8InventaireTransactionsTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireTransactionsTests : ' + (e.stack || e)); }
+try { await runL8CoursesAttenteTests({eq,ok}); } catch (e) { ok(false, 'runL8CoursesAttenteTests : ' + (e.stack || e)); }
+try { await runL8RepasBornesTests({eq,ok}); } catch (e) { ok(false, 'runL8RepasBornesTests : ' + (e.stack || e)); }
+try { await runL8SyncTests({eq,ok}); } catch (e) { ok(false, 'runL8SyncTests : ' + (e.stack || e)); }
+try { await runL8SyncReceptionTests({eq,ok}); } catch (e) { ok(false, 'runL8SyncReceptionTests : ' + (e.stack || e)); }
+try { await runL8SyncAccuseTests({eq,ok}); } catch (e) { ok(false, 'runL8SyncAccuseTests : ' + (e.stack || e)); }
+try { await runL8SyncSourcesTests({eq,ok}); } catch (e) { ok(false, 'runL8SyncSourcesTests : ' + (e.stack || e)); }
+try { await runL8InventaireRejeuTransactionsTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireRejeuTransactionsTests : ' + (e.stack || e)); }
+try { await runL8CoursesGestesTests({eq,ok}); } catch (e) { ok(false, 'runL8CoursesGestesTests : ' + (e.stack || e)); }
+try { await runL8SyncConflitsTests({eq,ok}); } catch (e) { ok(false, 'runL8SyncConflitsTests : ' + (e.stack || e)); }
+try { await runL8InventaireComparaisonRejeuTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireComparaisonRejeuTests : ' + (e.stack || e)); }
+try { await runL8InventaireReglagesTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireReglagesTests : ' + (e.stack || e)); }
+try { await runL8SyncAdoptionTests({eq,ok}); } catch (e) { ok(false, 'runL8SyncAdoptionTests : ' + (e.stack || e)); }
+try { await runL8SyncBornesTests({eq,ok}); } catch (e) { ok(false, 'runL8SyncBornesTests : ' + (e.stack || e)); }
 try { await runL7ObservationsBaseTests({eq,ok}); } catch (e) { ok(false, 'runL7ObservationsBaseTests : ' + (e.stack || e)); }
 
 try { await runL7CuisineArchiveTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineArchiveTests : ' + (e.stack || e)); }
@@ -547,7 +617,7 @@ try { await runL7MinuteursCommandesTests({eq,ok}); } catch (e) { ok(false, 'runL
 try { await runL7MinuteursDepotEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursDepotEcranTests : ' + (e.stack || e)); }
 try { await runL7MinuteursEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursEcranTests : ' + (e.stack || e)); }
 try { await runL7VoixTests({eq,ok}); } catch (e) { ok(false, 'runL7VoixTests : ' + (e.stack || e)); }
-eq(results.length, 10652,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 11082,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

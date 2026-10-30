@@ -8,7 +8,7 @@ import { displayUrl, typeAffichage } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { sectionPlain, field, vignettePage, gesteTelechargement, relireErreurs } from './components.js';
 import { capturerRecette } from './recette-garde.js';
-import { protegerSaisie } from './state.js';
+import { protegerSaisie,getSyncGeneration } from './state.js';
 import { LIMITES_CUISSON, ErreurCuisson, aujourdHui, photosDeCuisson, textePersonnel, validerTextePersonnel, validerCuisson } from '../domain/cuisine-personnelle.js';
 
 const titreDe = (r) => typeof r?.display_title === 'string' ? r.display_title : typeof r?.original_title === 'string' ? r.original_title : t('Recette');
@@ -208,6 +208,8 @@ export function creerFormulaireCuisson(item, { repo = repoModule, maintenant = m
 
 export function ouvrirCuissons(items, options = {}) {
   const repo = options.repo ?? repoModule, maintenant = options.maintenant ?? maintenantParDefaut;
+  const base=repo.db,generation=getSyncGeneration(),portee=base?.get?Promise.all([base.get('sync_state','user_id'),base.get('sync_state','editor_library_epoch:v1')]).catch(()=>null):Promise.resolve([]);
+  const courante=()=>repo.db===base&&getSyncGeneration()===generation&&options.estCourante?.()!==false;
   const capture = options.recettes ? Promise.resolve({recettes:options.recettes}) : Promise.all([...new Map(items.map(item => [item.recipe?.id,item.recipe])).values()].map(recipe => capturerRecette(repo, recipe, {ctx:options.ctx, historique:!!options.session}))).then(recettes => ({recettes}), erreur => ({erreur}));
   const stables = items.map(item => ({ ...item, id: item.id || repo.newId('ch') }));
   const forms = stables.map(item => creerFormulaireCuisson(item, { ...options, repo, maintenant }));
@@ -228,9 +230,17 @@ export function ouvrirCuissons(items, options = {}) {
       try {
         const contexte = await capture; if (contexte.erreur) throw contexte.erreur;
         const result = await enregistrerCuissons(stables.map((item, i) => ({ ...item, form: forms[i].lire(), fichiers: forms[i].fichiers })), { ...options, repo, maintenant, recettes:contexte.recettes, memoire });
+        // Le reçu est transmis avant la résolution du dialogue, depuis les IDs réellement écrits.
+        // Un échec de lecture/présentation après commit ne transforme pas la cuisson conservée en refus.
+        if(result.rows.length&&typeof options.onEnregistre==='function'&&courante()){
+          try{const attendue=await portee,rows=await Promise.all(result.rows.map(r=>repo.get('cook_history',r.id))),actuelle=base?.get?await Promise.all([base.get('sync_state','user_id'),base.get('sync_state','editor_library_epoch:v1')]):[];
+            if(courante()&&attendue&&JSON.stringify(attendue)===JSON.stringify(actuelle)&&rows.every((r,i)=>r&&r.recipe_id===result.rows[i].recipe_id&&r.recipe_version_id===result.rows[i].recipe_version_id)){
+              try{const retour=options.onEnregistre({deja:result.deja,rows:structuredClone(rows)});if(retour?.then)Promise.resolve(retour).catch(()=>{});}catch{}
+            }
+          }catch{}
+        }
         (options.toast ?? toastDom)(result.deja ? t('Cette cuisson est déjà enregistrée.') : t('Cuisson enregistrée'));
         fermer(true);
-        if(result.rows.length&&typeof options.onEnregistre==='function')Promise.resolve().then(()=>options.onEnregistre(result)).catch(()=>{});
       } catch (e) {
         message.hidden = false; message.textContent = messageErreurCuisson(e);
         const n = stables.findIndex(item => item.id === e?.cuisson_id); if (n >= 0) forms[n].signaler(e);

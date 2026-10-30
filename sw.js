@@ -1,11 +1,13 @@
 // Service worker : coquille applicative en cache pour consultation hors connexion des recettes déjà chargées.
 // Les nouvelles demandes IA et les recherches de métadonnées ne fonctionnent pas hors connexion (spec §15).
 importScripts('./sw-rules.js');
-const VERSION = 'cuisine-os-v0.29.0-1';
+const VERSION = 'cuisine-os-v0.30.0-1';
 // Tous les modules de production sont inclus ; tests/ reste chargé à la demande.
 // La complétude de cette liste est vérifiée par tests/sync.js (graphe d'imports depuis src/app.js) : un chemin
 // manquant ferait répondre 404 à cache.addAll et l'installation entière échouerait.
 const SHELL = [
+  './src/domain/comparaison-inventaire.js', './src/domain/inventaire-archive.js',
+  './src/ui/inventaire.js', './src/ui/inventaire-formulaire.js', './src/ui/inventaire-restes.js', './src/ui/repas-garde.js', './src/ui/inventaire-comparaison.js', './src/ui/inventaire-texte.js', './src/sync/commandes-inventaire.js', './src/domain/inventaire-mutations.js', './src/domain/inventaire-persistance.js', './src/domain/inventaire-sources.js', './src/domain/inventaire-format.js', './src/domain/repas-courses.js',
   './src/domain/comparaison-cuisine.js',
   './src/ui/comparaison-cuisine.js',
 

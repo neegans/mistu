@@ -268,7 +268,7 @@ export function createMoteur({
         for (let phase = 0; phase < 32; phase += 1) {
           if (arrete || getUserId() !== ownerPasse || bilanEnvoi.erreur || bilanEnvoi.pause || bilanEnvoi.attenteConnexion) break;
           const restants = await fileDe(db, ownerPasse);
-          const lies = restants.some(e => ['source_revision','index_apply','source_transfer','translation_apply','cooking_apply'].includes(e.op) || e.store==='imports'&&e.snapshot?.kind==='traduction' || e.store==='recipe_versions'&&(e.snapshot?.parent_version_id||e.snapshot?.provenance?.derived_from) || e.edition_contexts?.length || e.payload?.edition_id || e.store === 'book_editions');
+          const lies = restants.some(e => ['source_revision','index_apply','source_transfer','translation_apply','cooking_apply','inventory_change'].includes(e.op) || e.store==='imports'&&e.snapshot?.kind==='traduction' || e.store==='recipe_versions'&&(e.snapshot?.parent_version_id||e.snapshot?.provenance?.derived_from) || e.edition_contexts?.length || e.payload?.edition_id || e.store === 'book_editions');
           if (!lies || !(bilanEnvoi.envoyes + bilanEnvoi.ajustes + bilanEnvoi.abandonnees > 0)) break;
           const suivant = await push.envoyer();
           const avance = suivant.envoyes + suivant.ajustes + suivant.abandonnees > 0;

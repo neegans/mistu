@@ -3738,3 +3738,18 @@ Chrome8 mesures/36 gestes, deux onglets sans remontage, cache unique et11 module
 
 **L7 publié et reçu le 30 octobre.** SQL0012 appliqué une seule fois à **05:26:30UTC (01 h26 HAE)**, sous transaction gardée ; SHA256 `daa0767e323514b9d344494838f71b732e5ae8aeecf3dd9b582e7a34f8bbc669`. Catalogue distant :33 fonctions/corps et droits clients exacts,5 triggers/RLS conformes,2 tables privées L5 inchangées. Les33 différences service_role sont les ACL par défaut du rôle serveur privilégié ; ni anon ni authenticated n’en hérite, vérifié à distance. Capacité cooking_persistence1 confirmée sous rôle authenticated en lecture seule ; aucune donnée métier serveur consultée.
 Code **8fb0784** poussé par avance rapide dans main ; Pages construit à **05:27:42UTC (01 h27 HAE)**. **75 fichiers** publics identiques et **10653/10653** tests publics, zéro erreur JavaScript/requête extérieure. Parcours public **8 mesures/36 gestes** : deux onglets sans remontage, même minuteur/échéance, note et photo ouverte/décodée après rechargement réellement hors ligne ; cache unique0.29.0-1 et11 modules présents. Captures publiques relues. Aucun essai physique iPhone/Siri/TM7 ni appel assistant réel. **L8–L10 et E1 restent à terminer.**
+
+
+## L8 — Repas, courses et inventaire — réception locale du 30 octobre 2026
+
+**L8 — repas, courses et inventaire : réception locale terminée, publication en préparation.**
+[Spec](docs/superpowers/specs/2026-10-29-l8-repas-inventaire-design.md), [protocole](docs/superpowers/specs/2026-10-30-l8-protocole-inventaire.md), [rapport](docs/superpowers/plans/2026-10-29-l8-repas-inventaire.md).
+Branche l8-repas-inventaire, contrat1c42241 ; base L7 code8fb0784/reçu f7e836a. Revues A/B/C/root ; aucune relecture personnelle attribuée à Neegan.
+Envies et jours sans heure, courses à convention conservée et révision explicite ; stock confirmé, consommation/fin/annulation conditionnées et restes liés à la cuisson exacte.
+**0.30.0**, cache0.30.0-1, DB6/archive7, SQL0013 additive avec inventory_changes1. Public encore0.29.0 à ce reçu.
+**11083/11083** navigateur (épingle11082, +430 depuis L7, aucun scénario retiré), zéro erreur JavaScript/requête extérieure ; Node232/232, générateur0, syntaxe89 fichiers et diff propres.
+PostgreSQL UTF8 neuf0001→0013 :201 vecteurs JS/SQL,17 refus causaux/5legacy/21 anciens RPC,175 publication,26 sources,140 ACL et écriture authenticated ; bornes6JS/4SQL, réserve23500 octets sous32768.
+Concurrence35 contrôles avec deux connexions ; deux moteurs42 contrôles/15RPC, confirmation perdue/rejeu courant, refus récupéré, archive/bootstrap et deux passes sans écho. Régressions SQL antérieures21 scripts verts.
+Chrome : inventaire11 mesures/33 gestes et repas8/28, deux onglets, rechargements réellement hors ligne,14 modules en cache unique. Captures relues ; les défauts de navigation globale à texte200% sont consignés pour L9.
+Les courses gardent leur arbitrage par ligne entre appareils ; la fusion de cases prouvée ici concerne deux onglets partageant la même base. Aucun calcul automatique de quantité, consommation ou durée de conservation.
+Aucun compte privé/appel assistant réel ni essai physique iPhone/Safari/TM7. Publication autorisée par les demandes de poursuite/déploiement. **L9–L10 et E1 restent à terminer.**

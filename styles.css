@@ -742,3 +742,30 @@ dialog::backdrop { background: var(--backdrop); }
   .cuisine-contenu { grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr); gap: 1.5rem; }
   .cuisine-minuteurs .minuteurs-liste { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 }
+
+/* L8 : listes utilisables au pouce, formulaires de stock et comparaisons lisibles. */
+.repas-groupes, .repas-fiche, .courses-fiche, .inventaire-lots { min-width: 0; overflow-wrap: anywhere; }
+.repas-planification { padding-block: .75rem; border-bottom: 1px solid var(--line); }
+.courses-sections { display: grid; gap: 1.25rem; margin-block: 1rem; }
+.courses-ligne { min-width: 0; padding-block: .9rem; }
+.courses-ligne > .check { align-items: center; min-height: 44px; width: 100%; }
+.courses-ligne > .check > div, .courses-ligne .row > *, .inventaire-lot .row > * { min-width: 0; }
+.courses-ligne .row > input { flex: 1 1 10rem; width: 100%; }
+.courses-ligne details { margin-block: .5rem; }
+.courses-libre > .field { margin-top: .75rem; }
+.courses-comparaison { margin-block: 1rem; }
+.inventaire-lot { padding: 1rem; }
+.inventaire-lots > .row > select { flex: 1 1 14rem; width: auto; max-width: 100%; }
+.inventaire-lot p { margin-block: .25rem; }
+.inventaire-lot [data-role="restant-lot"] { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.inventaire-comparaison { margin-block: 1rem; }
+.inventaire-formulaire { width: min(42rem, calc(100vw - 2rem)); max-width: calc(100vw - 2rem); max-height: calc(100dvh - 2rem); overflow: auto; overflow-wrap: anywhere; }
+.inventaire-formulaire fieldset { min-width: 0; border: 0; padding: 0; margin-block: 1rem; }
+.inventaire-formulaire .row > .field { flex: 1 1 12rem; min-width: 0; }
+.inventaire-formulaire input, .inventaire-formulaire select, .inventaire-formulaire textarea { max-width: 100%; min-width: 0; }
+:is(.repas-groupes,.repas-fiche,.courses-fiche,.inventaire-lots,.inventaire-formulaire) :is(button,.btn.small,a.btn,summary,select) { min-height: 44px; min-width: 44px; }
+@media (max-width: 599px) {
+  .inventaire-lots > .row > *, .inventaire-lot .row > .btn, .inventaire-formulaire > .row > .btn { flex: 1 1 10rem; }
+  .inventaire-formulaire { padding: 1rem; }
+  .courses-ligne .row > .btn { flex: 1 1 8rem; }
+}

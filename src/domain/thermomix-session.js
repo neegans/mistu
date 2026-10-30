@@ -8,6 +8,7 @@ export function portionsSession(session, version) {
 }
 
 export function portionsRepas(item, meal) {
+  if (item.servings_custom === false) return meal.servings ?? null;
   if (Object.hasOwn(item, 'servings')) return item.servings ?? null;
   return meal.servings ?? null;
 }

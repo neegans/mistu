@@ -1,3 +1,7 @@
+import {MAGASINS_COMPARAISON_INVENTAIRE,snapshotComparaisonInventaire,deriverComparaisonInventaire,verifierCommandesComparaisonInventaire,egalesCopiesInventaire} from '../domain/comparaison-inventaire.js';
+import {verifierCommandeInventaire,ErreurInventaire,estLotProtege,egalesInventaire,lireRecuInventaire,projectionInventaireSeed} from '../domain/inventaire-format.js';
+import {verifierBaseInventaire,appliquerTransitionInventaire} from '../domain/inventaire-mutations.js';
+import {referencesInventaire,verifierSourceInventaire,memeReferenceInventaire,MAGASINS_SOURCES_INVENTAIRE} from '../domain/inventaire-sources.js';
 import {verifierCommandeCuisine,ErreurCuisine,estLigneCuisine,egalesCuisine} from '../domain/cuisine-format.js';
 import {MAGASINS_COMPARAISON_CUISINE,snapshotComparaisonCuisine,deriverComparaisonCuisine,verifierCommandesComparaisonCuisine,egalesCopiesCuisine} from '../domain/comparaison-cuisine.js';
 import {preparerGardesVersionsStructurees} from '../domain/versions-structurees.js';
@@ -437,6 +441,7 @@ function lireCondition(c, courant, store, key, lecture) {
 // Les lectures préparatoires résolvent les parents ; les associations et cycles sont revalidés dans la transaction finale.
 async function protegerMutationRecettes(puts, conditionsInitiales, recettesInitiales, { origin = 'local', deletes = {}, editions: editionsInitiales = [], source_commands = [], cooking_commands = [] } = {}) {
   const conditions = Object.fromEntries(Object.entries(conditionsInitiales || {}).map(([s, xs]) => [s, [...xs]]));
+  if(origin==='local')for(const key of deletes.inventory||[]){const avant=await db.get('inventory',key);if(estLotProtege(avant))throw new ErreurInventaire('stock_protege');conditionUnique(conditions,'inventory',key,ancienne=>({key,fusion:r=>{if(estLotProtege(r))throw new ErreurInventaire('stock_protege');return lireCondition(ancienne,r,'inventory',key);}}));}
   if(origin==='local')for(const store of ['timer_launches','cook_sessions'])for(const key of deletes[store]||[]){const avant=await db.get(store,key);if(estLigneCuisine(store,avant))throw new ErreurCuisine('cuisson_protegee');conditionUnique(conditions,store,key,ancienne=>({key,fusion:r=>{if(estLigneCuisine(store,r))throw new ErreurCuisine('cuisson_protegee');return lireCondition(ancienne,r,store,key);}}));}
   if (origin !== 'local') return { conditions, recettes: [], editions: [] };
   if (!Array.isArray(recettesInitiales)) throw new TypeError('Les contextes de recette sont un tableau');
@@ -652,6 +657,10 @@ async function protegerMutationRecettes(puts, conditionsInitiales, recettesIniti
     const entrantes=new Map((puts[store]||[]).map(r=>[r.id,r])),touches=new Set([...entrantes.keys(),...(conditions[store]||[]).filter(c=>c.key!=null).map(c=>c.key)]);
     for(const key of touches)if(!cooking_commands.some(c=>c.store===store&&c.id===key))conditionUnique(conditions,store,key,ancienne=>({key,fusion:(courant,lecture)=>{const fusion=lireCondition(ancienne,courant,store,key,lecture),written=fusion||entrantes.get(key);if(written&&(estLigneCuisine(store,courant)||estLigneCuisine(store,written))){const before=structuredClone(courant),after=structuredClone(written);if(before)delete before.updated_at;delete after.updated_at;if(!egalesCuisine(before,after))throw new ErreurCuisine('cuisson_protegee');}return fusion;}}));
   }
+  if(origin==='local'){
+    const entrantes=new Map((puts.inventory||[]).map(r=>[r.id,r])),touches=new Set([...entrantes.keys(),...(conditions.inventory||[]).filter(c=>c.key!=null).map(c=>c.key)]);
+    for(const key of touches)conditionUnique(conditions,'inventory',key,ancienne=>({key,fusion:(courant,lecture)=>{const fusion=lireCondition(ancienne,courant,'inventory',key,lecture),written=fusion||entrantes.get(key);if(written&&(estLotProtege(courant)||estLotProtege(written))){const before=structuredClone(courant),after=structuredClone(written);if(before)delete before.updated_at;delete after.updated_at;if(!egalesInventaire(before,after))throw new ErreurInventaire('stock_protege');}return fusion;}}));
+  }
   const structurees=await preparerGardesVersionsStructurees({puts,conditions,deletes,lire:(store,id)=>base.get(store,id),lireReferencesVersion:async id=>({traductions:(await base.getAll('recipe_translations')).filter(r=>r.recipe_version_id===id),journaux:(await base.getAll('imports')).filter(r=>r.kind==='traduction'&&r.source_version_id===id)})});
   return { conditions:structurees, recettes: [...contextes.values()].map(({ contexteValide, creation, ...c }) => c), editions: [...contextesEditions.values()].map(({ contexteValide, creation, ...c }) => c) };
 }
@@ -844,6 +853,33 @@ export async function muterTraductions({metier={},internes={},commandes=[]}={}, 
  const finales=Object.fromEntries(Object.entries(protection.conditions).map(([s,xs])=>[s,s==='sync_state'?xs:xs.map(c=>c.fusion?{...c,fusion:(...a)=>{const r=c.fusion(...a);return r?taille({...r,created_at:r.created_at||now,updated_at:now}):r;}}:c)]));
  const ecrites=await base.mutate({origin,puts:{...stamped,...(locaux.length?{sync_state:locaux}:{})},deletes:{sync_state:deletes},conditions:finales,recettes:protection.recettes,editions:protection.editions,translation_commands:cmds});verifier();
  for(const s of new Set([...Object.keys(stamped),...Object.keys(ecrites||{})]))if(s!=='sync_state')emit('change',{store:s});return{metier:ecrites,internes:[...locaux,...(ecrites?.sync_state||[])]};
+}
+
+// L8 : une seule cible de stock, sans puts/fusions arbitraires fournis par le formulaire.
+export async function muterInventaire({commande,attendue}={}, {baseAttendue,owner_id,library_epoch,contexteValide}={}){
+ const base=db,fail=code=>{throw new ErreurInventaire(code);},verifier=()=>{if(base!==db||base!==baseAttendue||typeof contexteValide!=='function'||!contexteValide())fail('contexte_change');};verifier();
+ const c=structuredClone(commande),before=structuredClone(attendue??null);await verifierCommandeInventaire(c);await verifierBaseInventaire(c,before);verifier();
+ const actual=await base.get('inventory',c.id),recuPrevu=!!lireRecuInventaire(actual,c);let deja=false,resultat=actual;
+ const conditions={sync_state:[{key:'user_id',fusion:r=>{verifier();if((r?.value??null)!==owner_id)fail('compte_change');return null;}},{key:'editor_library_epoch:v1',fusion:r=>{if(r?.value!==library_epoch)fail('bibliotheque_remplacee');return null;}}]};
+ if(!recuPrevu){
+  const sourceLot=c.action==='create'?c.change.lot:c.action==='restore'?c.change.target:before;
+  const stores=await base.getSnapshot(Object.values(MAGASINS_SOURCES_INVENTAIRE)),refs=referencesInventaire(sourceLot,stores);await verifierSourceInventaire(c,sourceLot,refs);verifier();
+  for(const[k,store]of Object.entries(MAGASINS_SOURCES_INVENTAIRE))if(c.source[k])conditions[store]=[{key:c.source[k].id,fusion:r=>{verifier();if(!memeReferenceInventaire(k,r,refs[k]))fail('source_changee');return null;}}];
+ }
+ conditions.inventory=[{key:c.id,fusion:r=>{verifier();if(lireRecuInventaire(r,c)){deja=true;resultat=r;return null;}if(recuPrevu)fail('stock_change');const next=appliquerTransitionInventaire(c,r??null,{attendue:before}),now=syncNow();next.updated_at=now;if(!Object.hasOwn(next,'created_at'))next.created_at=now;if(octetsJsonbSources(next)>524288)fail('bornes');resultat=next;return next;}}];
+ await base.mutate({origin:'local',conditions,inventory_commands:puts=>(puts.inventory||[]).some(r=>r.id===c.id)?[c]:[]});verifier();emit('change',{store:'inventory'});return{deja,ligne:resultat};
+}
+
+// L8 : la résolution calcule elle-même la seule cible et garde toute proposition refusée.
+export async function reconcilierInventaire({snapshot,id,owner_id,library_epoch,recovery_id,at}={}, {baseAttendue,contexteValide}={}){
+ const base=db,fail=code=>{throw new ErreurInventaire(code);},verifier=()=>{if(base!==db||base!==baseAttendue||typeof contexteValide!=='function'||!contexteValide())fail('contexte_change');};verifier();
+ if(typeof recovery_id!=='string'||!/^inventory-recovery[_-][A-Za-z0-9_-]{1,160}$/.test(recovery_id)||!Number.isFinite(Date.parse(at)))fail('forme_invalide');
+ const avant=snapshotComparaisonInventaire(snapshot),d=deriverComparaisonInventaire({snapshot:avant,id,owner_id});await verifierCommandesComparaisonInventaire(d);verifier();
+ const state=new Map(avant.sync_state.map(r=>[r.key,r]));if((state.get('user_id')?.value??null)!==owner_id)fail('compte_change');if(state.get('editor_library_epoch:v1')?.value!==library_epoch)fail('bibliotheque_remplacee');if(avant.sync_conflicts.some(r=>r.id===recovery_id))fail('stock_change');
+ const resolution={choix:'confirmation',at,recovery_id},recovery={id:recovery_id,kind:'inventory',store:'inventory',record_id:id,user_id:owner_id,at,resolution,recovery:{format:1,locale:d.locale,confirmation:d.confirmation,commandes:d.commandes,conflits:d.conflits}},puts={sync_conflicts:[...d.conflits.map(r=>({...r,resolution})),recovery]},deletes={outbox:d.commandes.map(e=>e.seq)};
+ if(d.confirmee)puts.inventory=[d.confirmee];else if(d.locale)deletes.inventory=[id];
+ const conditions=Object.fromEntries(MAGASINS_COMPARAISON_INVENTAIRE.map(store=>[store,[{toutes:true,verifier:rows=>{verifier();const current=store==='sync_state'?snapshotComparaisonInventaire({sync_state:rows}).sync_state:rows;if(!egalesCopiesInventaire(current,avant[store]))fail('stock_change');}}]]));
+ await base.mutate({origin:'remote',puts,deletes,conditions});emit('change',{store:'inventory'});return{recuperation_id:recovery_id,confirmee:!!d.confirmee};
 }
 
 // L7 : cuisson, photos et actes conservés dans la même transaction.

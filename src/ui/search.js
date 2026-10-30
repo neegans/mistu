@@ -20,7 +20,7 @@ import { RECIPE_TYPES, DIET_TAGS } from '../model/schema.js';
 import { COVER_INPUT_MIME } from '../sync/mime.js';
 import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant, carteConnexion, texteRefusAssistant, ligneReperes, remplacerEnRevoquant, contexteFichiers } from './components.js';
 import { demarrerLectureWeb } from './import-web.js';
-import { addToMealFlow } from './meals.js';
+import { addToMealFlow,boutonEnvie } from './meals.js';
 import { demarrerConnexion } from './settings.js';
 
 const MODES = [['recipes', 'Mes recettes'], ['books', 'Mes livres'], ['web', 'Web'], ['all', 'Tout']];
@@ -180,9 +180,10 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     const card = (hit) => {
       const extra = el('div', { class: 'stack', style: { marginTop: '.4rem' } },
         hit.assessments?.length ? el('div', { class: 'chips' }, ...hit.assessments.map((a) => el('span', { class: `chip ${a.state === 'compatible' ? 'ok' : 'warn'}` }, `${label('diet', a.diet)} — ${label('diet_assessment', a.state)}`))) : null,
+        boutonEnvie(ctx,hit.doc),
         hit.timeState === 'unknown' ? el('span', { class: 'chip neutral' }, t('Durée inconnue')) : null,
         hit.why ? el('div', null, el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Pourquoi cet accord ?')), ...hit.why.map((w) => el('div', { style: { fontSize: '.9rem' } }, w.text, ' ', el('span', { class: 'badge' }, w.origin)))) : null,
-        forRecipe ? el('button', { class: 'btn small sage', onClick: (e) => { e.preventDefault(); e.stopPropagation(); addToMealFlow(ctx, hit.doc, { role: role === 'soupe' ? 'entree' : 'accompagnement', mainDoc: forRecipe, mealId: query.meal || null }); } }, t('Ajouter à mon repas')) : null);
+        (forRecipe||query.meal) ? el('button', { class: 'btn small sage', onClick: (e) => { e.preventDefault(); e.stopPropagation(); addToMealFlow(ctx, hit.doc, { role: role === 'soupe' ? 'entree' : 'accompagnement', mainDoc: forRecipe, mealId: query.meal || null }); } }, t('Ajouter à mon repas')) : null);
       return recipeCard(hit.doc, { extra, reasons: hit.reasons, ctxF, ctx });
     };
     const total = groups.admissible.length + groups.to_verify.length + groups.adaptation.length + groups.time_unknown.length;

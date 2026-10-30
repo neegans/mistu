@@ -15,6 +15,7 @@ import {mentionCycleRecette} from './corbeille.js';
 import {photosPersonnellesParRecette,photoPrincipale} from '../domain/cuisine-personnelle.js';
 import {photoVisible} from './photos-visibles.js';
 import {ouvrirCuissons,noteEnCuisine} from './cuisson.js';
+import {ouvrirCuissonsAvecRestes} from './inventaire-restes.js';
 import {getSyncGeneration} from './state.js';
 import {creerPanneauMinuteurs,commandesMinuteurEtape} from './minuteurs-session.js';
 import {creerControleurEcran,creerCommandeEcranAllume} from './ecran-allume.js';
@@ -185,7 +186,7 @@ export async function renderCook(params,query,ctx,deps={}){
   if(occupe||bilanOuvert||!estCourante()||terminer.disabled)return;bilanOuvert=true;verrouiller();voix.arreter();
   const lectureBilan=lecture,sessionBilan=structuredClone(affiche.session),active=items.find(it=>it.version_id===projection.active_version_id);
   try{const minuteurs=await service.lireMinuteurs({portee,sessionId:params.id});if(!estCourante())return;if(minuteurs.issue!=='ok'){signaler(minuteurs);return;}
-   const confirmer=deps.ouvrirCuissons??ouvrirCuissons;const ok=await confirmer(items.map(it=>({recipe:it.recipe,version:it.version,servings:it.servings,scaled:it.scaled})),{...deps,ctx,repo:depot,session:sessionBilan,cuisine:{service,portee,lecture:lectureBilan,doneAdd},suivisActifs:minuteurs.actifs.length});
+   const ok=await ouvrirCuissonsAvecRestes(items.map(it=>({recipe:it.recipe,version:it.version,servings:it.servings,scaled:it.scaled})),{...deps,ctx,repo:depot,estCourante,session:sessionBilan,cuisine:{service,portee,lecture:lectureBilan,doneAdd},suivisActifs:minuteurs.actifs.length});
    if(ok&&estCourante())(deps.navigate??navigate)(sessionBilan.meal_id?`/meals/${encodeURIComponent(sessionBilan.meal_id)}`:`/recipes/${encodeURIComponent(active.recipe.id)}`);
   }catch{if(estCourante())signaler({});}finally{bilanOuvert=false;if(estCourante()){verrouiller();if(relireEnsuite){relireEnsuite=false;actualiser();}}}
  }

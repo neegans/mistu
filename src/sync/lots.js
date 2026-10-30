@@ -1,3 +1,5 @@
+import {estCommandeInventaire,lecturesCommandeInventaire,idsVersionsSourcesInventaire,idsHistoriquesSourcesInventaire} from './commandes-inventaire.js';
+import {verifierCommandeInventaire,estLotProtege} from '../domain/inventaire-format.js';
 import {estCommandeSources,ciblesCommandeSources} from './commandes-sources.js';
 import {estCommandeProtegee,ciblesCommandeProtegee,estCommandeTraduction,estLectureTraductionSignee,lecturesCommandeTraduction,estPhaseJournalTraduction,idsVersionsSourcesTraduction} from './commandes-traduction.js';
 import {verifierCommandeTraduction} from '../domain/traductions-format.js';
@@ -13,7 +15,7 @@ import { projectionFichier, remoteDeCeCompte } from './tables.js';
 import { commandeCycle, recettesDe } from './cycle.js';
 import { commandeEdition, editionsDe, cibleCommune } from './cycle-edition.js';
 
-export const estLectureSourceSignee=(store,row)=>store==='imports'&&!!row&&(row.source_capture!==undefined||row.index_call!==undefined||row.index_storage!==undefined)||estLectureTraductionSignee(store,row)||estLigneCuisine(store,row);
+export const estLectureSourceSignee=(store,row)=>store==='imports'&&!!row&&(row.source_capture!==undefined||row.index_call!==undefined||row.index_storage!==undefined)||estLectureTraductionSignee(store,row)||estLigneCuisine(store,row)||store==='inventory'&&estLotProtege(row);
 
 export const LIMITES = { elements: 500, lot: 921600, element: 524288 };
 const evenement = e => commandeCycle(e) || estLotSources(e) || estCommandeProtegee(e)||estPhaseJournalTraduction(e);
@@ -94,7 +96,8 @@ async function elementFichier(entree, relire) {
   return { element: { store: 'files', id: entree.id, data, updated_at: data.updated_at || entree.updated_at, deleted: false } };
 }
 
-async function elementDe(entree, relire,versionsSources,historiquesSources) {
+async function elementDe(entree, relire,versionsSources,historiquesSources,stocksSources) {
+  if(estCommandeInventaire(entree)){await verifierCommandeInventaire(entree.payload);return{element:structuredClone(entree.payload)};}
   if(estCommandeCuisine(entree)){await verifierCommandeCuisine(entree.payload);return{element:structuredClone(entree.payload)};}
   if(estCommandeTraduction(entree)){await verifierCommandeTraduction(entree.payload);return{element:structuredClone(entree.payload)};}
   if(estCommandeSources(entree)){await verifierEmpreinteCommandeSources(entree.payload);return{element:structuredClone(entree.payload)};}
@@ -113,7 +116,8 @@ async function elementDe(entree, relire,versionsSources,historiquesSources) {
     return { abandonnee: true };
   }
   // Un ancien put sans copie ne peut adopter les décisions appliquées depuis sa capture.
-  const exacte=estLectureSourceSignee(entree.store,fiche)||entree.store==='recipe_versions'&&versionsSources.has(entree.id)||entree.store==='cook_history'&&historiquesSources.has(entree.id);
+  const exacte=estLectureSourceSignee(entree.store,fiche)||entree.store==='inventory'&&stocksSources.has(entree.id)||entree.store==='recipe_versions'&&versionsSources.has(entree.id)||entree.store==='cook_history'&&historiquesSources.has(entree.id);
+  if(entree.store==='inventory'&&estLotProtege(fiche))return{retenue:true,raison:'commande inventaire requise'};
   if(exacte&&!entree.snapshot)return{retenue:true,raison:'copie de lecture absente'};
   const data = exacte?structuredClone(fiche):nettoyerChaines(fiche);
   return { element: { store: entree.store, id: entree.id, data, updated_at: data.updated_at || entree.updated_at, deleted: false,
@@ -130,6 +134,7 @@ function lecturesSources(file){
   if(c?.op==='source_transfer'){groupes.set(c.transfer_id,keys);lire(c.store,c.target,keys);for(const r of c.rows||[])lire(r.store,r.data,keys);}
   else if(c?.op==='index_apply'){keys.add('scan_sessions:'+c.session_id);for(const r of c.read_set||[])keys.add('imports:'+r.journal_id);}
   else if(estCommandeTraduction(c))for(const r of lecturesCommandeTraduction(c))keys.add(r.store+':'+r.id);
+  else if(estCommandeInventaire(c))for(const r of lecturesCommandeInventaire(c))keys.add(r.store+':'+r.id);
   else if(estCommandeCuisine(c))for(const r of lecturesCommandeCuisine(c))keys.add(r.store+':'+r.id);
   else if(e.store==='imports'&&e.snapshot?.kind==='traduction'){if(e.snapshot.recipe_id)keys.add('recipes:'+e.snapshot.recipe_id);if(e.snapshot.source_version_id)keys.add('recipe_versions:'+e.snapshot.source_version_id);}
   else if(e.store==='recipe_versions'&&e.snapshot){for(const id of[e.snapshot.parent_version_id,e.snapshot.provenance?.derived_from])if(id)keys.add('recipe_versions:'+id);}
@@ -139,8 +144,9 @@ function lecturesSources(file){
 }
 
 export async function composerLots(entrees, relire,{versionsSources=new Set(),historiquesSources=new Set()}={}) {
-  versionsSources=new Set([...versionsSources,...idsVersionsSourcesTraduction({},entrees),...idsVersionsSourcesCuisine({},entrees)]);
-  historiquesSources=new Set([...historiquesSources,...idsHistoriquesSourcesCuisine({},entrees)]);
+  versionsSources=new Set([...versionsSources,...idsVersionsSourcesTraduction({},entrees),...idsVersionsSourcesCuisine({},entrees),...idsVersionsSourcesInventaire({},entrees)]);
+  historiquesSources=new Set([...historiquesSources,...idsHistoriquesSourcesCuisine({},entrees),...idsHistoriquesSourcesInventaire({},entrees)]);
+  const stocksSources=new Set(entrees.filter(e=>estCommandeInventaire(e)&&e.payload.action==='adopt').map(e=>e.id));
   const lots = [];
   const retenues = [];
   const abandonnees = []; // R-L3-28 : rien à envoyer pour ces clés, et leurs entrées sont à retirer
@@ -175,11 +181,12 @@ export async function composerLots(entrees, relire,{versionsSources=new Set(),hi
   for (const e of file) {
     const first=[...commandes.values()].filter(c=>communeSources(c,e)).sort((a,b)=>a.seq-b.seq)[0];
     const avant=file.filter(x=>x.seq<e.seq);
-    const dependTraduction=estPhaseJournalTraduction(e)||estCommandeTraduction(e)||estCommandeCuisine(e)||transfertsTraduction.has(transfertId(e))||e.store==='recipe_versions';
+    const dependTraduction=estPhaseJournalTraduction(e)||estCommandeTraduction(e)||estCommandeCuisine(e)||estCommandeInventaire(e)||transfertsTraduction.has(transfertId(e))||e.store==='recipe_versions';
     const attendLecture=dependTraduction&&[...(lectures.get(e)||[])].some(k=>!(cles.get(e)||[]).includes(k)&&file.some(x=>x!==e&&(!transfertId(e)||transfertId(x)!==transfertId(e))&&(cles.get(x)||[]).includes(k)));
-    const prealable=x=>(dependTraduction||estPhaseJournalTraduction(x)||estCommandeTraduction(x)||estCommandeCuisine(x)||transfertsTraduction.has(transfertId(x)))&&[...(lectures.get(x)||[])].some(k=>(cles.get(e)||[]).includes(k))&&![...(lectures.get(e)||[])].some(k=>(cles.get(x)||[]).includes(k));
+    const baseStock=(a,b)=>estCommandeInventaire(a)&&a.payload.action==='adopt'&&b.store==='inventory'&&b.op==='put'&&a.id===b.id;
+    const prealable=x=>baseStock(x,e)||(dependTraduction||estPhaseJournalTraduction(x)||estCommandeTraduction(x)||estCommandeCuisine(x)||estCommandeInventaire(x)||transfertsTraduction.has(transfertId(x)))&&[...(lectures.get(x)||[])].some(k=>(cles.get(e)||[]).includes(k))&&![...(lectures.get(e)||[])].some(k=>(cles.get(x)||[]).includes(k));
     const attendCommande=file.some(x=>dependDe(e,x))||avant.some(x=>evenement(x)&&communeSources(x,e)&&!dependDe(x,e)&&!prealable(x));
-    const attendContenu=(commandeEdition(e)||estLotSources(e)||estCommandeProtegee(e))&&avant.some(x=>!evenement(x)&&communeSources(x,e));
+    const attendContenu=file.some(x=>baseStock(e,x))||(commandeEdition(e)||estLotSources(e)||estCommandeProtegee(e))&&avant.some(x=>!evenement(x)&&communeSources(x,e));
     const attendParent=editionsDe(e).some(id=>file.some(x=>x.op==='put'&&x.store==='book_editions'&&x.id===id&&x.seq!==e.seq&&(!commandeCycle(e)||x.seq<e.seq)))&&!['book_editions','books'].includes(e.store);
     const bookId=e.store==='book_editions'?(e.snapshot||e.payload?.seed)?.book_id:null;
     const attendLivre=!!bookId&&file.some(x=>x.store==='books'&&x.id===bookId&&x.op==='put');
@@ -192,7 +199,7 @@ export async function composerLots(entrees, relire,{versionsSources=new Set(),hi
   const ordre=g=>evenement(g.entree)?g.entree.seq:Math.min(...g.seqs);
   groupes.sort((a,b)=>ordre(a)-ordre(b));
   for (const { entree, seqs } of groupes) {
-    const r = await elementDe(entree, relire,versionsSources,historiquesSources);
+    const r = await elementDe(entree, relire,versionsSources,historiquesSources,stocksSources);
     if (r.retenue) { retenues.push({ seq: entree.seq, seqs, raison: r.raison||'fichier en attente' }); continue; }
     if (r.abandonnee) { abandonnees.push({ seq: entree.seq, seqs, raison: 'fiche disparue' }); continue; }
     if (evenement(entree)) {fermer();lots.push({elements:[r.element],seqs});continue;}

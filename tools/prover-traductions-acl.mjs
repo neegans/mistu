@@ -3,8 +3,9 @@
 const sql=String.raw`\set ON_ERROR_STOP on
 begin;
 do $$declare f record;autorise boolean;n integer:=0;begin
- for f in select p.oid,p.oid::regprocedure as signature,p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'l6_%' loop
-  autorise:=f.signature::text in ('l6_validate_version_write(uuid,jsonb,jsonb)','l6_validate_journal_write(uuid,jsonb,text)','l6_apply_translation_command(jsonb)');
+ for f in select p.oid,p.oid::regprocedure as signature,p.proname,p.prosecdef from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'l6_%' loop
+  autorise:=f.signature::text in ('l6_validate_version_write(uuid,jsonb,jsonb)','l6_validate_journal_write(uuid,jsonb,text)','l6_apply_translation_command(jsonb)','l6_sync_push_v2(jsonb)');
+  if f.signature::text='l6_sync_push_v2(jsonb)' and f.prosecdef then raise exception 'Alias L6 élevé à tort';end if;
   if has_function_privilege('authenticated',f.oid,'execute') is distinct from autorise then raise exception 'ACL authenticated incorrecte : %',f.signature;end if;
   if has_function_privilege('anon',f.oid,'execute') or exists(select 1 from aclexplode(coalesce((select proacl from pg_proc where oid=f.oid),acldefault('f',(select proowner from pg_proc where oid=f.oid)))) a where a.grantee=0 and a.privilege_type='EXECUTE') then raise exception 'ACL anonyme/publique : %',f.signature;end if;
   n:=n+3;

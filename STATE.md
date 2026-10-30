@@ -1,10 +1,16 @@
-# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L8 EN CONSTRUCTION, 0.29.0 EN LIGNE
+# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L8 REÇU LOCALEMENT, 0.29.0 EN LIGNE
 
-**L8 — repas, courses et inventaire : contrat technique fermé avant code.**
-[Spec](docs/superpowers/specs/2026-10-29-l8-repas-inventaire-design.md), [protocole](docs/superpowers/specs/2026-10-30-l8-protocole-inventaire.md), [plan](docs/superpowers/plans/2026-10-29-l8-repas-inventaire.md).
-Branche `l8-repas-inventaire`, base L7 code8fb0784/reçu f7e836a. Revues A/B/C/root, poursuite autorisée sans relecture personnelle inventée.
-Cible0.30.0/DB6/archive7/SQL0013 ; aucun code ni test L8 à cette entrée. Public0.29.0. **L8–L10 et E1 restent à terminer.**
-
+**L8 — repas, courses et inventaire : réception locale terminée, publication en préparation.**
+[Spec](docs/superpowers/specs/2026-10-29-l8-repas-inventaire-design.md), [protocole](docs/superpowers/specs/2026-10-30-l8-protocole-inventaire.md), [rapport](docs/superpowers/plans/2026-10-29-l8-repas-inventaire.md).
+Branche l8-repas-inventaire, contrat1c42241 ; base L7 code8fb0784/reçu f7e836a. Revues A/B/C/root ; aucune relecture personnelle attribuée à Neegan.
+Envies et jours sans heure, courses à convention conservée et révision explicite ; stock confirmé, consommation/fin/annulation conditionnées et restes liés à la cuisson exacte.
+**0.30.0**, cache0.30.0-1, DB6/archive7, SQL0013 additive avec inventory_changes1. Public encore0.29.0 à ce reçu.
+**11083/11083** navigateur (épingle11082, +430 depuis L7, aucun scénario retiré), zéro erreur JavaScript/requête extérieure ; Node232/232, générateur0, syntaxe89 fichiers et diff propres.
+PostgreSQL UTF8 neuf0001→0013 :201 vecteurs JS/SQL,17 refus causaux/5legacy/21 anciens RPC,175 publication,26 sources,140 ACL et écriture authenticated ; bornes6JS/4SQL, réserve23500 octets sous32768.
+Concurrence35 contrôles avec deux connexions ; deux moteurs42 contrôles/15RPC, confirmation perdue/rejeu courant, refus récupéré, archive/bootstrap et deux passes sans écho. Régressions SQL antérieures21 scripts verts.
+Chrome : inventaire11 mesures/33 gestes et repas8/28, deux onglets, rechargements réellement hors ligne,14 modules en cache unique. Captures relues ; les défauts de navigation globale à texte200% sont consignés pour L9.
+Les courses gardent leur arbitrage par ligne entre appareils ; la fusion de cases prouvée ici concerne deux onglets partageant la même base. Aucun calcul automatique de quantité, consommation ou durée de conservation.
+Aucun compte privé/appel assistant réel ni essai physique iPhone/Safari/TM7. Publication autorisée par les demandes de poursuite/déploiement. **L9–L10 et E1 restent à terminer.**
 
 **L7 — cuisine et minuteries : publié et vérifié.**
 [Spec](docs/superpowers/specs/2026-10-29-l7-cuisine-minuteurs-design.md), [protocole](docs/superpowers/specs/2026-10-30-l7-protocole-cuisine.md), [rapport](docs/superpowers/plans/2026-10-29-l7-cuisine-minuteurs.md).

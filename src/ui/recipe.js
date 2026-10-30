@@ -25,7 +25,10 @@ import { monterPhotoPlat } from './photo-plat.js';
 import { demarrerLectureWeb, texteEchecLecture, enLigneLecture, ligneWebOuverte } from './import-web.js';
 import { demarrerConnexion } from './settings.js';
 import { estCreationIA, etiquetteCreationIA, lireCreation, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
-import { addToMealFlow } from './meals.js';
+import { addToMealFlow,boutonEnvie } from './meals.js';
+import {capturerConventionCourses,validerVolumeRepas} from '../domain/repas-courses.js';
+import {creerGardeRepas} from './repas-garde.js';
+import {ouvrirCuissonsAvecRestes} from './inventaire-restes.js';
 import { deviceId } from './import.js';
 import { createTimerLaunch } from '../domain/timers.js';
 import { lienSignet } from '../core/lien.js';
@@ -116,7 +119,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const naviguer = deps.navigate ?? navigate;
   const dire = deps.toast ?? toast;
   const enLigneWeb = () => (deps.enLigne ?? enLigneLecture)();
-  let cuissonOuverte = false;
+  let cuissonOuverte = false,listePreparee=null,listeEnCours=false;
   // Ronde 1 : l'état en ligne est RELU à la tape (la fiche n'écoute pas online / offline : le bouton peut être resté allumé) — hors ligne, rien
   // n'est écrit (§ 4.4 : « Journal : rien ») ; une erreur qui n'est pas un refus (base indisponible, quota) est journalisée et dite, jamais un rejet
   // sans gestionnaire depuis un onClick.
@@ -263,7 +266,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     el('button', { type: 'button', class: 'btn', dataset: { role: 'jai-cuisine' }, onClick: async () => {
       if (cuissonOuverte) return;
       cuissonOuverte = true;
-      try { if (await ouvrirCuissons([{ recipe, version, servings: state.servings }], { ...deps, ctx, repo: gestesLecture.repo, toast: dire })) (deps.refresh ?? refresh)(); }
+      try { if (await ouvrirCuissonsAvecRestes([{ recipe, version, servings: state.servings }], { ...deps, ctx, repo: gestesLecture.repo, toast: dire })) (deps.refresh ?? refresh)(); }
       finally { cuissonOuverte = false; }
     } }, t('J’ai cuisiné ce plat'))),etat.querySelector('.resume-reperes'));
 
@@ -307,6 +310,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
       el('small', { class: 'muted' }, t('Changer les portions, les unités ou la langue ne crée pas de nouvelle version. Les durées ne sont pas multipliées.')),
       lectureSeule ? null : el('div', { class: 'row', dataset: { role: 'autres-actions' } },
         el('a', { class: 'btn', href: `#/search${buildQuery({ for: recipe.id, role: 'salade', mode: 'all' })}` }, t('Avec quoi on mange ça ?')),
+        boutonEnvie(ctx,{recipe,version,book,edition},{repo:gestesLecture.repo,toast:dire}),
         el('button', { class: 'btn', onClick: () => addToMealFlow(ctx, { recipe, version, book, edition }, { role: recipe.type === 'salade' || recipe.type === 'soupe' || recipe.type === 'legumes' || recipe.type === 'feculent' ? 'accompagnement' : 'plat_principal' }) }, t('Ajouter à mon repas')),
         el('button', { class: 'btn', onClick: makeList }, t('Liste d’épicerie')),
         dish ? el('a', { class: 'btn', href: `#/dishes/${dish.id}` }, t('Autres recettes de ce plat')) : el('button', { class: 'btn', onClick: () => modifier(attachDish) }, t('Rattacher à un plat')))));
@@ -461,8 +465,10 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   }
 
   async function makeList() {
-    const list = { id: repo.newId('sl'), title: `${recipe.display_title || recipe.original_title}`, items: [{ recipe_id: recipe.id, recipe_version_id: version.id, servings: state.servings, title: recipe.display_title || recipe.original_title }], checked: {} };
-    return modifier(async contexte => { await gestesLecture.repo.save('shopping_lists', list, {recettes:[contexte]}); navigate(`/lists/${list.id}`); });
+    if(listeEnCours)return;const R=gestesLecture.repo,garde=creerGardeRepas(R,ctx),source=structuredClone(version);if(!gardeThermomix(source,state.servings).ok){dire(t(BLOCAGE_THERMOMIX));return;}listeEnCours=true;
+    const proposition={items:[{recipe_id:recipe.id,recipe_version_id:version.id,servings:state.servings,title:recipe.display_title||recipe.original_title,convention_snapshot:capturerConventionCourses(ctx.conventionFor(recipe))}]};if(listePreparee&&JSON.stringify(listePreparee.items)!==JSON.stringify(proposition.items))listePreparee=null;
+    const list = listePreparee||{ id: R.newId('sl'), title: `${recipe.display_title || recipe.original_title}`, items: [{ recipe_id: recipe.id, recipe_version_id: version.id, servings: state.servings, title: recipe.display_title || recipe.original_title, convention_snapshot:capturerConventionCourses(ctx.conventionFor(recipe)) }], checked: {},manual_lines:[],row_overrides:{} };
+    listePreparee=list;try{return await modifier(async contexte=>{await R.saveBatch({},await garde.options({shopping_lists:[{key:list.id,fusion:c=>{if(c){if(JSON.stringify(c.items)!==JSON.stringify(list.items))throw Error('contenu_change');return null;}return validerVolumeRepas(list);}}],recipe_versions:[{key:source.id,fusion:c=>{if(JSON.stringify(c)!==JSON.stringify(source))throw Error('version_changee');return null;}}]},[contexte]));naviguer(`/lists/${list.id}`);});}finally{listeEnCours=false;}
   }
 
   async function attachDish(contexte) {
