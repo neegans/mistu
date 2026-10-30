@@ -510,6 +510,18 @@ details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
 .cook .controls .btn { min-height: 64px; font-size: 1.1rem; justify-content: center; }
 .cook .ingredients li { display: flex; justify-content: space-between; gap: .6rem; padding: .35rem 0; border-bottom: 1px dashed var(--line); }
 .cook .ingredients li.hit { background: var(--accent-bg); border-radius: 6px; padding-left: .3rem; padding-right: .3rem; }
+.coches > li.ingredient-heading, .cook .ingredients li.ingredient-heading { display: block; padding-block: .9rem .45rem; border-bottom: 0; }
+.ingredient-heading > .lecture-segment > span { font-family: var(--serif); font-size: 1.2rem; color: var(--action); }
+.cook .ingredients li[data-ingredient-id] { display: block; min-width: 0; }
+.lecture-segment, .lecture-original { min-width: 0; overflow-wrap: anywhere; }
+.lecture-original { margin-block: .25rem; font-size: .9rem; color: var(--muted); }
+.lecture-original > summary { min-height: 44px; padding-block: .6rem; cursor: pointer; }
+.lecture-original > div { padding-inline-start: .7rem; border-inline-start: 2px solid var(--line); }
+.lecture-langue button, [data-role="langue-cuisine"] button, .editeur-traduction button { min-height: 44px; }
+.editeur-traduction, .traduction-segments, .traduction-segment { min-width: 0; }
+.editeur-traduction .btn { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.editeur-traduction .status { min-width: 0; max-width: 100%; flex-wrap: wrap; overflow-wrap: anywhere; }
+.traduction-source { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Photos, descriptions et temps : les repères restent lisibles avant les gestes. */
 .description-recette { margin: .35rem 0 .5rem; font-size: .95rem; line-height: 1.45; }
@@ -669,6 +681,9 @@ dialog::backdrop { background: var(--backdrop); }
 .editeur-sections .btn[aria-pressed="true"], .editeur-sections [aria-selected="true"] { background: var(--sage-2); color: var(--ink); }
 .editeur-ingredient, .editeur-etape { border: 1px solid var(--line); border-radius: var(--radius-btn); background: var(--card); padding: .9rem; min-width: 0; }
 .editeur-ingredient + .editeur-ingredient, .editeur-etape + .editeur-etape { margin-top: .8rem; }
+.editeur-heading { min-width: 0; border-inline-start: 3px solid var(--action); background: var(--action-bg); }
+.editeur-heading input { min-width: 0; }
+.editeur-heading + .editeur-ingredient, .editeur-ingredient + .editeur-heading, .editeur-heading + .editeur-heading { margin-top: .8rem; }
 .editeur-ligne-champs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: .65rem; }
 .editeur-recette :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select), .livre-editeur :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) { max-width: 100%; width: 100%; min-width: 0; }
 .editeur-recette textarea, .livre-editeur textarea { resize: vertical; min-height: 5rem; }

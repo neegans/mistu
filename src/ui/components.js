@@ -1,3 +1,4 @@
+import {texteLecture} from '../domain/lecture-recette.js';
 import { lireCycleEdition } from '../domain/cycle-edition.js';
 // Composants partagés : en-têtes, badges d'état, cartes, pastilles de filtres, quantités avec hypothèses, minuteries.
 import { el, formatMinutes, downloadBlob, toast } from '../core/dom.js';
@@ -419,6 +420,34 @@ export function ingredientLineEl(ri, ctx, ingredientsById) {
       ri.uncertain === true ? el('span', { class: 'chip warn', title: t('Ligne incertaine selon l’assistant') }, t('incertain')) : null),
     ri.source_text && (ri.source_text !== `${ri.quantity?.raw || ''} ${ri.unit_text || ''} ${ri.name_text || ''}`.replace(/\s+/g, ' ').trim()) && ctx.showSource
       ? el('div', { class: 'src-text' }, `${t('Texte source')} : ${ri.source_text}`) : null);
+}
+
+// L6 : segments du projecteur commun ; le rendu ne choisit ni ne recalcule la traduction.
+export function segmentLectureEl(segment, {original = true, role = null} = {}) {
+  const texte = el('span', { ...(segment.langReelle ? {lang:segment.langReelle} : {}), style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}, ...(role ? {dataset:{role}} : {}) }, segment.texte);
+  const root = el('div', {class:'lecture-segment'}, texte);
+  if (segment.etat==='manquant'||segment.etat==='perime') root.append(el('small',{class:'lecture-manquante muted',dataset:{role:'traduction-manquante'}},t(segment.etat==='perime'?'Traduction à revoir ; texte original.':'Passage non traduit ; texte original.')));
+  if(segment.citationSource)root.append(el('small',{class:'lecture-manquante muted',dataset:{role:'citation-source-tm'}},t('Réglages traduits ; noms d’aliments cités dans la langue source.')));
+  if (original && segment.traduit && segment.original !== segment.texte) root.append(el('details',{class:'lecture-original'},el('summary',null,t('Voir l’original')),el('div',{...(segment.originalLang?{lang:segment.originalLang}:{}),style:{whiteSpace:'pre-wrap'}},segment.original)));
+  return root;
+}
+export function ingredientLectureEl(ligne) {
+  const ri=ligne.ingredient, principal=ligne.principal;
+  const q=el('span',{class:'qty'},ligne.quantite);
+  if(ligne.quantiteDetail.converted)q.append(' ',el('span',{class:'est',title:ligne.quantiteDetail.assumptions?.join(' · ')||''},ligne.quantiteDetail.estimate?'≈':'↺'));
+  else if(ligne.quantiteDetail.blocked)q.append(' ',el('span',{class:'chip neutral'},t('orig.')));
+  const nom=el('span',{dataset:{role:'nom-ingredient'},...(principal.langReelle?{lang:principal.langReelle}:{})},principal.texte);
+  if(!ligne.sansQuantiteCalculee&&ligne.preparation.texte)nom.append(', ',el('span',{lang:ligne.preparation.langReelle||'',class:'muted'},ligne.preparation.texte));
+  if(ri.optional)nom.append(' ',el('span',{class:'muted'},`(${texteLecture('facultatif',ligne.locale)})`));
+  const li=el('li',{'data-ingredient-id':ri.id||''},el('div',{class:'row',style:{gap:'.4rem'}},q,nom,
+    ri.verification_state!=='verified'?el('span',{class:'chip warn'},t('À vérifier')):null,
+    ri.uncertain===true?el('span',{class:'chip warn'},t('incertain')):null,
+    ri.unit_candidates?el('span',{class:'chip warn'},`${ri.unit_text||''} ?`):null));
+  if(ligne.source.original)li.append(el('details',{class:'lecture-original'},el('summary',null,t('Texte source et quantités d’origine')),segmentLectureEl(ligne.source)));
+  if(ligne.documentaire)li.append(el('details',{class:'lecture-original'},el('summary',null,t('Traduction conservée aux quantités d’origine')),segmentLectureEl(ligne.documentaire)));
+  if(ligne.sansQuantiteCalculee&&!ri.name_text)li.append(el('small',{class:'muted',dataset:{role:'quantite-documentaire'}},t('Texte conservé aux quantités d’origine ; quantité non recalculable.')));
+  if(principal.etat==='manquant'||principal.etat==='perime'||(!ligne.sansQuantiteCalculee&&ligne.preparation.original&&['manquant','perime'].includes(ligne.preparation.etat)))li.append(el('small',{class:'lecture-manquante muted',dataset:{role:'traduction-manquante'}},t('Passage non traduit ; texte original.')));
+  return li;
 }
 
 // Bloc minuterie (spec §33) : Siri par l'utilisateur, ou raccourci installé. Aucun compteur JS n'est présenté comme alarme.

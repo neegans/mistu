@@ -1692,7 +1692,7 @@ export async function runImportCibleTests({ eq, ok }) {
         eq(lis.map((li) => [...li.querySelectorAll('.chip')].some((c) => c.textContent === 'incertain')), [false, true, false, false, true, false, false], 'fiche : la puce « incertain » sur les lignes uncertain seulement (sucre, lait)');
         eq(lis.map((li) => [...li.querySelectorAll('.chip')].filter((c) => c.textContent === 'À vérifier').length), [1, 1, 1, 1, 1, 1, 1], 'fiche : la puce « À vérifier » reste sur chaque ligne non vérifiée');
         const etapes = [...page.querySelectorAll('.steps li [data-role="texte-etape"]')];
-        eq([etapes.length, etapes[0]?.textContent, etapes[0]?.style.whiteSpace, etapes[1]?.textContent], [2, 'Peler les pommes.\nLes couper en quartiers.', 'pre-line', 'Cuire 45 min.'], 'fiche : une étape « a\\nb » est rendue entière, avec son saut de ligne (white-space: pre-line)');
+        eq([etapes.length, etapes[0]?.textContent, etapes[0]?.style.whiteSpace, etapes[1]?.textContent], [2, 'Peler les pommes.\nLes couper en quartiers.', 'pre-wrap', 'Cuire 45 min.'], 'fiche : une étape « a\\nb » est rendue entière, avec ses sauts et espaces (white-space: pre-wrap)');
         eq(reseau, 0, 'fiche : aucun réseau');
         const pageC = await renderRecipe({ id: 'rc_imp' }, { v: 'rv_corr' }, await ctxDe()); scene.append(pageC);
         const etatC = pageC.querySelector('[data-role="etat-verification"]');
@@ -1724,7 +1724,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const b = cuisine.querySelector('[data-role="bandeau-non-relue"]');
         eq([texte(b), b?.classList.contains('status'), !!b && b.compareDocumentPosition(cuisine.querySelector('.cook')) === Node.DOCUMENT_POSITION_FOLLOWING], ['Lue par l’assistant, non relue', true, true], 'cuisine (D-3) : bandeau « Lue par l’assistant, non relue » pour une extraction à vérifier, avant l’étape');
         const et = cuisine.querySelector('.step-big [data-role="texte-etape"]');
-        eq([et?.textContent, et?.style.whiteSpace], ['Peler les pommes.\nLes couper en quartiers.', 'pre-line'], 'cuisine : l’étape « a\\nb » est rendue entière (pre-line)');
+        eq([et?.textContent, et?.style.whiteSpace], ['Peler les pommes.\nLes couper en quartiers.', 'pre-wrap'], 'cuisine : l’étape « a\\nb » est rendue entière (pre-wrap)');
         const cuisineC = await renderCook({ id: 'cs_c' }, {}, await ctxCuisine([session('cs_c', ['rv_corr'])]));
         const cuisineV = await renderCook({ id: 'cs_v' }, {}, await ctxCuisine([session('cs_v', ['rv_verif'])]));
         eq([cuisineC.querySelector('[data-role="bandeau-non-relue"]'), cuisineV.querySelector('[data-role="bandeau-non-relue"]')], [null, null], 'cuisine (D-3) : bandeau absent pour une correction et après vérification');
@@ -2546,7 +2546,7 @@ export async function runImportCibleTests({ eq, ok }) {
     const ligneDe = (root, id) => root.querySelector(`[data-role="ligne-import"][data-id="${CSS.escape(id)}"]`);
     try {
       // --- 1. Domaine PUR (§ 4.7) : une lecture web est listée, avec ses gestes ; la table entière.
-      eq(D.KINDS_IMPORT, ['recette', 'index', 'web', 'classement', 'couverture', 'livre', 'thermomix', 'reperes'], 'Lots B/D/E/I2 : les sortes du journal comprennent web, classement, couverture et livre');
+      eq(D.KINDS_IMPORT, ['recette', 'index', 'web', 'classement', 'couverture', 'livre', 'thermomix', 'reperes','traduction'], 'Lots B/D/E/I2/L6 : les sortes du journal comprennent les lectures de traduction');
       eq(D.KINDS_PAGES, ['recette', 'index', 'classement'], 'lot B (P-1) : KINDS_PAGES — les sortes à pages, seules ouvertes par le chemin photo (« web » listée, jamais ouverte par lui) ; lot D (I-D11) : une ligne de classement porte des photos');
       const ICI = 'doc-ici', MOI = 'dev-ici', AUTRE = 'dev-ailleurs';
       const ilYa = (min) => new Date(Date.parse(NOW) - min * 60000).toISOString();

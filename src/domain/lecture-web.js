@@ -8,6 +8,7 @@ import { appelerAssistant, echecDomaine, LIMITES_PASSERELLE } from './passerelle
 import { validateParsedRecipe, parseJsonLoose, ErreurExtraction, BORNES_EXTRACTION, BORNES_NOMBRES, REPONSE_BRUTE_MAX } from './llm.js';
 import { MOTIF_ADRESSE, porteUneAdresse, normaliserPourAdresse } from './recherche-web.js';
 import { parseIngredientLine, detectTimers } from './lines.js';
+import { fabriquerStructureLecture } from './structure-ingredients.js';
 import { assertVocabulaire, originePhotoAdmise } from './vocabulaire.js';
 import { versionEcrite, ligneImportNeuve } from './import-cible.js';
 import { adresseImageAdmise, candidatPhotoWeb, memeAdresseImage, pointeurValide } from './photo-web.js';
@@ -194,7 +195,7 @@ export function versionHumaine(versions) {
 // dataient la lecture du jour d'« Enregistrer ») et `uncertain_fields` (VF-10 du lot A, ≤ 40 × 200 : « Incertain : adresse retirée… » et « La page
 // était longue… » survivent à la purge à 30 jours de la ligne du journal) ; le source_kind est vérifié dans les DEUX branches.
 // Lot F (§ 4.3 point 2) : `photoAnnoncee` (l'adresse que l'écran a ANNONCÉE) entre ; `photoWeb` (l'adresse à rapatrier après la transaction, ou null) sort.
-export function fabriquerLectureWeb(recette, { signet, versions = [], page = null, sourceKind = null, importId = null, modele = null, maintenant = null, remplacer = true, photoAnnoncee = null } = {}) {
+export function fabriquerLectureWeb(recette, { signet, versions = [], versionSource=versions.find(v=>v.id===signet.current_version_id)||null, sansTitresConfirme=false, page = null, sourceKind = null, importId = null, modele = null, maintenant = null, remplacer = true, photoAnnoncee = null } = {}) {
   assertVocabulaire({ source_kind: sourceKind }, 'recipes'); // la provenance porte sourceKind même quand la fiche reste intacte
   const B = BORNES_EXTRACTION;
   const ingredients = recette.ingredients.map((l) => ({ ...parseIngredientLine(l.source_text), uncertain: l.uncertain === true, verification_state: 'to_verify' }));
@@ -203,10 +204,12 @@ export function fabriquerLectureWeb(recette, { signet, versions = [], page = nul
   const titreLu = lu && !adresseStricte(lu) ? lu : null;
   const premiere = !(Array.isArray(versions) && versions.length);
   const incertains = (Array.isArray(recette.uncertain_fields) ? recette.uncertain_fields : []).filter((u) => typeof u === 'string' && Array.from(u).length <= B.champIncertain).slice(0, B.champsIncertains);
+  const structure=fabriquerStructureLecture(recette,ingredients,{newId,versionSource,sansTitresConfirme});
   const version = {
     id: newId('rv'), recipe_id: signet.id, kind: 'extraction', parent_version_id: signet.current_version_id || null, status: null,
     servings: recette.servings ?? null, prep_minutes: recette.prep_minutes ?? null, cook_minutes: recette.cook_minutes ?? null, active_minutes: null, total_minutes: recette.total_minutes ?? null,
     ingredients, steps, constraints: {}, changes: '', notes: recette.notes ?? null,
+    ...(structure?{ingredient_structure:structure}:{}),
     provenance: {
       source_url: signet.source_url, url_finale: page?.url_finale ?? null, source_kind: sourceKind, lue_le: page?.lue_le ?? null, lu_le: page?.lue_le ?? null, model: modele ?? null, generated_by: 'ai',
       auteur: page?.auteur ?? null, site: page?.site ?? null,

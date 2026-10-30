@@ -1,3 +1,34 @@
+import { runL6DepotGardesTests } from './l6-depot-gardes.js';
+import { runL6ReglagesSynchronisationTests } from './l6-reglages-synchronisation.js';
+import { runL6ArchivesTests } from './l6-archives.js';
+import { runL6TransfertsTraductionTests } from './l6-archives.js';
+import { runL6ArchivesJournauxTests } from './l6-archives.js';
+import { runL6BrouillonsAjouterTests } from './l6-brouillons-liste.js';
+import { runL6ComplementsGroupesTests } from './l6-complements-groupes.js';
+import { runL6ConsommateursTests } from './l6-consommateurs.js';
+import { runL6CuisineLangueTests } from './l6-cuisine-langue.js';
+import { runL6DepotTraductionsTests } from './l6-depot-traductions.js';
+import { runL6JournalTraductionsTests } from './l6-journal-traductions.js';
+import { runL6SyncTraductionsTests } from './l6-sync-traductions.js';
+import { runL6TraductionParcoursTests } from './l6-traduction-parcours.js';
+import { runL6TraductionsTransactionsTests } from './l6-traductions-transactions.js';
+import { runL6VersionsRepoTests } from './l6-versions-repo.js';
+import { runL6VersionsStructureesTests } from './l6-versions-structurees.js';
+import { runL6TraductionRepriseTests } from './l6-traduction-reprise.js';
+import { runL6EditeurTraductionTests } from './l6-editeur-traduction.js';
+import { runL6TraductionVolTests } from './l6-traduction-vol.js';
+import { runL6BrouillonsListeTests } from './l6-brouillons-liste.js';
+import { runL6CommandesTraductionTests } from './l6-commandes-traduction.js';
+import { runL6LectureExportsTests } from './l6-lecture-exports.js';
+import { runL6LectureEcransTests } from './l6-lecture-ecrans.js';
+import { runL6LectureRecetteTests } from './l6-lecture-recette.js';
+import { runL6PasserelleBrutTests } from './l6-passerelle-brut.js';
+import { runL6StructureIngredientsTests } from './l6-structure-ingredients.js';
+import { runL6TraductionsFormatTests } from './l6-traductions-format.js';
+import { runL6ExtractionGroupesTests } from './l6-extraction-groupes.js';
+import { runL6TraductionProviderTests } from './l6-traduction-provider.js';
+import { runL6TraductionPortionsTests } from './l6-traduction-portions.js';
+import { runL6EditeurGroupesTests } from './l6-editeur-groupes.js';
 import { runL5ComplementsRecetteTests } from './l5-complements-recette.js';
 import { runL5ComplementsRecetteUiTests } from './l5-complements-recette-ui.js';
 import { runL5JournalSnapshotTests } from './l5-journal-snapshot.js';
@@ -287,6 +318,68 @@ catch (error) { ok(false, `Suite créer avec l'IA interrompue : ${error?.message
 // --- Passerelle de l'assistant : l'app poste à la fonction Supabase avec la session, jamais à api.anthropic.com ; jeton jamais rendu.
 try { await runPasserelleTests({ eq, ok }); }
 catch (error) { ok(false, `Suite passerelle interrompue : ${error?.message || String(error)}`); }
+try { await runL6ArchivesTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6ArchivesTests : ' + (e.stack || e)); }
+try { await runL6TransfertsTraductionTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6TransfertsTraductionTests : ' + (e.stack || e)); }
+try { await runL6ArchivesJournauxTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6ArchivesJournauxTests : ' + (e.stack || e)); }
+try { await runL6BrouillonsAjouterTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6BrouillonsAjouterTests : ' + (e.stack || e)); }
+try { await runL6ComplementsGroupesTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6ComplementsGroupesTests : ' + (e.stack || e)); }
+try { await runL6ConsommateursTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6ConsommateursTests : ' + (e.stack || e)); }
+try { await runL6CuisineLangueTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6CuisineLangueTests : ' + (e.stack || e)); }
+try { await runL6DepotTraductionsTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6DepotTraductionsTests : ' + (e.stack || e)); }
+try { await runL6JournalTraductionsTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6JournalTraductionsTests : ' + (e.stack || e)); }
+try { await runL6SyncTraductionsTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6SyncTraductionsTests : ' + (e.stack || e)); }
+try { await runL6TraductionParcoursTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6TraductionParcoursTests : ' + (e.stack || e)); }
+try { await runL6TraductionsTransactionsTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6TraductionsTransactionsTests : ' + (e.stack || e)); }
+try { await runL6VersionsRepoTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6VersionsRepoTests : ' + (e.stack || e)); }
+try { await runL6VersionsStructureesTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6VersionsStructureesTests : ' + (e.stack || e)); }
+try { await runL6DepotGardesTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6DepotGardesTests : ' + (e.stack || e)); }
+try { await runL6ReglagesSynchronisationTests({ eq, ok }); }
+catch (e) { ok(false, 'runL6ReglagesSynchronisationTests : ' + (e.stack || e)); }
+try { await runL6LectureRecetteTests({ eq, ok }); }
+catch (e) { ok(false, 'L6 lecture-recette : ' + (e.stack || e)); }
+try { await runL6LectureEcransTests({ eq, ok }); }
+catch (e) { ok(false, 'L6 lecture-ecrans : ' + (e.stack || e)); }
+try { await runL6LectureExportsTests({ eq, ok }); }
+catch (e) { ok(false, 'L6 lecture-exports : ' + (e.stack || e)); }
+try { await runL6CommandesTraductionTests({ eq, ok }); }
+catch (e) { ok(false, 'L6 commandes-traduction : ' + (e.stack || e)); }
+try { await runL6BrouillonsListeTests({ eq, ok }); }
+catch (e) { ok(false, 'L6 brouillons-liste : ' + (e.stack || e)); }
+try { await runL6TraductionVolTests({ eq, ok }); }
+catch (e) { ok(false, 'L6 traduction-vol : ' + (e.stack || e)); }
+try { await runL6EditeurTraductionTests({ eq, ok }); }
+catch (e) { ok(false, 'L6 editeur-traduction : ' + (e.stack || e)); }
+try { await runL6TraductionRepriseTests({ eq, ok }); }
+catch (e) { ok(false, 'L6 traduction-reprise : ' + (e.stack || e)); }
+try { await runL6PasserelleBrutTests({ eq, ok }); }
+catch (error) { ok(false, `Suite récupération brute L6 interrompue : ${error?.message || String(error)}`); }
+try { await runL6StructureIngredientsTests({ eq, ok }); }
+catch (error) { ok(false, `Suite groupes d’ingrédients L6 interrompue : ${error?.message || String(error)}`); }
+try { await runL6TraductionsFormatTests({ eq, ok }); }
+catch (error) { ok(false, `Suite format traduction L6 interrompue : ${error?.message || String(error)}`); }
+try { await runL6ExtractionGroupesTests({ eq, ok }); }
+catch (error) { ok(false, `Suite extraction des groupes L6 interrompue : ${error?.message || String(error)}`); }
+try { await runL6TraductionProviderTests({ eq, ok }); }
+catch (error) { ok(false, `Suite appel traduction L6 interrompue : ${error?.message || String(error)}`); }
+try { await runL6TraductionPortionsTests({ eq, ok }); }
+catch (error) { ok(false, `Suite portions de traduction L6 interrompue : ${error?.message || String(error)}`); }
+try { await runL6EditeurGroupesTests({ eq, ok }); }
+catch (error) { ok(false, `Suite éditeur de groupes L6 interrompue : ${error?.message || String(error)}`); }
 
 // --- Importer une recette repérée (lot A, tâche 1) : schéma imports (DB_VERSION 4), conditions de db.mutate, repo.transitionner, archives tolérantes, vocabulaire.
 try { await runImportCibleTests({ eq, ok }); }
@@ -395,7 +488,7 @@ for (const suite of [runL5ComplementsRecetteTests, runL5ComplementsRecetteUiTest
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 9471,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 10160,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

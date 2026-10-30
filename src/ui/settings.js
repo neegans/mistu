@@ -8,19 +8,21 @@ import { refresh, currentPath } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { logError } from '../core/log.js';
 import { reprendreEnvoi, retirerEnvoi, fileDe } from '../sync/outbox.js';
+import { estCommandeTraduction, estPhaseJournalTraduction } from '../sync/commandes-traduction.js';
 import { garderIci, garderAilleurs, ignorerRenvoye, abandonnerConflitCycle } from '../sync/conflits.js';
 import { retirerMarqueur } from '../sync/backfill.js';
 import { referencesFichiers, nomFichier, lireErreursFichiers, MAGASINS_FICHIERS } from '../sync/fichiers.js';
 import { createArchive as createArchiveReel, inspectArchive, applyArchive, verifyRestored, compterFichesSynchronisees } from '../domain/backup.js';
 import { syncNow } from '../sync/clock.js';
-import { toJsonLd, toPaprikaYaml, toReadableSite } from '../domain/exporters.js';
+import {preparerLectureRecette,projeterLectureRecette} from '../domain/lecture-recette.js';
+import { toJsonLd, toPaprikaYaml, toReadableSite, toMarkdown, toRecipeText } from '../domain/exporters.js';
 import { gardeThermomix } from '../domain/thermomix.js';
 import { createZip } from '../core/zip.js';
 import { extFor } from '../domain/backup.js';
 import { etatAssistant, sessionValide } from '../domain/passerelle.js';
 import { shortcutUrl, SHORTCUT_NAME, isAppleTouchDevice } from '../domain/timers.js';
 import { STORES, SYNC_INTERNAL_STORES, APP_VERSION, ARCHIVE_FORMAT_VERSION } from '../model/schema.js';
-import { pageHeader, section, field, segmented, majPastille, sessionAssistant, TEXTE_CONNEXION, boutonSeConnecter, messageGardeRefusee, motifFichier } from './components.js';
+import { pageHeader, section, field, select, segmented, majPastille, sessionAssistant, TEXTE_CONNEXION, boutonSeConnecter, messageGardeRefusee, motifFichier } from './components.js';
 import { invalidate, setSyncState, getSyncState, relireReglages, SYNC_ROUTE_KEY } from './state.js';
 
 // Évite deux opérations d’archive concurrentes, même après un changement d’écran.
@@ -157,29 +159,36 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     el('p', { class: 'muted' }, t('Archive ZIP privée : manifeste, données par entité, photos et PDF avec empreinte SHA-256. Les secrets d’accès ne sont pas exportés. Une synchronisation ne remplace pas une sauvegarde restaurable.')),
     el('p', { class: 'muted' }, t('Les brouillons de saisie restent sur cet appareil et ne sont pas dans cette archive.'), ' ',
       el('a', { href: '#/add?section=brouillons' }, t('Retrouver mes brouillons et télécharger leur texte'))),
+    el('p', { class: 'muted' }, t('Les copies brutes des réponses de traduction restent aussi sur cet appareil. Récupère-les dans leur écran de traduction avant d’effacer cet appareil : elles ne sont ni synchronisées ni dans l’archive.')),
     backupStatus, archiveControls, restoreBox));
 
   // Exports
   const etatExport = el('div', { class: 'stack', role: 'status', 'aria-live': 'polite', dataset: { role: 'etat-export-recettes' } });
+  let langueExport='original';
+  const choisirLangueExport=select([{value:'original',label:t('Original')},{value:'fr',label:t('Français')},{value:'en',label:t('Anglais')}],langueExport,v=>{langueExport=v;});choisirLangueExport.dataset.role='langue-export';
   const preparerExport = async (includeReferences, exporter) => {
     try {
-      const bundles = exportBundles(ctx, { includeReferences });
+      const langueChoisie=langueExport,bundles=await Promise.all(exportBundles(ctx,{includeReferences}).map(async b=>b.version?{...b,lecture:projeterLectureRecette(await preparerLectureRecette({recipe:b.recipe,version:b.version,traductions:ctx.recipe_translations||[]}),{locale:langueChoisie,servings:b.version.servings,system:'original',ingredientsById:ctx.ingredientsById})}:b));
       const invalides = bundles.filter(b => !gardeThermomix(b.version).ok);
       if (invalides.length) {
         etatExport.replaceChildren(el('p', { class: 'status warn' }, t('Les recettes à revoir sont conservées comme documents. Leurs anciens réglages TM7 ne sont pas des instructions de cuisson validées.')),
           ...invalides.map(b => el('a', { class: 'btn link', href: `#/recipes/${encodeURIComponent(b.recipe.id)}?v=${encodeURIComponent(b.version.id)}` },
             t('Revoir la recette source'), ' — ', b.recipe.display_title || b.recipe.original_title)));
       } else etatExport.replaceChildren();
+      if(bundles.some(b=>b.lecture?.etat==='conflit'))etatExport.append(el('p',{class:'status warn'},t('Plusieurs traductions existent pour certaines recettes. Leur texte original est exporté ; choisis une traduction sur chaque fiche pour un export individuel.')));
       await exporter(bundles);
     } catch {
       etatExport.replaceChildren(el('p', { class: 'status warn' }, t('L’export n’a pas pu être préparé. Réessaie.')));
     }
   };
   root.append(section(t('Exporter des recettes'),
-    el('p', { class: 'muted' }, t('Formats d’échange : la version courante de chaque recette disponible, dans sa langue d’origine. Durées ou portions inconnues omises ; provenance et statut d’adaptation dans les champs source/notes.')),
+    el('p', { class: 'muted' }, t('Formats d’échange : version courante de chaque recette disponible, dans la langue choisie. Les passages manquants restent signalés dans leur langue d’origine.')),
+    field(t('Langue des recettes exportées'),choisirLangueExport),
     el('div', { class: 'row' },
       el('button', { class: 'btn', onClick: () => preparerExport(false, bundles => telechargerRecettes(new Blob([JSON.stringify(bundles.map((b) => toJsonLd(b, { documentaire: true })), null, 2)], { type: 'application/ld+json' }), 'cuisine-os-recettes.jsonld')) }, t('Recipe / JSON-LD')),
       el('button', { class: 'btn', onClick: () => preparerExport(false, bundles => telechargerRecettes(new Blob([toPaprikaYaml(bundles, { documentaire: true })], { type: 'text/yaml;charset=utf-8' }), 'cuisine-os-recettes.yml')) }, t('YAML compatible Paprika')),
+      el('button',{class:'btn',onClick:()=>preparerExport(false,bundles=>telechargerRecettes(new Blob([bundles.map(b=>toMarkdown(b)).join('\n\n---\n\n')],{type:'text/markdown;charset=utf-8'}),'cuisine-os-recettes.md'))},t('Exporter Markdown')),
+      el('button',{class:'btn',onClick:()=>preparerExport(false,bundles=>telechargerRecettes(new Blob([bundles.map(b=>toRecipeText(b)).join('\n\n---\n\n')],{type:'text/plain;charset=utf-8'}),'cuisine-os-recettes.txt'))},t('Exporter le texte')),
       el('button', { class: 'btn', onClick: () => preparerExport(true, async disponibles => {
         const bundles = disponibles.map((b) => ({ ...b, pages: (b.recipe.source_page_ids || []).map((id) => ctx.pagesById.get(id)).filter(Boolean) }));
         const shas = new Set(bundles.flatMap((b) => b.pages.map((p) => p.sha256)));
@@ -551,8 +560,7 @@ export async function abandonnerEnvoi({ db, seq, confirm, retirer = retirerEnvoi
   if (!entree) return false;
   const message = t('L’envoi de cette fiche sera abandonné ; la fiche reste sur cet appareil.');
   if (!(await confirm(message, { danger: true, okLabel: t('Abandonner cet envoi') }))) return false;
-  await retirer(db, seq);
-  return true;
+  return (await retirer(db, seq)) !== false;
 }
 
 // Trancher un conflit (spec § 5.5) : le conflit est RELU au moment du geste — l'autre bouton, un autre onglet ou la
@@ -820,15 +828,27 @@ export function syncSectionL3(model, gestes = {}) {
     for (const q of quarantaine) {
       noeuds.push(el('div', { class: 'status warn', dataset: { quarantaine: String(q.seq) } },
         el('p', null, `${q.libelle} — ${q.motif}`),
-        rangee(bouton('reessayer', t('Réessayer'), q.seq), bouton('abandonner', t('Abandonner cet envoi'), q.seq, 'btn danger'))));
+        rangee(bouton('reessayer', t('Réessayer'), q.seq), q.protegee ? null : bouton('abandonner', t('Abandonner cet envoi'), q.seq, 'btn danger')),
+        ...(q.protegee ? [el('p',null,t('Cet envoi reste conservé. Consulte la recette pour reprendre les changements.')),q.recipeId ? el('a',{class:'btn',href:`#/recipes/${encodeURIComponent(q.recipeId)}`},t('Consulter la recette')) : null] : [])));
     }
   }
   const conflits = model.conflits || [];
   if (conflits.length) {
-    if (conflits.some(c => c.kind !== 'import_cloture')) noeuds.push(el('h3', null, t('Conflits à trancher')),
+    if (conflits.some(c => !['import_cloture','translation','source'].includes(c.kind))) noeuds.push(el('h3', null, t('Conflits à trancher')),
       el('p', { class: 'muted' }, t('Choisis celle qui compte ; rien n’est fusionné.')));
     if (conflits.some(c => c.kind === 'import_cloture')) noeuds.push(el('h3', null, t('Réponses conservées après clôture')));
+    if (conflits.some(c => ['translation','source'].includes(c.kind))) noeuds.push(el('h3',null,t('Copies à consulter')));
     for (const c of conflits) {
+      if (['translation','source'].includes(c.kind)) {
+        noeuds.push(el('div',{class:'status warn stack',dataset:{conflit:String(c.id)}},
+          el('p',null,t('Cette modification n’a pas été acceptée. Ta copie reste consultable ici. Reprends les changements depuis le contenu concerné.')),
+          el('p',null,c.libelle),
+          el('details',null,el('summary',null,t('Consulter la copie conservée')),el('pre',{style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'22rem',overflow:'auto'}},c.copieLocale)),
+          c.sessionId ? el('a',{class:'btn',href:`#/import?session=${encodeURIComponent(c.sessionId)}`},t('Comparer les sources synchronisées')) : null,
+          c.recipeId ? el('a',{class:'btn',href:`#/recipes/${encodeURIComponent(c.recipeId)}`},t('Consulter la recette')) : null,
+          c.editionId ? el('a',{class:'btn',href:`#/books/${encodeURIComponent(c.editionId)}`},t('Consulter le livre')) : null));
+        continue;
+      }
       if (c.kind === 'import_cloture') {
         noeuds.push(el('div', { class: 'status stack', dataset: { conflit: String(c.id) } },
           el('p', null, t('Ce brouillon est terminé. Une autre copie reste consultable sur cet appareil, sans être appliquée.')),
@@ -1087,6 +1107,7 @@ export function syncSectionModel({ available = false, reason = null, user = null
       // Vague finale (I-G8) : une ligne files est nommée par nomFichier dès qu'un snapshot est là (sans snapshot : la forme de L3, bornée).
       libelle: e.store === 'files' && snapshot ? tronquer(nomFichier(e.id, snapshot), NOM_MAX) : `${e.store} · ${tronquer(e.id, CLE_MAX)}`,
       motif: motifEnvoi(e.last_error),
+      ...(estCommandeTraduction(e)||estPhaseJournalTraduction(e) ? {protegee:true,recipeId:e.payload?.recipe_id||e.snapshot?.recipe_id||null} : {}),
     })),
     conflits: aTrancher.map((c) => {
       const nom = c.local?.title || c.local?.name || null;
@@ -1096,6 +1117,7 @@ export function syncSectionModel({ available = false, reason = null, user = null
         dateIci: formatDate(c.local?.updated_at || c.at, { withTime: true }),
         dateAilleurs: formatDate(c.server?.updated_at || c.at, { withTime: true }),
         kind: c.kind,
+        ...(['translation','source'].includes(c.kind) ? {copieLocale:JSON.stringify(c.local??{},null,2),recipeId:c.local?.recipe_id||c.local?.target?.recipe_id||null,editionId:c.local?.edition_id||c.local?.target?.edition_id||null,sessionId:c.kind==='source'?(c.store==='scan_sessions'?c.local?.id||c.record_id:c.local?.scan_session_id||c.local?.target?.scan_session_id||null):null} : {}),
         ...(c.kind === 'cycle' ? {copieLocale:JSON.stringify(c.local ?? {},null,2),peutAbandonnerCycle:['recipes','book_editions'].includes(c.store),recipeId:c.store === 'recipes' ? c.record_id : c.local?.recipe_id || null,editionId:c.store === 'book_editions'?c.record_id:c.edition_id||c.local?.edition_id||null} : {}),
         ...(c.kind === 'import_cloture' ? { copieLocale: JSON.stringify(c.server?.data ?? {}, null, 2), recipeId: c.local?.recipe_id || null } : {}),
         // R-L3-29 : la version d'ici est DÉJÀ repartie — ce n'est pas une question posée à la personne. Jamais

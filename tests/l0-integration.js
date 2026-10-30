@@ -28,12 +28,12 @@ export async function runL0IntegrationTests({ eq, ok }) {
         const lines = [...root.querySelectorAll('[data-role=section-ingredients] ul.coches > li')];
         eq(lines.length, 3, 'L0 fiche : trois ingrédients conservés');
         ok(lines[0].textContent.includes('sel') && !lines[1].textContent.includes('beurre') && lines[2].textContent.includes('beurre'), 'L0 fiche : seules les bonnes positions reçoivent sel et beurre');
-        ok(lines[1].textContent.includes('sugar') && lines[1].textContent.includes('Traduction à compléter'), 'L0 fiche : manque au deuxième ingrédient explicite avec sa source');
+        ok(lines[1].textContent.includes('sugar') && !!lines[1].querySelector('[data-role=traduction-manquante]'), 'L0 fiche : manque au deuxième ingrédient explicite avec sa source');
         const steps = [...root.querySelectorAll('[data-role=section-preparation] ol.steps > li')];
         eq(steps.length, 2, 'L0 fiche : deux étapes malgré les paragraphes internes');
-        const paragraph = [...steps[0].querySelectorAll('div')].find(n => n.textContent === tr.translated_content.steps[0]);
-        ok(paragraph && ['pre-line', 'pre-wrap', 'break-spaces'].includes(getComputedStyle(paragraph).whiteSpace), 'L0 fiche : paragraphes traduits conservés visuellement');
-        ok(steps[1].textContent.includes('Bake.') && steps[1].textContent.includes('Traduction à compléter'), 'L0 fiche : étape non traduite annoncée à sa position');
+        const paragraph=steps[0].querySelector('[data-role=texte-etape]');
+        ok(paragraph?.textContent===tr.translated_content.steps[0]&&['pre-line','pre-wrap','break-spaces'].includes(getComputedStyle(paragraph).whiteSpace), 'L0 fiche : paragraphes traduits conservés visuellement');
+        ok(steps[1].textContent.includes('Bake.') && !!steps[1].querySelector('[data-role=traduction-manquante]'), 'L0 fiche : étape non traduite annoncée à sa position');
         eq(await repo.get('recipe_translations', tr.id), before, 'L0 fiche : lire ne migre ni ne réécrit la traduction');
       } finally { root.dispose?.(); root.remove(); }
     }));

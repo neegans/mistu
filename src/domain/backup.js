@@ -15,6 +15,7 @@ import { ligneEpoqueEditeur } from './brouillons-format.js';
 import { canoniqueSources, empreinteSources, validerRevisionSource, validerCopieSource, validerEtatSources, validerCaptureSources, validerAppelIndex, historiquePage, pagesActivesSeance, projectionIdentitePage, projectionIdentiteDocument, projectionIdentiteSeance } from './sources-format.js';
 import { validerStockageIndex } from './index-stockage.js';
 import { preparerSourcesArchive } from './transferts-source.js';
+import { contientTraductionsExactes, estLigneTraductionReservee, validerFormesTraductionsArchive, verifierPreuvesTraductionsArchive, verifierIdentitesTraductionsArchive, preparerTraductionsArchive } from './traductions-archive.js';
 
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf', 'application/epub+zip': 'epub', 'text/plain': 'txt' };
 export const extFor = (mime) => MIME_EXT[mime] || 'bin';
@@ -26,6 +27,7 @@ data/*.json    : un tableau JSON par magasin (identifiants stables, relations pa
 files/<sha256>.<ext> : scans, photos et PDF originaux, nommés par leur empreinte.
 Le manifeste peut porter l'identifiant technique du compte qui a envoyé un fichier (un uuid, pas un secret).
 Aucun secret d'accès n'est inclus. Cette archive est privée ; sa création ne publie rien.
+Les brouillons locaux et les copies brutes des réponses de traduction ne sont pas inclus.
 `;
 
 const DATA_STORES = [...ARCHIVE_DATA_STORES, 'settings'];
@@ -43,7 +45,9 @@ const porteSourcesL5 = row => record(row) && champsSourcesL5.some(k=>own(row,k))
 const exigeArchive4 = (stores,version) => version<4 && ['source_pages','source_documents','scan_sessions','imports'].some(s=>(stores[s]||[]).some(porteSourcesL5));
 const contientSourcesExactes = stores => ['source_pages','source_documents','scan_sessions'].some(s=>(stores[s]||[]).some(porteSourcesL5));
 const restaurationsSources = new WeakMap();
+const MAGASINS_CAPTURE_SOURCES = ['source_documents','source_pages','scan_sessions','imports','book_editions','recipes','recipe_versions','recipe_translations'];
 async function verifierPreuvesSources(stores) {
+  await verifierPreuvesTraductionsArchive(stores);
   await validerStockageIndex(stores.imports||[]);
   const pages=new Map((stores.source_pages||[]).map(p=>[p.id,p])),sessions=new Map((stores.scan_sessions||[]).map(s=>[s.id,s]));
   for(const journal of stores.imports||[])if(journal.source_capture) {
@@ -132,6 +136,8 @@ function validateRows(stores) {
       ids.add(row[key]);
     }
   }
+  try { validerFormesTraductionsArchive(stores); }
+  catch (e) { errors.push('Structure ou traduction invalide : ' + (e.code || 'forme_invalide')); }
   return errors;
 }
 
@@ -313,6 +319,7 @@ export async function inspectArchive(arrayBuffer) {
     }
     errors.push(...validateRows(payload.stores));
     if(exigeArchive4(payload.stores,manifest.format_version))errors.push('Les révisions de source et lectures exactes exigent le format 4.');
+    if(manifest.format_version<5&&contientTraductionsExactes(payload.stores))errors.push('Les groupes d’ingrédients et traductions exactes exigent le format 5.');
     if (manifest.format_version === 1 && (payload.stores.recipes || []).some(r => lireCycleRecette(r).id !== null)) errors.push('Une archive de format 1 ne porte pas de cycle de corbeille.');
     if (manifest.format_version < 3 && ((payload.stores.book_editions || []).some(e => lireCycleEdition(e).id !== null) || (payload.stores.recipes || []).some(r => r.restored_from_edition != null))) errors.push('Le cycle des livres exige le format 3.');
     const hashes = new Set();
@@ -365,6 +372,7 @@ function requireInspection(inspection, mode) {
   if (!inspection?.ok || !record(payload) || !Array.isArray(payload.files) || (payload.missing != null && !Array.isArray(payload.missing))) throw new Error('Archive non validée');
   const errors = validateRows(payload.stores);
   if(exigeArchive4(payload.stores,inspection.manifest?.format_version))errors.push('Les révisions de source et lectures exactes exigent le format 4.');
+  if(inspection.manifest?.format_version<5&&contientTraductionsExactes(payload.stores))errors.push('Les groupes d’ingrédients et traductions exactes exigent le format 5.');
   if (inspection.manifest?.format_version === 1 && (payload.stores.recipes || []).some(r => lireCycleRecette(r).id !== null)) errors.push('Une archive de format 1 ne porte pas de cycle de corbeille.');
   if (inspection.manifest?.format_version < 3 && ((payload.stores.book_editions || []).some(e => lireCycleEdition(e).id !== null) || (payload.stores.recipes || []).some(r => r.restored_from_edition != null))) errors.push('Le cycle des livres exige le format 3.');
   const hashes = new Set();
@@ -412,7 +420,8 @@ export function compterFichesSynchronisees(inspection) {
 // `applyArchive` écrit par `db.putBatch` sans passer par `repo` — une archive d'avant cette vague ramenait donc des
 // fiches sales, et la fiche locale (sale) différait de la copie du serveur (que `lots.js` nettoie à l'envoi) à
 // instants ÉGAUX : le conflit perpétuel revenait par la porte de l'archive. Un `Blob` traverse intact.
-const ficheRestauree = (name, row, {sourcesExactes=false}={}) => {
+const ficheRestauree = (name, row, {sourcesExactes=false,traductionsExactes=false}={}) => {
+  if((traductionsExactes&&name==='recipe_versions')||estLigneTraductionReservee(name,row))return structuredClone(row);
   if((sourcesExactes&&['source_pages','source_documents','scan_sessions'].includes(name))||(name==='imports'&&porteSourcesL5(row)))return structuredClone(row);
   return SYNC_STORES.includes(name)&&record(row)?nettoyerChaines(row):row;
 };
@@ -428,17 +437,17 @@ const ficheRestauree = (name, row, {sourcesExactes=false}={}) => {
 //     un neuf — en fusion comme en remplacement. Sans cela le serveur garderait sa version (I7 : updated_at
 //     strictement supérieur gagne) et la restauration ne se verrait sur aucun autre appareil. Un remplacement ne
 //     supprime rien chez le fournisseur pour autant : ce qui n'est pas dans l'archive y reste (dit par Réglages).
-const normaliserFiche = (name, row, { horodater, sourcesExactes=false }) => {
-  const fiche = ficheRestauree(name, row, {sourcesExactes});
+const normaliserFiche = (name, row, { horodater, sourcesExactes=false, traductionsExactes=false }) => {
+  const fiche = ficheRestauree(name, row, {sourcesExactes,traductionsExactes});
   if (typeof horodater === 'function') fiche.updated_at = horodater();
   else if (!fiche.updated_at) fiche.updated_at = syncNow();
   return fiche;
 };
-function normaliserFiches(batch, { horodater, sourcesExactes=false }) {
+function normaliserFiches(batch, { horodater, sourcesExactes=false, traductionsExactes=false }) {
   for (const name of SYNC_STORES) {
     const rows = batch[name];
     if (!Array.isArray(rows)) continue;
-    for (const [i, row] of rows.entries()) if (record(row)) rows[i] = normaliserFiche(name, row, { horodater, sourcesExactes });
+    for (const [i, row] of rows.entries()) if (record(row)) rows[i] = normaliserFiche(name, row, { horodater, sourcesExactes, traductionsExactes });
   }
 }
 
@@ -552,12 +561,14 @@ export async function applyArchive(db, inspection, { mode = 'merge', horodater =
   const owner = (await db.get('sync_state', 'user_id'))?.value ?? null;
   const divergences = await conflitsCyclesArchive(db, inspection, { mode });
   if (divergences.length) throw new ErreurCycleArchive(divergences);
-  const sourcesAvant=await db.getSnapshot(['source_documents','source_pages','scan_sessions','imports','book_editions','recipes']);
+  const sourcesAvant=await db.getSnapshot(MAGASINS_CAPTURE_SOURCES);
   verifierIdentitesSources(inspection.payload.stores,sourcesAvant);
+  verifierIdentitesTraductionsArchive(inspection.payload.stores,sourcesAvant);
   let batch = structuredClone(restoredStores(inspection));
-  normaliserFiches(batch, { horodater, sourcesExactes:contientSourcesExactes(batch) });
+  normaliserFiches(batch, { horodater, sourcesExactes:contientSourcesExactes(batch), traductionsExactes:contientTraductionsExactes(batch) });
   const transfert=await preparerSourcesArchive({batch,snapshot:sourcesAvant,owner_id:owner});
-  batch=transfert.batch;
+  const traductions=await preparerTraductionsArchive({batch:transfert.batch,snapshot:sourcesAvant,owner_id:owner});
+  batch=traductions.batch;
   const fusion = mode === 'merge';
   const maintenant = new Date().toISOString();
   for (const file of inspection.payload.files) {
@@ -583,7 +594,7 @@ export async function applyArchive(db, inspection, { mode = 'merge', horodater =
   const cycleGarde = { toutes: true, verifier: courantes => {
     locales.recipes = courantes;
     verifierIdentitesSources(batch,locales);
-    for(const store of ['source_documents','source_pages','scan_sessions','imports','book_editions','recipes']) {
+    for(const store of MAGASINS_CAPTURE_SOURCES) {
       if(canonical(locales[store])!==canonical(sourcesAvant[store]))throw new ErreurSourcesArchive(store,null);
     }
     const deplaces = deplacementsGraphes(batch, locales);
@@ -592,12 +603,13 @@ export async function applyArchive(db, inspection, { mode = 'merge', horodater =
   } };
   const { recettes: contextes, editions } = capturerContextesInitiaux(batch, { owner_id: owner });
   const epoqueEditeur=mode==='replace'?ligneEpoqueEditeur():null;
-  await db.mutate({ puts: {...batch,...(epoqueEditeur?{sync_state:[epoqueEditeur]}:{})}, origin: 'local', archive_import: true, source_commands:transfert.source_commands, recettes: contextes, editions, conditions: { ...(conditions.length ? { files: conditions } : {}), ...liensGardes, recipes: [cycleGarde],
+  await db.mutate({ puts: {...batch,...(epoqueEditeur?{sync_state:[epoqueEditeur]}:{})}, origin: 'local', archive_import: true, source_commands:[...transfert.source_commands,...traductions.source_commands], translation_commands:traductions.translation_commands, recettes: contextes, editions, conditions: { ...(conditions.length ? { files: conditions } : {}), ...liensGardes, recipes: [cycleGarde],
     sync_state: [{ key: 'user_id', fusion: courant => { if ((courant?.value ?? null) !== owner) throw new Error('Le compte a changé pendant la restauration.'); return null; } }] },
     clearStores: mode === 'replace' ? Object.keys(STORES).filter((s) => !SYNC_INTERNAL_STORES.includes(s) && s !== 'assistant_config') : [] });
   const normalisationsSources=(batch.scan_sessions||[]).filter(s=>s.source_state).map(s=>({id:s.id,source_state:structuredClone(s.source_state),source_receipts:structuredClone(s.source_receipts||[])}));
-  restaurationsSources.set(inspection,{db,normalisationsSources});
-  return { ...Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length])), files: conditions.length, originauxConserves, normalisationsSources };
+  const normalisationsTraductions=(batch.recipe_translations||[]).filter(t=>t.alignment_format===2).map(t=>({id:t.id,revision:t.revision,publication_receipts:structuredClone(t.publication_receipts),publication_receipt_floor:t.publication_receipt_floor}));
+  restaurationsSources.set(inspection,{db,normalisationsSources,normalisationsTraductions});
+  return { ...Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length])), files: conditions.length, originauxConserves, normalisationsSources, normalisationsTraductions };
 }
 
 // Comparaison JSON indépendante de l’ordre des propriétés, sensible à l’ordre des tableaux.
@@ -619,15 +631,17 @@ function canonicalSansHeure(value) {
 // `horodate` : la restauration a réhorodaté les magasins synchronisés (compte connecté, cf. applyArchive).
 // La SEULE différence tolérée est alors l’heure de modification, et seulement sur un magasin synchronisé — sans
 // cette tolérance, chaque restauration d’un compte connecté serait annoncée comme une restauration en écart.
-export async function verifyRestored(db, inspection, { mode = 'merge', horodate = false, normalisationsSources = null } = {}) {
+export async function verifyRestored(db, inspection, { mode = 'merge', horodate = false, normalisationsSources = null, normalisationsTraductions = null } = {}) {
   requireInspection(inspection, mode);
   const synchronises = new Set(SYNC_STORES);
   const diffs = [];
   const snapshot = await db.getSnapshot(Object.keys(STORES));
   const expected = restoredStores(inspection);
   const sourcesExactes=contientSourcesExactes(expected);
+  const traductionsExactes=contientTraductionsExactes(expected);
   const preuve=restaurationsSources.get(inspection);
   const normalisations=normalisationsSources||(preuve?.db===db?preuve.normalisationsSources:[]);
+  const traductions=normalisationsTraductions||(preuve?.db===db?preuve.normalisationsTraductions:[])||[];
   const currentStores = Object.fromEntries(DATA_STORES.map((name) => [name, snapshot[name]]));
   diffs.push(...validateRows(currentStores));
   for (const name of DATA_STORES) {
@@ -639,7 +653,8 @@ export async function verifyRestored(db, inspection, { mode = 'merge', horodate 
       // R61 : la fiche attendue est celle que la restauration a PROMIS d'écrire — nettoyée pour un magasin
       // synchronisé. Comparer la fiche brute de l'archive annoncerait un écart pour chaque caractère de contrôle
       // délibérément retiré, et toute restauration d'une vieille archive finirait en rouge.
-      const row = ficheRestauree(name, brute, {sourcesExactes});
+      const row = ficheRestauree(name, brute, {sourcesExactes,traductionsExactes});
+      if(name==='recipe_translations'&&row.alignment_format===2){const n=traductions.find(t=>t.id===row.id);if(n){row.revision=n.revision;row.publication_receipts=structuredClone(n.publication_receipts);row.publication_receipt_floor=n.publication_receipt_floor;}}
       if(name==='scan_sessions'&&row.source_state) {
         const normalisation=normalisations.find(s=>s.id===row.id);
         if(normalisation){row.source_state=structuredClone(normalisation.source_state);row.source_receipts=structuredClone(normalisation.source_receipts);}

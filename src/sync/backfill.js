@@ -1,6 +1,8 @@
 import {estLectureSourceSignee} from './lots.js';
 import {preparerPremiereLiaisonTransfert} from '../domain/transfert-premiere-liaison.js';
 import {preparerSourcesArchive} from '../domain/transferts-source.js';
+import {preparerTraductionsArchive} from '../domain/traductions-archive.js';
+import {estCommandeProtegee,ciblesCommandeProtegee} from './commandes-traduction.js';
 import {estCommandeSources,ciblesCommandeSources,CLE_SOURCE_CONFIRMEE} from './commandes-sources.js';
 // Envoi initial (spec § 5.2) : tout ce qui existait AVANT la connexion est mis en file, table par table, commandé
 // par des marqueurs — pas par user_id. Reprenable : une table interrompue est rejouée en entier (le dédoublonnage de
@@ -85,8 +87,25 @@ export async function envoiInitial({ db, getUserId, isActivitySynced = () => fal
       await db.mutate({origin:'device',puts,deletes:{outbox:anciens.map(e=>e.seq)},conditions});snapshot=await db.getSnapshot();file=(snapshot.outbox||[]).filter(e=>estDeCeCompte(e,user_id));
     }
   }
+  if(tables.length){
+    const couverts=new Set(file.filter(estCommandeProtegee).flatMap(e=>ciblesCommandeProtegee(e.payload).map(r=>r.store+':'+r.id)));
+    const confirme=(store,id)=>(snapshot.sync_state||[]).some(r=>r.key===CLE_SOURCE_CONFIRMEE(store,id)&&r.value?.user_id===user_id&&r.value.data);
+    // Une chaîne locale déjà capturée garde ses phases. Seuls les historiques sans intention deviennent des restores.
+    const capturesImports=new Set(file.filter(e=>e.store==='imports').map(e=>e.id));
+    const imports=(snapshot.imports||[]).filter(r=>r.kind==='traduction'&&!capturesImports.has(r.id)&&!couverts.has('imports:'+r.id)&&!confirme('imports',r.id));
+    const traductions=(snapshot.recipe_translations||[]).filter(r=>r.alignment_format===2&&!couverts.has('recipe_translations:'+r.id)&&!confirme('recipe_translations',r.id));
+    if(imports.length||traductions.length){
+      const idsImports=new Set(imports.map(r=>r.id)),idsTraductions=new Set(traductions.map(r=>r.id));
+      const p=await preparerTraductionsArchive({batch:{imports,recipe_translations:traductions},snapshot:{...snapshot,imports:(snapshot.imports||[]).filter(r=>!idsImports.has(r.id)),recipe_translations:(snapshot.recipe_translations||[]).filter(r=>!idsTraductions.has(r.id))},owner_id:user_id,purpose:'bootstrap'});
+      const cles=p.couvertes,anciens=file.filter(e=>e.op==='put'&&cles.has(e.store+':'+e.id)),identique=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
+      const conditions={sync_state:[gardeCompteCycle(user_id,getUserId)],outbox:[{toutes:true,verifier:rows=>{const cible=rows.filter(e=>estDeCeCompte(e,user_id));if(!identique(cible,file))throw Error('File changée pendant la préparation des traductions');}}]};
+      for(const store of ['recipes','recipe_versions','recipe_translations','imports','book_editions'])conditions[store]=[{toutes:true,verifier:rows=>{if(!identique(rows,snapshot[store]||[]))throw Error('Sources de traduction changées pendant la préparation');}}];
+      await db.mutate({origin:'device',puts:{outbox:[...p.source_commands,...p.translation_commands].map(c=>({user_id,store:c.store,id:c.id,op:c.op,payload:c,tries:0})),recipe_translations:p.batch.recipe_translations},deletes:{outbox:anciens.map(e=>e.seq)},conditions});
+      snapshot=await db.getSnapshot();file=(snapshot.outbox||[]).filter(e=>estDeCeCompte(e,user_id));
+    }
+  }
   // Une intention déjà capturée garde son contenu et sa base, même incomplète : jamais de second put rebasé.
-  const captures = new Set(file.flatMap(e => [`${e.store}:${e.id}`, ...(e.op === 'source_batch' ? (e.payload?.rows || []).map(r => `${r.store}:${r.id}`) : estCommandeSources(e)?ciblesCommandeSources(e.payload).map(r=>`${r.store}:${r.id}`):[])]));
+  const captures = new Set(file.flatMap(e => [`${e.store}:${e.id}`, ...(e.op === 'source_batch' ? (e.payload?.rows || []).map(r => `${r.store}:${r.id}`) : estCommandeProtegee(e)?ciblesCommandeProtegee(e.payload).map(r=>`${r.store}:${r.id}`):[])]));
   const capture = capturerContextesInitiaux(snapshot, { owner_id: user_id });
   const identique = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
   const garde = attendu => current => { if (!identique(current, attendu)) throw new Error('Données initiales modifiées pendant la capture'); return null; };
@@ -94,7 +113,7 @@ export async function envoiInitial({ db, getUserId, isActivitySynced = () => fal
   // conservée, bloquée et nommée, plutôt que recevoir les droits du livre tel qu'il est aujourd'hui.
   const anciens = [], copies = [];
   for (const e of file) {
-    if (estCommandeSources(e) || ['lifecycle', 'source_batch'].includes(e.op) || e.edition_contexts || e.lifecycle_blocked || e.store === 'files') continue;
+    if (estCommandeProtegee(e) || ['lifecycle', 'source_batch'].includes(e.op) || e.edition_contexts || e.lifecycle_blocked || e.store === 'files') continue;
     const contexte = contexteInitialPour(capture, e.store, e.id);
     if (!contexte.edition_contexts?.length) continue;
     const current = (snapshot[e.store] || []).find(r => keyOf(e.store, r) === e.id);
@@ -139,7 +158,7 @@ export async function envoiInitial({ db, getUserId, isActivitySynced = () => fal
       const puts = { outbox: morceau.map(r => {
         const contexte = contexteInitialPour(capture, table, keyOf(table, r));
         return { user_id, store: table, id: keyOf(table, r), op: 'put', updated_at: r.updated_at || null, tries: 0,
-          ...contexte, ...(contexte.edition_contexts||estLectureSourceSignee(table,r) ? { snapshot: structuredClone(r) } : {}) };
+          ...contexte, ...(contexte.edition_contexts||table==='recipe_versions'||estLectureSourceSignee(table,r) ? { snapshot: structuredClone(r) } : {}) };
       }) };
       if (!puts.outbox.length) delete puts.outbox;
       if (dernier) puts.sync_state = [{ key: MARQUEUR(table), value: 'fait' }];

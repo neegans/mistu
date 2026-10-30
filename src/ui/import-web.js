@@ -5,7 +5,8 @@ import { destinationApresRecette } from './actions-contenu.js';
 // partagé avec l'extraction de pages : I-B3) ; toute écriture passe par repo.saveBatch conditionné (création, I-2 du lot A) ou repo.transitionner
 // (I-10) ; l'adresse lue est celle du signet RELU en base, jamais celle de l'écran (D-B4). Sens unique : ce module n'importe jamais
 // ./import-cible.js (D-B13). Gestes injectables { repo, fetch, maintenant, enLigne, battementMs, langue } : la suite n'ouvre aucun réseau.
-import { el, toast as toastDom, chooseDialog, formatDate } from '../core/dom.js';
+import { el, toast as toastDom, chooseDialog, confirmDialog, formatDate } from '../core/dom.js';
+import {projectionVersionEditeur,canoniqueEditeur} from '../domain/brouillons-format.js';
 import { t, getUiLocale } from '../core/i18n.js';
 import { navigate as naviguerDom } from '../core/router.js';
 import { logError } from '../core/log.js';
@@ -255,7 +256,7 @@ async function marquerIllisible(repo, ligne) {
   try { await repo.transitionner('imports', ligne.id, { attendus: ['a_verifier'], patch }); }
   catch (e) { if (!estRefus(e)) logError('import_web.revalidation', { error: e, id: ligne.id }); }
 }
-export async function enregistrerLecture(importId, { repo = repoModule, remplacer = null, maintenant = horloge, choisir = chooseDialog, cle = null, ctx = null, fetch: fetchInjecte = undefined, enLigne = () => enLigneFlag, photoAnnoncee = null, contexte = null } = {}) {
+export async function enregistrerLecture(importId, { repo = repoModule, remplacer = null, maintenant = horloge, choisir = chooseDialog, confirmer=confirmDialog, versionSource:sourceAffichee=undefined, cle = null, ctx = null, fetch: fetchInjecte = undefined, enLigne = () => enLigneFlag, photoAnnoncee = null, contexte = null } = {}) {
   const ligne = await repo.get('imports', importId);
   if (!ligne || ligne.kind !== 'web' || ligne.status !== 'a_verifier') return refus('statut');
   if (cle !== null && cleLecture(ligne) !== cle) return refus('lecture'); // la lecture affichée a été remplacée : rien d'écrit, l'écran se redessine
@@ -271,6 +272,9 @@ export async function enregistrerLecture(importId, { repo = repoModule, remplace
   if (!recetteActiveDansContexte(fiche.signet, ctx)) return refus('transition');
   const garde = contexte || await capturerRecette(repo, fiche.signet, { ctx });
   if (!memeCaptureImport(ligne, garde) || (Object.hasOwn(ligne, 'owner_id') && ligne.owner_id !== garde.owner_id)) return refus('transition');
+  const versionSource=structuredClone(sourceAffichee===undefined?(ctx?.versionsById?.get(fiche.signet.current_version_id)||fiche.versions.find(v=>v.id===fiche.signet.current_version_id)||null):sourceAffichee);
+  const baseVersion=versionSource?canoniqueEditeur(projectionVersionEditeur(versionSource)):null;
+  if((fiche.signet.current_version_id??null)!==(versionSource?.id??null))return refus('transition');
   let choix = remplacer;
   while (choix === null && versionHumaine(fiche.versions)) {
     // Défaut « non » (comme I-5 du lot A) : la première option est « Ajouter sans remplacer ».
@@ -279,17 +283,24 @@ export async function enregistrerLecture(importId, { repo = repoModule, remplace
     if (r !== 'ajouter' && r !== 'remplacer') return { issue: 'annule' };
     fiche = await relire();
     if (!fiche) return refus('inconnu');
+    const parente=fiche.versions.find(v=>v.id===fiche.signet.current_version_id)||null;
+    if((fiche.signet.current_version_id??null)!==(versionSource?.id??null)||(parente?canoniqueEditeur(projectionVersionEditeur(parente)):null)!==baseVersion)return refus('transition');
     if (fondement(fiche) === avant) choix = r === 'remplacer'; // sinon la question est reposée (ou n'a plus lieu d'être)
   }
+  let sansTitresConfirme=false;
+  if(Object.hasOwn(versionSource||{},'ingredient_structure')&&!lu.recette.ingredient_blocks){
+    sansTitresConfirme=await confirmer(t('Garder cette lecture sans titres de groupe ?'),{body:el('p',null,t('Les ingrédients de cette nouvelle version garderont leur ordre. Les titres de la version originale resteront consultables. La réponse déjà reçue sera conservée si tu annules.'))});
+    if(!sansTitresConfirme)return{issue:'annule'};
+  }
   // Lot F (§ 4.3 point 2, S-12) : l'adresse ANNONCÉE par l'écran voyage jusqu'au fabricant, qui ne rend `photoWeb` que si elle est encore candidate.
-  const fab = fabriquerLectureWeb(lu.recette, { signet: fiche.signet, versions: fiche.versions, page: lu.page, sourceKind: lu.source_kind, importId: ligne.id, modele: modeleBorne(ligne.model), maintenant: maintenant(), photoAnnoncee, ...(choix === false ? { remplacer: false } : {}) });
+  const fab = fabriquerLectureWeb(lu.recette, { signet: fiche.signet, versions: fiche.versions,versionSource,sansTitresConfirme, page: lu.page, sourceKind: lu.source_kind, importId: ligne.id, modele: modeleBorne(ligne.model), maintenant: maintenant(), photoAnnoncee, ...(choix === false ? { remplacer: false } : {}) });
   const cleLue = cleLecture(ligne);
   const cloture = (c) => { if (cleLecture(c) !== cleLue) throw new TransitionRefusee('imports', ligne.id, c.status); return { status: 'enregistre', reponse_brute: null, finished_at: maintenant() }; };
   // Revue finale du lot F (D-F16) : la fiche s'écrit par une condition { key, fusion } — les trois champs de la photo relus DANS la transaction (une descente
   // ou « Choisir une image » engagée après relire() n'est plus effacée) ; seul le rapatriement attendu (D-F18) repose photo_source_url, sur une fiche relue
   // sans photo valide. Supprimée entre-temps : jamais ressuscitée (refus inconnu, rien d'écrit).
   const ficheDans = (c) => {
-    if (!c) throw new TransitionRefusee('recipes', fiche.signet.id, null);
+    if (!c||(c.current_version_id??null)!==(versionSource?.id??null)) throw new TransitionRefusee('recipes', fiche.signet.id, null);
     const r = { ...fab.recipe };
     for (const champ of ['photo_sha256', 'photo_origin', 'photo_source_url']) { if (Object.hasOwn(c, champ)) r[champ] = champ === 'photo_origin' ? originePhotoAdmise(c[champ]) : c[champ]; else delete r[champ]; }
     if (fab.photoWeb && !pointeurValide(c)) r.photo_source_url = fab.photoWeb;
@@ -297,7 +308,8 @@ export async function enregistrerLecture(importId, { repo = repoModule, remplace
     return r;
   };
   try {
-    await repo.transitionner('imports', ligne.id, { attendus: ['a_verifier'], patch: cloture, puts: { recipe_versions: [fab.version] }, recettes: [garde], ...(choix === false ? {} : { conditions: { recipes: [{ key: fiche.signet.id, fusion: ficheDans }] } }) });
+    const conditions={recipes:[{key:fiche.signet.id,fusion:c=>{if(choix!==false)return ficheDans(c);if(!c||(c.current_version_id??null)!==(versionSource?.id??null))throw new TransitionRefusee('recipes',fiche.signet.id,null);return null;}}],...(versionSource?{recipe_versions:[{key:versionSource.id,fusion:c=>{if(!c||canoniqueEditeur(projectionVersionEditeur(c))!==baseVersion)throw new TransitionRefusee('recipe_versions',versionSource.id,null);return null;}}]}:{})};
+    await repo.transitionner('imports', ligne.id, { attendus: ['a_verifier'], patch: cloture, puts: { recipe_versions: [fab.version] }, recettes: [garde],conditions });
   } catch (e) {
     if (e?.name === 'ErreurCycleRecette') return refus(e.code === 'source_absente' ? 'inconnu' : 'transition');
     if (estRefus(e)) return refus(e.store === 'recipes' ? 'inconnu' : 'transition'); // enregistré, ignoré ou relu par un autre onglet juste avant : rien d'écrit
@@ -314,7 +326,7 @@ export async function enregistrerLecture(importId, { repo = repoModule, remplace
 // Ouvert par renderImportCible quand la fiche porte une adresse (sens unique). Gestes injectables { repo, navigate, toast, fetch, maintenant,
 // enLigne, battementMs, choisir, veilleMs }. L'état est relu dans la base à chaque redessin ; le résultat d'une lecture est revalidé à chaque rendu (I-B2) ;
 // tout texte lu est rendu en nœud texte ; l'hôte RECALCULÉ est toujours dit en premier (I-B5).
-export async function renderImportWeb(params, query, ctx, { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, choisir = chooseDialog, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = {}) {
+export async function renderImportWeb(params, query, ctx, { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, choisir = chooseDialog, confirmer=confirmDialog, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = {}) {
   const recipe = ctx?.recipesById?.get(params?.id);
   const root = el('div', null);
   // lu : la lecture relue (relireResultat) de la ligne a_verifier, calculée UNE fois par chargement (ronde 1) — null = illisible ou pas de lecture.
@@ -323,6 +335,7 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
   if (!recetteActiveDansContexte(recipe, ctx)) return mentionCycleRecette(recipe, ctx?.editionsById?.get(recipe.edition_id));
   const contexte = await capturerRecette(repo, recipe, { ctx });
+  const versionSource=structuredClone(recipe.current_version_id?(ctx?.versionsById?.get(recipe.current_version_id)||await repo.get('recipe_versions',recipe.current_version_id)||null):null);
   const lien = lienSignet(recipe.source_url);
   const https = lien.ok && lien.href.startsWith('https:');
   const connecter = () => demarrerConnexion(ctx?.sync?.auth);
@@ -395,7 +408,7 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
     const L = etat.ligne; if (!L || etat.occupe) return;
     etat.occupe = true; dessiner();
     let r = null;
-    try { r = await enregistrerLecture(L.id, { repo, maintenant, choisir, cle: cleLecture(L), ctx, fetch: fetchInjecte, enLigne, photoAnnoncee: etat.photoAnnoncee, contexte }); }
+    try { r = await enregistrerLecture(L.id, { repo, maintenant, choisir,confirmer,versionSource, cle: cleLecture(L), ctx, fetch: fetchInjecte, enLigne, photoAnnoncee: etat.photoAnnoncee, contexte }); }
     catch (e) { logError('import_web.enregistrer', { error: e, id: L.id }); toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); }
     finally { etat.occupe = false; }
     if (r?.issue === 'enregistre' && root.isConnected) { toast(t('Recette enregistrée')); navigate(destinationApresRecette(recipe.id,query,ctx,{v:r.versionId})); return; }

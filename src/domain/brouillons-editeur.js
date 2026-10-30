@@ -51,7 +51,7 @@ export function creerServiceBrouillons({repo,getGeneration,maintenant=nowIso,new
  async function ligneRecuperable(id,p){const g=await scope(p),row=await g.base.get('sync_state',cleBrouillon(id));g.verifier();if(!row||(row.value?.owner_id!==p.owner_id&&!anonymeAdmissible(row.value,p))||row.value?.database_name!==p.database_name)throw new ErreurBrouillon('absent');return{g,row};}
  function attenteRecuperation(row){const attendu={};recuperations.set(attendu,copie(row));return attendu;}
  function resumeInvalide(row,raison){return{id:row.key.slice(PREFIXE_BROUILLON.length),kind:null,titre:'',saved_at:typeof row.value?.saved_at==='string'&&Number.isFinite(Date.parse(row.value.saved_at))?row.value.saved_at:'',revision:Number.isSafeInteger(row.value?.revision)?row.value.revision:null,etat:'invalide',entity_id:null,edition_id:null,book_id:null,raisons:[raison],attendu:attenteRecuperation(row)};}
- async function changements(d,payload){const result=[];for(const path of d.kind==='book_metadata'?cheminsLivre:cheminsRecette){const f=d.base_fields[path];if(!f||await empreinteEditeur(champModele(payload,path))!==f.modele_sha256)result.push(path);}return result;}
+ async function changements(d,payload){const result=[];for(const path of d.kind==='book_metadata'?cheminsLivre:cheminsRecette){const f=d.base_fields[path];if((!f&&!(path==='contenu.ingredient_structure'&&!Object.hasOwn(payload.contenu||{},'ingredient_structure')))||f&&await empreinteEditeur(champModele(payload,path))!==f.modele_sha256)result.push(path);}return result;}
  async function capturerPortee({owner_id,estCourante=()=>true}={}){
   const base=repo.db,generation=getGeneration(),verifier=()=>{if(repo.db!==base||getGeneration()!==generation||!estCourante())throw new ErreurBrouillon('contexte_change');};
   const owner=(await base.get('sync_state','user_id'))?.value??null;verifier();if(owner!==owner_id)throw new ErreurBrouillon('compte_change');
@@ -111,7 +111,7 @@ export function creerServiceBrouillons({repo,getGeneration,maintenant=nowIso,new
  const titre=d=>d.kind==='book_metadata'?d.payload.book?.title:d.payload.metadata?.display_title||d.payload.metadata?.original_title||d.entity_id;
  async function listerBrouillons({portee,inclureDetaches=false}){
   const g=await scope(portee),rows=await g.base.getAll('sync_state'),brouillons=[];g.verifier();
-  for(const row of rows){if(!row.key?.startsWith(PREFIXE_BROUILLON)||!idEditeur(row.key.slice(PREFIXE_BROUILLON.length))||(row.value?.owner_id!==portee.owner_id&&!anonymeAdmissible(row.value,portee))||row.value?.database_name!==portee.database_name)continue;
+  for(const row of rows){if(row.value?.kind==='recipe_translation')continue;if(!row.key?.startsWith(PREFIXE_BROUILLON)||!idEditeur(row.key.slice(PREFIXE_BROUILLON.length))||(row.value?.owner_id!==portee.owner_id&&!anonymeAdmissible(row.value,portee))||row.value?.database_name!==portee.database_name)continue;
    try{validerLigneEditeur(row);if(row.value.state==='committed')continue;await valider(row.value,row.value.payload);}catch(e){brouillons.push(resumeInvalide(row,e.code||'contenu_invalide'));continue;}
    const d=row.value,detache=d.library_epoch!==portee.library_epoch;if(detache&&!inclureDetaches)continue;const raisons=detache?['bibliotheque_remplacee']:await compatibilite(d,g);
    brouillons.push({id:d.id,kind:d.kind,titre:String(titre(d)||''),saved_at:d.saved_at,revision:d.revision,etat:anonymeAdmissible(d,portee)?'anonyme':detache?'detache':raisons.length?'bloque':'reprenable',entity_id:d.entity_id,edition_id:d.edition_id,book_id:d.book_id,raisons});

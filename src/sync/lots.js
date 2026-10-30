@@ -1,4 +1,6 @@
 import {estCommandeSources,ciblesCommandeSources} from './commandes-sources.js';
+import {estCommandeProtegee,ciblesCommandeProtegee,estCommandeTraduction,estLectureTraductionSignee,lecturesCommandeTraduction,estPhaseJournalTraduction,idsVersionsSourcesTraduction} from './commandes-traduction.js';
+import {verifierCommandeTraduction} from '../domain/traductions-format.js';
 import {verifierEmpreinteCommandeSources} from '../domain/sources-format.js';
 // Composition des lots d'envoi (spec § 5.3) : pur, sans base ni réseau. L'ordre est celui de la file (seq), chaque
 // (store, id) part une fois (la version la plus récente), un put est RELU au moment de l'envoi (la file ne garde
@@ -9,10 +11,10 @@ import { projectionFichier, remoteDeCeCompte } from './tables.js';
 import { commandeCycle, recettesDe } from './cycle.js';
 import { commandeEdition, editionsDe, cibleCommune } from './cycle-edition.js';
 
-export const estLectureSourceSignee=(store,row)=>store==='imports'&&!!row&&(row.source_capture!==undefined||row.index_call!==undefined||row.index_storage!==undefined);
+export const estLectureSourceSignee=(store,row)=>store==='imports'&&!!row&&(row.source_capture!==undefined||row.index_call!==undefined||row.index_storage!==undefined)||estLectureTraductionSignee(store,row);
 
 export const LIMITES = { elements: 500, lot: 921600, element: 524288 };
-const evenement = e => commandeCycle(e) || estLotSources(e) || estCommandeSources(e);
+const evenement = e => commandeCycle(e) || estLotSources(e) || estCommandeProtegee(e)||estPhaseJournalTraduction(e);
 const CONTROLE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g;
 const encodeur = new TextEncoder();
 
@@ -90,7 +92,8 @@ async function elementFichier(entree, relire) {
   return { element: { store: 'files', id: entree.id, data, updated_at: data.updated_at || entree.updated_at, deleted: false } };
 }
 
-async function elementDe(entree, relire) {
+async function elementDe(entree, relire,versionsSources) {
+  if(estCommandeTraduction(entree)){await verifierCommandeTraduction(entree.payload);return{element:structuredClone(entree.payload)};}
   if(estCommandeSources(entree)){await verifierEmpreinteCommandeSources(entree.payload);return{element:structuredClone(entree.payload)};}
   if (estLotSources(entree)) return { element: nettoyerChaines(entree.payload) };
   if (commandeCycle(entree)) return {element:{store:entree.store,id:entree.id,op:'lifecycle',...nettoyerChaines(entree.payload)}};
@@ -107,27 +110,32 @@ async function elementDe(entree, relire) {
     return { abandonnee: true };
   }
   // Un ancien put sans copie ne peut adopter les décisions appliquées depuis sa capture.
-  if(estLectureSourceSignee(entree.store,fiche)&&!entree.snapshot)return{retenue:true,raison:'copie de lecture absente'};
-  const data = estLectureSourceSignee(entree.store,fiche)?structuredClone(fiche):nettoyerChaines(fiche);
+  const exacte=estLectureSourceSignee(entree.store,fiche)||entree.store==='recipe_versions'&&versionsSources.has(entree.id);
+  if(exacte&&!entree.snapshot)return{retenue:true,raison:'copie de lecture absente'};
+  const data = exacte?structuredClone(fiche):nettoyerChaines(fiche);
   return { element: { store: entree.store, id: entree.id, data, updated_at: data.updated_at || entree.updated_at, deleted: false,
     ...contexteCycle(entree) } };
 }
 
-const clesSources=e=>estCommandeSources(e)?[...ciblesCommandeSources(e.payload),...(e.payload.base_sources||[])].map(r=>r.store+':'+r.id):[cleDe(e)];
+const clesSources=e=>estCommandeProtegee(e)?[...ciblesCommandeProtegee(e.payload),...(e.payload.base_sources||[])].map(r=>r.store+':'+r.id):[cleDe(e)];
 // Les préconditions de lecture d'un transfert sont portées par ses octets immuables,
 // même quand begin/part n'embarquent pas encore la cible. Elles attendent aussi son finish accusé.
 function lecturesSources(file){
  const groupes=new Map(),parEntree=new Map();
- const lire=(store,row,keys)=>{if(!row)return;if(row.source_copy?.source_id)keys.add(store+':'+row.source_copy.source_id);if(row.scan_session_id)keys.add('scan_sessions:'+row.scan_session_id);if(store==='imports')for(const id of row.page_ids||[])keys.add('source_pages:'+id);};
+ const lire=(store,row,keys)=>{if(!row)return;if(row.source_copy?.source_id)keys.add(store+':'+row.source_copy.source_id);if(row.scan_session_id)keys.add('scan_sessions:'+row.scan_session_id);if(store==='imports'){for(const id of row.page_ids||[])keys.add('source_pages:'+id);if(row.kind==='traduction'){keys.add('recipes:'+row.recipe_id);keys.add('recipe_versions:'+row.source_version_id);}}};
  for(const e of file){const c=e.payload,keys=c?.op==='source_transfer'?(groupes.get(c.transfer_id)||new Set()):new Set();
   if(c?.op==='source_transfer'){groupes.set(c.transfer_id,keys);lire(c.store,c.target,keys);for(const r of c.rows||[])lire(r.store,r.data,keys);}
   else if(c?.op==='index_apply'){keys.add('scan_sessions:'+c.session_id);for(const r of c.read_set||[])keys.add('imports:'+r.journal_id);}
+  else if(estCommandeTraduction(c))for(const r of lecturesCommandeTraduction(c))keys.add(r.store+':'+r.id);
+  else if(e.store==='imports'&&e.snapshot?.kind==='traduction'){if(e.snapshot.recipe_id)keys.add('recipes:'+e.snapshot.recipe_id);if(e.snapshot.source_version_id)keys.add('recipe_versions:'+e.snapshot.source_version_id);}
+  else if(e.store==='recipe_versions'&&e.snapshot){for(const id of[e.snapshot.parent_version_id,e.snapshot.provenance?.derived_from])if(id)keys.add('recipe_versions:'+id);}
   else if(estLectureSourceSignee(e.store,e.snapshot))lire(e.store,e.snapshot,keys);
   parEntree.set(e,keys);
  }return parEntree;
 }
 
-export async function composerLots(entrees, relire) {
+export async function composerLots(entrees, relire,{versionsSources=new Set()}={}) {
+  versionsSources=new Set([...versionsSources,...idsVersionsSourcesTraduction({},entrees)]);
   const lots = [];
   const retenues = [];
   const abandonnees = []; // R-L3-28 : rien à envoyer pour ces clés, et leurs entrées sont à retirer
@@ -155,18 +163,22 @@ export async function composerLots(entrees, relire) {
   // Fermeture transitive pour ne pas bloquer l'origine derrière une copie de copie.
   for(const[id,deps]of dependances){const pend=[...deps];for(let n=0;n<pend.length;n++)for(const next of dependances.get(pend[n])||[])if(!deps.has(next)){deps.add(next);pend.push(next);}}
   const transfertId=e=>e.payload?.op==='source_transfer'?e.payload.transfer_id:null;
+  const transfertsTraduction=new Set(file.filter(e=>e.payload?.op==='source_transfer'&&(e.payload.target?.kind==='traduction'||e.payload.rows?.some(r=>r.data?.kind==='traduction'))).map(transfertId));
   const dependDe=(a,b)=>{const x=transfertId(a),y=transfertId(b);return !!x&&!!y&&x!==y&&dependances.get(x)?.has(y);};
-  const communeSources=(a,b)=>{if(cibleCommune(a,b))return true;if(!estCommandeSources(a)&&!estCommandeSources(b))return false;const ca=cles.get(a)||clesSources(a),cb=cles.get(b)||clesSources(b),la=lectures.get(a)||new Set(),lb=lectures.get(b)||new Set();return ca.some(k=>cb.includes(k)||lb.has(k))||cb.some(k=>la.has(k));};
+  const communeSources=(a,b)=>{if(cibleCommune(a,b))return true;if(!estCommandeProtegee(a)&&!estCommandeProtegee(b)&&!estPhaseJournalTraduction(a)&&!estPhaseJournalTraduction(b))return false;const ca=cles.get(a)||clesSources(a),cb=cles.get(b)||clesSources(b),la=lectures.get(a)||new Set(),lb=lectures.get(b)||new Set();return ca.some(k=>cb.includes(k)||lb.has(k))||cb.some(k=>la.has(k));};
   const admissibles=[];
   for (const e of file) {
     const first=[...commandes.values()].filter(c=>communeSources(c,e)).sort((a,b)=>a.seq-b.seq)[0];
     const avant=file.filter(x=>x.seq<e.seq);
-    const attendCommande=file.some(x=>dependDe(e,x))||avant.some(x=>evenement(x)&&communeSources(x,e)&&!dependDe(x,e));
-    const attendContenu=(commandeEdition(e)||estLotSources(e)||estCommandeSources(e))&&avant.some(x=>!evenement(x)&&communeSources(x,e));
+    const dependTraduction=estPhaseJournalTraduction(e)||estCommandeTraduction(e)||transfertsTraduction.has(transfertId(e))||e.store==='recipe_versions';
+    const attendLecture=dependTraduction&&[...(lectures.get(e)||[])].some(k=>!(cles.get(e)||[]).includes(k)&&file.some(x=>x!==e&&(!transfertId(e)||transfertId(x)!==transfertId(e))&&(cles.get(x)||[]).includes(k)));
+    const prealable=x=>(dependTraduction||estPhaseJournalTraduction(x)||estCommandeTraduction(x)||transfertsTraduction.has(transfertId(x)))&&[...(lectures.get(x)||[])].some(k=>(cles.get(e)||[]).includes(k))&&![...(lectures.get(e)||[])].some(k=>(cles.get(x)||[]).includes(k));
+    const attendCommande=file.some(x=>dependDe(e,x))||avant.some(x=>evenement(x)&&communeSources(x,e)&&!dependDe(x,e)&&!prealable(x));
+    const attendContenu=(commandeEdition(e)||estLotSources(e)||estCommandeProtegee(e))&&avant.some(x=>!evenement(x)&&communeSources(x,e));
     const attendParent=editionsDe(e).some(id=>file.some(x=>x.op==='put'&&x.store==='book_editions'&&x.id===id&&x.seq!==e.seq&&(!commandeCycle(e)||x.seq<e.seq)))&&!['book_editions','books'].includes(e.store);
     const bookId=e.store==='book_editions'?(e.snapshot||e.payload?.seed)?.book_id:null;
     const attendLivre=!!bookId&&file.some(x=>x.store==='books'&&x.id===bookId&&x.op==='put');
-    if (e.lifecycle_blocked || e.lifecycle_waiting || e.quarantined_at || attendCommande||attendContenu||attendParent||attendLivre) {retenues.push({seq:e.seq,seqs:[e.seq],raison:'cycle en attente'});continue;}
+    if (e.lifecycle_blocked || e.lifecycle_waiting || e.quarantined_at || attendCommande||attendContenu||attendParent||attendLivre||attendLecture) {retenues.push({seq:e.seq,seqs:[e.seq],raison:'cycle en attente'});continue;}
     // La création non encore reçue sera portée par le seed de la première commande. Ces séquences ne sont retirées qu'avec son accusé.
     if (!commandeEdition(first)&&first?.payload?.seed && e.store==='recipes' && e.op==='put' && e.seq<first.seq && first.payload.base_cycle_id==null) continue;
     admissibles.push(e);
@@ -175,7 +187,7 @@ export async function composerLots(entrees, relire) {
   const ordre=g=>evenement(g.entree)?g.entree.seq:Math.min(...g.seqs);
   groupes.sort((a,b)=>ordre(a)-ordre(b));
   for (const { entree, seqs } of groupes) {
-    const r = await elementDe(entree, relire);
+    const r = await elementDe(entree, relire,versionsSources);
     if (r.retenue) { retenues.push({ seq: entree.seq, seqs, raison: r.raison||'fichier en attente' }); continue; }
     if (r.abandonnee) { abandonnees.push({ seq: entree.seq, seqs, raison: 'fiche disparue' }); continue; }
     if (evenement(entree)) {fermer();lots.push({elements:[r.element],seqs});continue;}

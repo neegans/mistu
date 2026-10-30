@@ -1,4 +1,20 @@
-# STATE.md — Cuisine OS (Mistu) — 29 octobre 2026 — L5 PUBLIÉ, 0.27.0 EN LIGNE
+# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L6 REÇU LOCALEMENT, L5 EN LIGNE
+
+**L6 — Groupes d’ingrédients et recette en français : réception locale terminée, publication en préparation.**
+[Spec](docs/superpowers/specs/2026-10-29-l6-ingredients-groupes-traductions-design.md),
+[protocole](docs/superpowers/specs/2026-10-29-l6-protocole-traductions.md),
+[rapport](docs/superpowers/plans/2026-10-29-l6-ingredients-groupes-traductions.md).
+Branche `l6-ingredients-traductions`, base publique `8e6a82f`, contrat `3ca2255` relu techniquement ; aucune relecture personnelle attribuée à Neegan.
+Groupes explicites, français principal sur fiche/cuisine/exports, original accessible ; traduction partielle et provenance par passage.
+Appels explicites bornés, réponses conservées avant la suite, récupération brute et réessai sans nouvel appel ; comparaison/reprise et publication atomique.
+Versions sources protégées, phases de journal exactes, archive5 et restauration historique ; brouillons/bruts restent locaux et hors archive.
+**10161/10161** navigateur (épingle10160, +689 depuis L5), Node232/232, générateur0, syntaxe/diff propres.
+PostgreSQL UTF8 neuf0001→0011 : L5 **327 contrôles**, L6 **212 contrôles** + **132 contrôles ACL** et écriture réelle sous authenticated ; bornes4JS supplémentaires.
+Concurrence réelle :16 contrôles L6 +10 L5 ; deux moteurs avec PostgreSQL :30 contrôles,12 RPC, confirmation perdue/rejeu, archive puis second appareil, zéro écho.
+Parcours Chrome : lecture15 mesures/28 gestes, éditeur7 mesures/20 gestes, deux onglets, quota, texte récupéré et rechargements réellement hors ligne ;12 nouveaux modules en cache.
+Cible **0.28.0**, cache `cuisine-os-v0.28.0-1`, DB6, archive5 ; migration0011 additive,0001–0010 inchangées. **Aucune migration0011 distante appliquée à ce reçu.**
+Aucun compte privé, appel assistant réel ni essai physique iPhone/Safari/TM7. Nouveau geste d’import d’un ancien ZIP peut refuser une divergence après restauration ; comparer, sans falsifier les reçus.
+L7/L8/L9/L10 ont des propositions/revues préparatoires distinctes ; **L7–L10 et E1 restent à terminer**. La version publique reste0.27.0 jusqu’au reçu de publication ci-dessous.
 
 **L5 — Sources et index : publié et vérifié.**
 [Spec](docs/superpowers/specs/2026-10-29-l5-sources-index-design.md), [rapport](docs/superpowers/plans/2026-10-29-l5-sources-index.md).

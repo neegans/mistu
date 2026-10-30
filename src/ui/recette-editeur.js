@@ -10,6 +10,7 @@ import { parseIngredientBlock, parseIngredientLine } from '../domain/lines.js';
 import { parseQuantity } from '../domain/quantity.js';
 import { matchUnit } from '../domain/units.js';
 import { creerModeleRecette, decrireChangementsRecette, modifierIngredient, confirmerIngredient, modifierEtape, deplacerElement, retirerElement } from '../domain/editeur-recette.js';
+import { lireStructureIngredients, deplacerBlocIngredients, transformerIngredientEnTitre, transformerTitreEnIngredient } from '../domain/structure-ingredients.js';
 import { capturerProprietaire, conditionProprietaire } from './recette-garde.js';
 import { demarrerConnexion } from './settings.js';
 import { displayUrl } from '../sync/mime.js';
@@ -117,6 +118,7 @@ export async function renderEditeurRecette(params,query,ctx,deps={}) {
     const statut=statutBrouillon(controleur),source=el('section',{class:'editeur-source stack'}),formulaire=el('div',{class:'editeur-formulaire stack'});
     const informations=el('section',{class:'stack',dataset:{section:'informations'}}),ingredients=el('section',{class:'stack',dataset:{section:'ingredients'},hidden:true}),preparation=el('section',{class:'stack',dataset:{section:'preparation'},hidden:true});
     const avecLecture=!!journal||!!brouillon?.import_id;
+    if(journal?.resultat?.ingredient_blocks_issue)ingredients.append(el('div',{class:'status warn stack'},el('p',null,t('Les titres de groupe n’ont pas pu être associés aux aliments. La recette reste disponible ; les groupes sont à relire.')),...journal.resultat.ingredient_blocks_issue.candidates.map(texte=>el('p',null,texte))));
     const sansChangement=()=>!avecLecture&&decrireChangementsRecette(modele,initial).sansChangement;
     const enregistrer=el('button',{class:'btn primary big',type:'button',disabled:sansChangement(),dataset:{role:'enregistrer-editeur'},onClick:publier},t('Enregistrer les modifications'));
     const modifier=()=>{controleur.modifier();enregistrer.disabled=publication||sansChangement();};
@@ -140,8 +142,23 @@ export async function renderEditeurRecette(params,query,ctx,deps={}) {
     const notes=el('textarea',{rows:3,value:modele.contenu.notes||'',dataset:{role:'editeur-notes'},onInput:e=>mettre('contenu','notes',e.target.value)});informations.append(field(t('Notes de cette version'),notes));
     if(intention==='adaptation')informations.append(field(t('Résumé des changements, raisons et compromis *'),el('textarea',{rows:3,value:modele.contenu.changes||'',dataset:{role:'editeur-changes'},onInput:e=>mettre('contenu','changes',e.target.value)})),field(t('Statut'),select([{value:'proposed',label:t('Proposée')},{value:'tested',label:t('Testée par Neegan')}],modele.contenu.status||'proposed',v=>mettre('contenu','status',v))));
     const hoteIngredients=el('div',{class:'stack'}),hoteEtapes=el('div',{class:'stack'});
+    const focaliserBloc=id=>[...hoteIngredients.children].find(n=>n.dataset.id===id)?.querySelector('input,button')?.focus();
+    const activerStructure=()=>{
+      if(Object.hasOwn(modele.contenu,'ingredient_structure'))return;
+      const vus=new Set();for(const ligne of modele.contenu.ingredients){if(!ligne.id||vus.has(ligne.id))ligne.id=repo.newId('ri');vus.add(ligne.id);}
+      modele.contenu.ingredient_structure={format:1,blocks:modele.contenu.ingredients.map(i=>({kind:'ingredient',ingredient_id:i.id}))};
+    };
+    const appliquerBloc=(r,id)=>{if(!r.ok){erreur({raison:'contenu_invalide'});return;}modele=r.modele;modifier();dessinerIngredients();focaliserBloc(id);};
+    const gestesBloc=(id,{groupe=false}={})=>[-1,1].map(sens=>el('button',{class:'btn small',type:'button',dataset:{role:(sens<0?'monter':'descendre')+(groupe?'-groupe':'-bloc')},onClick:()=>appliquerBloc(deplacerBlocIngredients(modele,id,sens,{groupe}),id)},groupe?(sens<0?t('Monter le groupe'):t('Descendre le groupe')):(sens<0?t('Monter'):t('Descendre'))));
+    const transformerLigne=async id=>{
+      const ligne=modele.contenu.ingredients.find(i=>i.id===id);if(!ligne)return;
+      const capture=JSON.stringify(ligne),resume=[ligne.quantity?.raw||'',ligne.unit_text||ligne.unit_id||'',ligne.name_text||ligne.source_text||'',ligne.ingredient_id||''].filter(Boolean).join(' ');
+      if(!await confirmDialog(t('Transformer cette ligne en titre ?'),{body:el('p',null,t('Cette ligne ne comptera plus dans les quantités, les courses et les vérifications alimentaires : {ligne}',{ligne:resume}))})||!estCourante())return;
+      if(JSON.stringify(modele.contenu.ingredients.find(i=>i.id===id))!==capture)return;
+      const headingId=repo.newId('gh');appliquerBloc(transformerIngredientEnTitre(modele,id,{headingId,texte:ligne.name_text||ligne.source_text||''}),headingId);
+    };
     const avecId=(liste,index)=>{const ligne=modele.contenu[liste][index];if(!ligne.id)ligne.id=repo.newId(liste==='steps'?'st':'ri');return ligne.id;};
-    const gestes=(liste,index,redessiner)=>el('div',{class:'row'},...[-1,1].map(sens=>el('button',{class:'btn small',type:'button',disabled:sens===-1?index===0:index===modele.contenu[liste].length-1,onClick:()=>{modele=deplacerElement(modele,liste,avecId(liste,index),sens);modifier();redessiner();}},sens===-1?t('Monter'):t('Descendre'))),el('button',{class:'btn small danger',type:'button',onClick:()=>{modele=retirerElement(modele,liste,avecId(liste,index));modifier();redessiner();}},t('Retirer')));
+    const gestes=(liste,index,redessiner)=>el('div',{class:'row'},...(liste==='ingredients'&&modele.contenu.ingredient_structure?gestesBloc(avecId(liste,index)):[-1,1].map(sens=>el('button',{class:'btn small',type:'button',disabled:sens===-1?index===0:index===modele.contenu[liste].length-1,onClick:()=>{const id=avecId(liste,index);modele=deplacerElement(modele,liste,id,sens);modifier();redessiner();if(liste==='ingredients')focaliserBloc(id);}},sens===-1?t('Monter'):t('Descendre')))),el('button',{class:'btn small danger',type:'button',onClick:()=>{modele=retirerElement(modele,liste,avecId(liste,index));modifier();redessiner();(liste==='ingredients'?hoteIngredients:hoteEtapes).querySelector('input,textarea')?.focus();}},t('Retirer')));
     const dessinerIngredients=()=>{hoteIngredients.replaceChildren();modele.contenu.ingredients.forEach((ligne,index)=>{
       const boite=el('div',{class:'card stack editeur-ingredient',dataset:{role:'editeur-ingredient',id:ligne.id||'ligne-'+index}}),champs=el('div',{class:'editeur-ligne-champs'});
       const mod=(patch)=>{modele=modifierIngredient(modele,avecId('ingredients',index),patch);modifier();verifie.checked=false;};
@@ -160,12 +177,27 @@ export async function renderEditeurRecette(params,query,ctx,deps={}) {
           await repo.save('ingredients',ing,{conditions:{sync_state:[conditionProprietaire(await compte)]}});if(!estCourante())return;
           ctx.ingredients.push(ing);ctx.ingredientsById?.set(ing.id,ing);mod({ingredient_id:ing.id,name_text:nom.trim()});dessinerIngredients();
         }catch{erreur({raison:'stockage_indisponible'});dessinerIngredients();}
-      })),el('label',{class:'row'},verifie,t('Ligne vérifiée')),sourceTexte,gestes('ingredients',index,dessinerIngredients));hoteIngredients.append(boite);
-    });};
+      })),el('label',{class:'row'},verifie,t('Ligne vérifiée')),sourceTexte,gestes('ingredients',index,dessinerIngredients),el('button',{class:'btn small',type:'button',onClick:()=>transformerLigne(avecId('ingredients',index))},t('Transformer cette ligne en titre')));hoteIngredients.append(boite);
+    });
+      if(Object.hasOwn(modele.contenu,'ingredient_structure')){
+        const lecture=lireStructureIngredients(modele.contenu),blocks=modele.contenu.ingredient_structure?.blocks;
+        if(lecture.etat==='invalide')hoteIngredients.prepend(el('div',{class:'status warn stack'},el('p',null,t('Les groupes sont à corriger avant l’enregistrement. Les aliments restent conservés.')),el('button',{class:'btn',type:'button',onClick:async()=>{if(!await confirmDialog(t('Recréer l’ordre des aliments sans les titres ?'),{body:el('p',null,t('Les titres de la version source restent consultables. Cette nouvelle version gardera seulement les aliments actuels.'))})||!estCourante())return;modele.contenu.ingredient_structure={format:1,blocks:modele.contenu.ingredients.map(i=>({kind:'ingredient',ingredient_id:i.id}))};modifier();dessinerIngredients();hoteIngredients.querySelector('input')?.focus();}},t('Recréer l’ordre sans titres'))));
+        const lignes=new Map([...hoteIngredients.children].filter(n=>n.dataset.id).map(n=>[n.dataset.id,n]));
+        if(Array.isArray(blocks))for(const b of blocks){
+          if(b.kind==='ingredient'){const ligne=lignes.get(b.ingredient_id);if(ligne){hoteIngredients.append(ligne);lignes.delete(b.ingredient_id);}continue;}
+          if(b.kind!=='heading')continue;
+          const input=el('input',{value:typeof b.text==='string'?b.text:'',dataset:{role:'titre-groupe'},onInput:e=>{const courant=modele.contenu.ingredient_structure.blocks.find(x=>x.kind==='heading'&&x.id===b.id);if(courant){courant.text=e.target.value;modifier();}}});
+          const boite=el('div',{class:'card stack editeur-heading',dataset:{role:'editeur-heading',id:b.id}},field(t('Titre du groupe'),input),el('div',{class:'row'},...gestesBloc(b.id),...gestesBloc(b.id,{groupe:true}),el('button',{class:'btn small',type:'button',onClick:()=>{const id=repo.newId('ri');appliquerBloc(transformerTitreEnIngredient(modele,b.id,{ingredientId:id}),id);}},t('Transformer ce titre en ingrédient')),el('button',{class:'btn small danger',type:'button',onClick:async()=>{if(!await confirmDialog(t('Retirer ce titre de groupe ?'),{body:el('p',null,t('Les ingrédients seront conservés dans leur ordre actuel.'))})||!estCourante())return;modele.contenu.ingredient_structure.blocks=modele.contenu.ingredient_structure.blocks.filter(x=>x.kind!=='heading'||x.id!==b.id);modifier();dessinerIngredients();hoteIngredients.querySelector('input')?.focus();}},t('Retirer le titre'))));
+          const i=blocks.indexOf(b);if(!blocks.slice(i+1).some((x,k,rest)=>x.kind==='ingredient'&&!rest.slice(0,k).some(y=>y.kind==='heading')))boite.append(el('p',{class:'muted'},t('Ce groupe ne contient aucun aliment.')));
+          hoteIngredients.append(boite);
+        }
+      }
+    };
     const dessinerEtapes=()=>{hoteEtapes.replaceChildren();modele.contenu.steps.forEach((etape,index)=>{const textarea=el('textarea',{rows:5,value:etape.text,dataset:{role:'editeur-etape-texte'},onInput:e=>{modele=modifierEtape(modele,avecId('steps',index),e.target.value);modifier();}});hoteEtapes.append(el('div',{class:'card stack editeur-etape',dataset:{role:'editeur-etape',id:etape.id||'etape-'+index}},field(t('Étape {n}',{n:index+1}),textarea),gestes('steps',index,dessinerEtapes)));});};
     const analyse=el('details',{class:'card'},el('summary',null,t('Ajouter des ingrédients depuis un texte'))),texteAnalyse=el('textarea',{rows:4,dataset:{role:'texte-analyse-ingredients'}});
-    analyse.append(field(t('Une ligne par ingrédient'),texteAnalyse),el('button',{class:'btn',type:'button',onClick:()=>{const lignes=parseIngredientBlock(texteAnalyse.value);if(!lignes.length)return;modele.contenu.ingredients.push(...lignes);texteAnalyse.value='';modifier();dessinerIngredients();}},t('Analyser les lignes')));
-    ingredients.append(el('h2',null,t('Ingrédients')),hoteIngredients,el('button',{class:'btn',type:'button',onClick:()=>{modele.contenu.ingredients.push(parseIngredientLine(''));modifier();dessinerIngredients();hoteIngredients.lastElementChild?.querySelector('input')?.focus();}},t('Ajouter un ingrédient')),analyse);
+    const ajouterLignes=lignes=>{modele.contenu.ingredients.push(...lignes);if(modele.contenu.ingredient_structure?.blocks)modele.contenu.ingredient_structure.blocks.push(...lignes.map(i=>({kind:'ingredient',ingredient_id:i.id})));modifier();dessinerIngredients();};
+    analyse.append(field(t('Une ligne par ingrédient'),texteAnalyse),el('button',{class:'btn',type:'button',onClick:()=>{const lignes=parseIngredientBlock(texteAnalyse.value);if(!lignes.length)return;ajouterLignes(lignes);texteAnalyse.value='';}},t('Analyser les lignes')));
+    ingredients.append(el('h2',null,t('Ingrédients')),hoteIngredients,el('button',{class:'btn',type:'button',onClick:()=>{ajouterLignes([parseIngredientLine('')]);hoteIngredients.lastElementChild?.querySelector('input')?.focus();}},t('Ajouter un ingrédient')),el('button',{class:'btn',type:'button',dataset:{role:'ajouter-titre-groupe'},onClick:()=>{activerStructure();const id=repo.newId('gh');modele.contenu.ingredient_structure.blocks.push({kind:'heading',id,text:''});modifier();dessinerIngredients();focaliserBloc(id);}},t('Ajouter un titre de groupe')),analyse);
     preparation.append(el('h2',null,t('Préparation')),hoteEtapes,el('button',{class:'btn',type:'button',onClick:()=>{modele.contenu.steps.push({id:repo.newId('st'),position:modele.contenu.steps.length+1,text:''});modifier();dessinerEtapes();hoteEtapes.lastElementChild?.querySelector('textarea')?.focus();}},t('Ajouter une étape')));
     if(sourceTM){preparation.prepend(el('div',{class:'status warn stack',dataset:{role:'correction-thermomix'}},el('p',null,t('Une correction manuelle invalide les réglages TM7. Tu peux conserver ce document ou repartir des étapes source pour créer une version personnelle.')),sourceTM.ok?el('button',{class:'btn',type:'button',disabled:modele.source_sans_thermomix,dataset:{role:'reprendre-source-sans-thermomix'},onClick:e=>{modele.contenu.steps=structuredClone(sourceTM.source.steps);modele.source_sans_thermomix=true;modele.contenu.changes=[modele.contenu.changes||'',t('Étapes source reprises sans les réglages Thermomix générés.')].filter(Boolean).join('\n\n');const resume=racine.querySelector('[data-role=editeur-changes]');if(resume)resume.value=modele.contenu.changes;modifier();dessinerEtapes();e.currentTarget.disabled=true;}},t('Repartir des étapes source sans réglages TM7')):el('p',null,t('La version source est absente ou a changé. Le document reste conservé ; aucun ancien réglage n’est réutilisé.'))));}
     const photos=el('section',{class:'stack',hidden:true,dataset:{section:'photos'}},el('h2',null,t('Photos')));

@@ -1,5 +1,6 @@
 // I3 : contrat logiciel TM7 NA 120 V. Aucun réseau, stockage ou commande du robot.
 // Une réponse IA est hostile ; seules les valeurs typées produisent des instructions.
+import {validerStructureIngredients} from './structure-ingredients.js';
 import { formatQuantity } from './quantity.js';
 import { unitLabel, dimensionOf, convertValue } from './units.js';
 import { EN } from '../i18n/en.js';
@@ -419,6 +420,7 @@ function fabriquerEtapes(source, blocs, contexte, correspondance) {
 }
 export function fabriquerVersionThermomix({ source, contexte, resultat, id, newId, maintenant, modele } = {}) {
   const c = relireContexte(contexte), r = reponseDe(resultat, c);
+  if(Object.hasOwn(source,'ingredient_structure')&&!validerStructureIngredients(source.ingredient_structure,source.ingredients).ok)erreur('structure_invalide');
   if (r.type !== 'proposition') erreur('pas_proposition');
   if (empreinteThermomix(source, { incomplete: c.source.incomplete }) !== c.source_signature) erreur('source_modifiee');
   identifiant(id); if (id === source.id || typeof newId !== 'function') erreur('identifiant');
@@ -436,7 +438,7 @@ export function fabriquerVersionThermomix({ source, contexte, resultat, id, newI
     servings: c.source.servings, ingredients: cloneJson(source.ingredients), steps: fabriquerEtapes(c.source, blocs, c, correspondance),
     prep_minutes: null, cook_minutes: null, active_minutes: null, total_minutes: null,
     changes: tr('Adaptation au TM7 des étapes sélectionnées.', null, c.langue),
-    provenance: { ...provenance, generated_by: 'ai', model, incomplete: c.source.incomplete }, created_at: date, updated_at: date };
+    provenance: { ...provenance, derived_from: source.id, generated_by: 'ai', model, incomplete: c.source.incomplete }, created_at: date, updated_at: date };
   delete version.translations; delete version.translation; delete version.plan_invalide; delete version.incomplete;
   version.provenance.thermomix = { revision: 1, profil: PROFIL_TM7.id, contexte: c, resultat: r, blocs,
     correspondance, version_signature: signatureVersion(version), reviewed_at: date, modele: model };

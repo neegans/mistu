@@ -21,6 +21,10 @@ export async function renderRecipeEdit(params, query, ctx) {
     const { renderEditeurRecette } = await import('./recette-editeur.js');
     return renderEditeurRecette(params, query, ctx);
   }
+  if(query.format==='2'||query.draft){
+    const {renderTraductionEditeur}=await import('./traduction-editeur.js');
+    return renderTraductionEditeur(params,query,ctx);
+  }
   const recipe = params.id ? ctx.recipesById.get(params.id) : null;
   if (params.id && !recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
   if (recipe && !recetteActiveDansContexte(recipe, ctx)) return mentionCycleRecette(recipe, ctx?.editionsById?.get(recipe.edition_id));
@@ -37,7 +41,15 @@ function f_defaultTranslation(recipe) { return recipe?.original_language === 'en
 // Traduction d'une version précise : signalée comme telle, sans devenir une adaptation culinaire (spec §14, §29.1).
 function translationEditor({ recipe, base, ctx, f, gardeRecette, query = {} }) {
   if (!base) return el('div', { class: 'card' }, t('Aucune version à traduire.'));
-  const existing = ctx.recipe_translations.find((tr) => tr.recipe_version_id === base.id && tr.locale === f.translationLocale);
+  const candidates = ctx.recipe_translations.filter(tr=>tr.recipe_version_id===base.id&&tr.locale===f.translationLocale);
+  const candidatesOuvertes=JSON.stringify([...candidates].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0));
+  if(candidates.length>1&&!query.translation){
+    const choix=el('div',{class:'stack'},el('h2',null,t('Plusieurs traductions existent pour cette version. Choisis celle à comparer.')));
+    for(const tr of candidates){const q=new URLSearchParams(query);q.set('translation',tr.id);if(tr.alignment_format===2)q.set('format','2');choix.append(el('a',{class:'btn',href:`#/recipes/${encodeURIComponent(recipe.id)}/edit?${q}`},t('Traduction conservée : {id}',{id:tr.id})));}return choix;
+  }
+  const existing = query.translation?candidates.find(tr=>tr.id===query.translation):candidates[0];
+  if(query.translation&&!existing)return el('p',{role:'status'},t('Cette traduction a changé ailleurs. Ta saisie est conservée ; recharge la traduction pour comparer.'));
+  if(existing?.alignment_format===2){const q=new URLSearchParams(query);q.set('format','2');q.set('translation',existing.id);return el('a',{class:'btn',href:`#/recipes/${encodeURIComponent(recipe.id)}/edit?${q}`},t('Comparer cette traduction'));}
   const lecture = lireTraduction(existing, base);
   const sourceValide = verifierSourceTraduction(base, recipe.original_title || '');
   const ancien = existing?.translated_content;
@@ -120,7 +132,10 @@ function translationEditor({ recipe, base, ctx, f, gardeRecette, query = {} }) {
         recipe_translations: [existing ? { key: existing.id, fusion: courante => {
           if (JSON.stringify(courante) !== traductionOuverte) throw new TransitionRefusee('recipe_translations', existing.id, null);
           return null;
-        } } : { key: row.id, absente: true }],
+        } } : { key: row.id, absente: true },{index:'recipe_version_id',valeur:base.id,verifier:rows=>{
+          const courantes=JSON.stringify(rows.filter(r=>r.locale===f.translationLocale).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0));
+          if(courantes!==candidatesOuvertes)throw new TransitionRefusee('recipe_translations',row.id,null);
+        }}],
       } });
       toast(t('Traduction enregistrée')); navigate(destinationApresRecette(recipe.id,query,ctx,{v:base.id,lang:f.translationLocale}));
     } catch (error) {

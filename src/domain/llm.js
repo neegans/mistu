@@ -8,6 +8,7 @@ import { tailleJson } from '../sync/lots.js';
 import { reduireImage, dimensionsImage, ErreurImage } from '../core/image.js';
 import { validerZonesPhoto } from './photo-page.js';
 import { validerIsbn } from '../core/isbn.js';
+import { lireBlocsIngredientsExtraits } from './structure-ingredients.js';
 
 export class LLMProvider {
   constructor(config = {}) { this.config = config; }
@@ -52,6 +53,17 @@ export class PasserelleProvider extends LLMProvider {
     this.modele = typeof r.corps.model === 'string' ? borner(r.corps.model, LIMITES_PASSERELLE.modele) || null : null; // le modèle que le SERVEUR a choisi (provenance)
     this.stopReason = typeof r.corps.stop_reason === 'string' ? borner(r.corps.stop_reason, STOP_REASON_MAX) || null : null;
     return (Array.isArray(r.corps.content) ? r.corps.content : []).filter((c) => c && c.type === 'text' && typeof c.text === 'string').map((c) => c.text).join('');
+  }
+  async completeTranslation({system,messages,maxTokens=8000,signal}={}){
+    const vide={text:null,stopReason:null,model:null,reponseBrute:null,raison:null};
+    if(!Number.isInteger(maxTokens)||maxTokens<1||maxTokens>8000||typeof system!=='string'||!Array.isArray(messages))return{...vide,raison:'requete'};
+    const r=await appelerAssistant('creation',{system,messages,max_tokens:maxTokens},{fetch:this.fetch,session:this.session,tentativeMs:LIMITES_PASSERELLE.tentativeMs,signal,captureReponse:true});
+    const reponseBrute=r.reponseBrute instanceof Uint8Array?r.reponseBrute:null;
+    if(r.raison)return{...vide,reponseBrute,raison:echecDomaine(r).raison};
+    const model=typeof r.corps.model==='string'?borner(r.corps.model,LIMITES_PASSERELLE.modele)||null:null;
+    const stopReason=typeof r.corps.stop_reason==='string'?borner(r.corps.stop_reason,STOP_REASON_MAX)||null:null;
+    const text=(Array.isArray(r.corps.content)?r.corps.content:[]).filter(c=>c?.type==='text'&&typeof c.text==='string').map(c=>c.text).join('');
+    return{text,stopReason,model,reponseBrute,raison:text?null:'reponse_illisible'};
   }
 }
 const STOP_REASON_MAX = 40;
@@ -127,8 +139,10 @@ Réponds UNIQUEMENT par un objet JSON valide avec ce schéma :
  "ingredients": [{"source_text": string, "uncertain": boolean}], "steps": [{"text": string}], "printed_page": number|null,
  "sub_recipes": [{"title": string, "page_reference": string|null}], "uncertain_fields": [string], "notes": string|null,
  "incomplete": boolean, "missing_page": boolean,
+ "ingredient_blocks": [{"kind":"heading","text":string}|{"kind":"ingredient","index":number}],
  "photo_zones": [{"photo": number, "rectangle": {"x": number, "y": number, "largeur": number, "hauteur": number}, "incertain": boolean}]}
 Règles : recopie le texte exactement (source_text = ligne d'ingrédient telle qu'imprimée, avec quantité et unité d'origine).
+ingredients contient seulement les aliments. ingredient_blocks est facultatif : recopie les titres de groupe visibles comme heading, et cite chaque aliment exactement une fois par son index dans ingredients (commence à 0), dans le même ordre. Aucun titre ne devient un aliment. N'invente aucun groupe d'après le nom d'un aliment.
 N'invente jamais une quantité, une durée ou une portion absente : mets null ou marque "uncertain": true.
 Si une quantité est illisible, garde le texte lisible et ajoute la ligne dans uncertain_fields.
 Si une page semble manquer (étapes qui commencent au milieu, ingrédients sans étapes, renvoi à une page absente), mets "missing_page": true ; si la recette est visiblement partielle, mets "incomplete": true ; une étape peut tenir sur plusieurs lignes : garde-la entière dans un seul "text".
@@ -390,7 +404,8 @@ export function validateParsedRecipe(data) {
   const B = BORNES_EXTRACTION, N = BORNES_NOMBRES;
   const texte = texteBorne; // Cc/Cf retirés, trim, borne en points de code (ronde 1)
   const liste = (v) => (Array.isArray(v) ? v : []);
-  const ingredients = liste(data.ingredients).filter((i) => i && typeof i.source_text === 'string').map((i) => ({ source_text: texte(i.source_text, B.ligne), uncertain: !!i.uncertain })).filter((i) => i.source_text);
+  const indicesGardes=[];
+  const ingredients = liste(data.ingredients).map((i,index) => {if(!i||typeof i.source_text!=='string')return null;const source_text=texte(i.source_text,B.ligne);if(!source_text)return null;indicesGardes.push(index);return{source_text,uncertain:!!i.uncertain};}).filter(Boolean);
   if (ingredients.length > B.lignes) horsBornes();
   const steps = liste(data.steps).filter((s) => s && typeof s.text === 'string').map((s) => ({ text: texte(s.text, B.etape) })).filter((s) => s.text);
   if (steps.length > B.etapes) horsBornes();
@@ -401,7 +416,7 @@ export function validateParsedRecipe(data) {
   const recette = {
     title: texte(data.title, B.titre),
     servings: entierBorne(data.servings, N.portions), prep_minutes: entierBorne(data.prep_minutes, N.minutes), cook_minutes: entierBorne(data.cook_minutes, N.minutes),
-    ingredients, steps,
+    ingredients, steps, ...lireBlocsIngredientsExtraits(data,indicesGardes),
     printed_page: entierBorne(data.printed_page, N.page),
     sub_recipes, uncertain_fields,
     notes: texte(data.notes, B.notes),

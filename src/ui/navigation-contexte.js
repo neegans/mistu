@@ -30,7 +30,7 @@ export function routeInterne(cible) {
   // Seules recipes acceptent un troisième segment.
   if (parts.length === 3 && parts[0] !== 'recipes') return null;
   const params = new URLSearchParams(suite[0] || '');
-  const admis = new Set(['draft','section','kind','pages','doc','adapter','add','adresse','cmp','intention','nouveau','titre','origine','retour_nav','tab','onglet','q','mode','fav','cooked','any','for','role','meal','v','servings','locale','lang','import','session','edition','book','source','type','diets','max','panel','panneau','intent','tout','page','id','sources','editionId','disponibilites','favoris','aRelire','cuisinees','rapide','maxMinutes','ingredientIds','appareil','tri','presentation','limite']);
+  const admis = new Set(['draft','section','kind','format','assistant','translation','pages','doc','adapter','add','adresse','cmp','intention','nouveau','titre','origine','retour_nav','tab','onglet','q','mode','fav','cooked','any','for','role','meal','v','servings','locale','lang','import','session','edition','book','source','type','diets','max','panel','panneau','intent','tout','page','id','sources','editionId','disponibilites','favoris','aRelire','cuisinees','rapide','maxMinutes','ingredientIds','appareil','tri','presentation','limite']);
   for (const [k, v] of [...params]) if (!admis.has(k) || k.length > 50 || [...v].length > 500 || /[\u0000-\u001f\u007f]/.test(k + v)) params.delete(k);
   const query = params.toString(); return path + (query ? '?' + query : '');
 }

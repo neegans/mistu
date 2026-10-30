@@ -10,6 +10,7 @@ import { conditionFichier, memeRemote, HASH_FICHIER } from './fichiers.js';
 import { idCycle, porteCycle, fusionCycle, CLE_CYCLE_CONFIRME, gardeCompteCycle } from './cycle.js';
 import { fusionEdition, CLE_EDITION_CONFIRMEE } from './cycle-edition.js';
 import { estCommandeSources, ciblesCommandeSources, CLE_SOURCE_CONFIRMEE } from './commandes-sources.js';
+import {estCommandeProtegee,ciblesCommandeProtegee,estLectureTraductionSignee,estPhaseJournalTraduction} from './commandes-traduction.js';
 
 // R-L3-12 : les versions AVANT les recettes. Le pointeur d'une recette reçue désigne presque toujours une version
 // créée par le même geste, sur l'autre appareil : lue après la recette, elle serait encore inconnue ici et chaque
@@ -145,7 +146,7 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
 
   async function appliquerPage(table, lignes, bilan, curseur, tentative = 0) {
     const owner=getUserId();
-    const commandesSources=rows=>rows.filter(e=>estCommandeSources(e)&&(e.user_id==null||e.user_id===owner));
+    const commandesSources=rows=>rows.filter(e=>(estCommandeProtegee(e)||estPhaseJournalTraduction(e))&&(e.user_id==null||e.user_id===owner));
     const fileSources=commandesSources(await db.getAll('outbox'));
     const signatureFile=JSON.stringify(stable(fileSources));
     const gardeFile={toutes:true,verifier:rows=>{if(JSON.stringify(stable(commandesSources(rows)))!==signatureFile)throw Object.assign(new Error('Commande source modifiée pendant la réception'),{code:'SYNC_SOURCE_CHANGED'});}};
@@ -167,9 +168,9 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       const refus = refusDeForme(table, ligne, clePrimaire);
       if (refus) return { erreur: refus };
       const locale = await db.get(table, ligne.id);
-      const commandes=fileSources.filter(e=>ciblesCommandeSources(e.payload).some(r=>r.store===table&&r.id===ligne.id));
+      const commandes=fileSources.filter(e=>(estPhaseJournalTraduction(e)?[{store:e.store,id:e.id}]:ciblesCommandeProtegee(e.payload)).some(r=>r.store===table&&r.id===ligne.id));
       const cleSource=CLE_SOURCE_CONFIRMEE(table,ligne.id),confirmationSource=await db.get('sync_state',cleSource);
-      const geree=row=>!!row&&(row.source_state!==undefined||row.source_revision!==undefined||row.source_copy!==undefined||row.index_storage!==undefined||row.index_decision_revision!==undefined||row.index_application_receipts!==undefined||row.index_resolved_occurrences!==undefined);
+      const geree=row=>!!row&&(row.source_state!==undefined||row.source_revision!==undefined||row.source_copy!==undefined||row.index_storage!==undefined||row.index_decision_revision!==undefined||row.index_application_receipts!==undefined||row.index_resolved_occurrences!==undefined||estLectureTraductionSignee(table,row));
       if(commandes.length||confirmationSource||geree(locale)||geree(ligne.data)){
         confirmations.set(cleSource,{key:cleSource,fusion:row=>{if(JSON.stringify(stable(row??null))!==JSON.stringify(stable(confirmationSource??null)))throw Object.assign(new Error('Confirmation source modifiée pendant la réception'),{code:'SYNC_CONFIRMATION_CHANGED'});return null;}});
         if(confirmationSource?.value?.user_id===owner&&Number.isFinite(confirmationSource.value.server_seq)&&confirmationSource.value.server_seq>ligne.server_seq)continue;

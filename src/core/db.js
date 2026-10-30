@@ -1,3 +1,4 @@
+import {preparerCommandesTraduction} from '../sync/commandes-traduction.js';
 import {preparerCommandesSources} from '../sync/commandes-sources.js';
 // Enveloppe IndexedDB à promesses. Un seul magasin d'objets par entité (spec §14 : « structures simples dans une seule base »).
 
@@ -102,7 +103,7 @@ function listeConditions(conditions) {
 // change jamais la clé (TypeError, transaction annulée) : la fiche fusionnée s'écrirait sinon À CÔTÉ de l'originale. La portée inclut
 // `outbox` seulement si la base la possède : la capture écrit là, et les bases de test TEST_STORES n'en ont pas.
 // Rend les fiches fusionnées, par magasin ({ [store]: [fiche, …] }) : l'appelant n'a pas à relire la base dans une autre transaction.
-async function ecrireConditionne(db, { puts, deletes, clearStores, origin, payloads, liste, recettes, editions, lifecycle, archive_import, source_batch, source_commands }) {
+async function ecrireConditionne(db, { puts, deletes, clearStores, origin, payloads, liste, recettes, editions, lifecycle, archive_import, source_batch, source_commands, translation_commands }) {
   const toClear = knownStoreNames(db.stores, clearStores);
   const portee = knownStoreNames(db.stores, [...toClear, ...Object.keys(puts), ...Object.keys(deletes), ...liste.map((c) => c.store), ...(db.stores.outbox ? ['outbox'] : [])]);
   const tx = await db.tx(portee, 'readwrite');
@@ -151,8 +152,8 @@ async function ecrireConditionne(db, { puts, deletes, clearStores, origin, paylo
           allPuts[c.store] = [...(allPuts[c.store] || []), fusion];
           fusionnees[c.store] = [...(fusionnees[c.store] || []), fusion];
         }
-        if(origin==='local')preparerCommandesSources({puts:allPuts,commandes:source_commands});
-        const extra = db.onMutate ? (db.onMutate({ puts: allPuts, deletes, clearStores, origin, payloads, recettes, editions, lifecycle: typeof lifecycle === 'function' ? lifecycle() : lifecycle, archive_import, source_batch, source_commands }) || {}) : {};
+        if(origin==='local'){preparerCommandesSources({puts:allPuts,commandes:source_commands});preparerCommandesTraduction({puts:allPuts,commandes:translation_commands,source_commands});}
+        const extra = db.onMutate ? (db.onMutate({ puts: allPuts, deletes, clearStores, origin, payloads, recettes, editions, lifecycle: typeof lifecycle === 'function' ? lifecycle() : lifecycle, archive_import, source_batch, source_commands, translation_commands }) || {}) : {};
         for (const [name, rows] of Object.entries(extra)) allPuts[name] = [...(allPuts[name] || []), ...rows];
         ecrire(tx, toClear, allPuts, deletes);
       } catch (error) {
@@ -324,7 +325,7 @@ export class Database {
   // patch fusionné dans la MÊME transaction que tout le reste ; condition fausse → TransitionRefusee, rien d'écrit (ecrireConditionne) ;
   // ce chemin rend les fiches fusionnées par magasin. `null` ou absent : aucune condition, et le chemin ordinaire ne rend rien. Les quatre
   // formes (dont `{ key, fusion }`, lot G) sont décrites au-dessus de listeConditions.
-  async mutate({ puts = {}, deletes = {}, clearStores = [], origin = 'local', payloads = {}, conditions = null, recettes = [], editions = [], lifecycle = null, archive_import = false, source_batch = null, source_commands = [] } = {}) {
+  async mutate({ puts = {}, deletes = {}, clearStores = [], origin = 'local', payloads = {}, conditions = null, recettes = [], editions = [], lifecycle = null, archive_import = false, source_batch = null, source_commands = [], translation_commands = [] } = {}) {
     for (const [name, rows] of Object.entries(puts)) if (!Array.isArray(rows)) throw new TypeError('Les données de ' + name + ' doivent être un tableau');
     for (const [name, keys] of Object.entries(deletes)) if (!Array.isArray(keys)) throw new TypeError('Les clés de ' + name + ' doivent être un tableau');
     // K-6 / S6 : un magasin `noDelete` (assistant_config) n'accepte aucune suppression d'origine locale ou device —
@@ -337,9 +338,9 @@ export class Database {
       }
     }
     const liste = listeConditions(conditions);
-    if (liste.length) return ecrireConditionne(this, { puts, deletes, clearStores, origin, payloads, liste, recettes, editions, lifecycle, archive_import, source_batch, source_commands });
-    if(origin==='local')preparerCommandesSources({puts,commandes:source_commands});
-    const extra = this.onMutate ? (this.onMutate({ puts, deletes, clearStores, origin, payloads, recettes, editions, lifecycle: typeof lifecycle === 'function' ? lifecycle() : lifecycle, archive_import, source_batch, source_commands }) || {}) : {};
+    if (liste.length) return ecrireConditionne(this, { puts, deletes, clearStores, origin, payloads, liste, recettes, editions, lifecycle, archive_import, source_batch, source_commands, translation_commands });
+    if(origin==='local'){preparerCommandesSources({puts,commandes:source_commands});preparerCommandesTraduction({puts,commandes:translation_commands,source_commands});}
+    const extra = this.onMutate ? (this.onMutate({ puts, deletes, clearStores, origin, payloads, recettes, editions, lifecycle: typeof lifecycle === 'function' ? lifecycle() : lifecycle, archive_import, source_batch, source_commands, translation_commands }) || {}) : {};
     const allPuts = { ...puts };
     for (const [name, rows] of Object.entries(extra)) allPuts[name] = [...(allPuts[name] || []), ...rows];
     const toClear = knownStoreNames(this.stores, clearStores);

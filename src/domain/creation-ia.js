@@ -10,6 +10,7 @@ import { formatNumber, parseQuantity } from './quantity.js';
 import { DIET_TAGS, RECIPE_TYPES } from '../model/schema.js';
 import { getConvention } from './units.js';
 import { assertVocabulaire } from './vocabulaire.js';
+import { lireBlocsIngredientsExtraits, fabriquerStructureIngredients, lireStructureIngredients } from './structure-ingredients.js';
 
 export const LIMITES_CREATION = { demande: 500, changement: 500, titre: 120, description: 400, portions: [1, 12], minutes: [5, 240], ingredients: [1, 40], nom: 100, unite: 30, quantite: [0.05, 10000], etapes: [2, 20], etape: 500, conseils: [0, 6], conseil: 250, notes: [0, 8], note: 250, tentativeMs: 135000, corps: 1024 * 1024, maxTokens: 16000 };
 export const CLES_REFUSEES = ['source', 'url', 'href', 'link', 'author', 'chef', 'image', 'photo', 'citation'];
@@ -116,9 +117,11 @@ function parenteBornee(p) {
   const description = chaine(p.provenance?.creation?.description);
   if (longueur(title) > LIMITES_CREATION.titre || longueur(description) > LIMITES_CREATION.description) return null;
   if (ingredients.length > LIMITES_CREATION.ingredients[1] || steps.length > LIMITES_CREATION.etapes[1] || steps.some((x) => longueur(x) > LIMITES_CREATION.etape) || ingredients.some((x) => longueur(x) > LIMITES_CREATION.nom + LIMITES_CREATION.unite + 20)) return null;
-  return { title, servings: Number.isFinite(p.servings) ? p.servings : null, ingredients, steps, description };
+  const structure=lireStructureIngredients(p);if(structure.etat==='invalide')return null;
+  const index=structure.etat==='courante'?new Map(p.ingredients.map((i,n)=>[i.id,n])):null;
+  return { title, servings: Number.isFinite(p.servings) ? p.servings : null, ingredients, steps, description,...(structure.etat==='courante'?{ingredient_blocks:structure.blocks.map(b=>b.kind==='heading'?{kind:'heading',text:b.text}:{kind:'ingredient',index:index.get(b.ingredient_id)})}:{}) };
 }
-const FORME = '{"title":string,"description":string,"servings":integer,"estimated_minutes":integer,"ingredients":[{"name":string,"quantity":number,"unit":string}],"steps":[string],"tips":[string],"restrictions_notes":[string]}';
+const FORME = '{"title":string,"description":string,"servings":integer,"estimated_minutes":integer,"ingredients":[{"name":string,"quantity":number,"unit":string}],"ingredient_blocks":[{"kind":"heading","text":string}|{"kind":"ingredient","index":integer}],"steps":[string],"tips":[string],"restrictions_notes":[string]}. ingredient_blocks est facultatif : ingrédients alimentaires seuls dans ingredients, titres dans heading ; chaque index alimentaire (commence à 0) apparaît exactement une fois et dans le même ordre.';
 const SYSTEM = {
   // R-CRE-13 : l'invite annonce CHAQUE règle qui refuse (tests/creer-ia.js, table « règle refusée → phrase »), avec des cibles SOUS les
   // bornes du validateur pour ce qui se compte en caractères (titre 100/120, description 350/400, conseils et notes 200/250, étapes
@@ -195,7 +198,7 @@ export function validerRecetteIA(json, options) {
   const avertissements = [];
   if (Number.isInteger(servings) && portions.n !== servings) avertissements.push(`L’assistant a rendu ${portions.n} portions au lieu de ${servings}.`);
   if (Number.isInteger(maxMinutes) && minutes.n > maxMinutes) avertissements.push(`Durée estimée ${minutes.n} min, au-dessus des ${maxMinutes} min demandées.`);
-  return { ok: true, recette: { title: title.s, description: description.s, servings: portions.n, estimated_minutes: minutes.n, ingredients, steps: steps.out, tips: tips.out, restrictions_notes: notes.out }, avertissements };
+  return { ok: true, recette: { title: title.s, description: description.s, servings: portions.n, estimated_minutes: minutes.n, ingredients, ...lireBlocsIngredientsExtraits(json,ingredients.map((_,i)=>i)), steps: steps.out, tips: tips.out, restrictions_notes: notes.out }, avertissements };
 }
 
 // § 4.3 : « quantité unité nom » en français lisible, que le parseur existant relit (N-4, F9).
@@ -218,16 +221,18 @@ export function texteLigne({ quantity, unit, name }, langue = 'fr') {
   return [q, u, name].filter(Boolean).join(' ');
 }
 
-export function fabriquerRecetteIA({ recette, demande, filtres, langue = 'fr', modele = null, usage = null, convention = null, parente = null, changement = null, newId, maintenant }) {
+export function fabriquerRecetteIA({ recette, demande, filtres, langue = 'fr', modele = null, usage = null, convention = null, parente = null, changement = null, newId, maintenant, sansTitresConfirme=false }) {
   // Ordre des identifiants FIXÉ (P3, épinglé par les tests) : fiche, version, lignes, étapes.
   const recipeId = parente ? parente.recipe_id : newId('rc');
   const versionId = newId('rv');
   const ingredients = recette.ingredients.map((i) => ({ ...parseIngredientLine(texteLigne(i, langue)), id: newId('ri'), verification_state: 'to_verify' }));
   const steps = parseStepsBlock(recette.steps.join('\n')).map((s) => ({ ...s, id: newId('st') }));
+  let structure=fabriquerStructureIngredients(recette,ingredients,{newId});
+  if(Object.hasOwn(parente||{},'ingredient_structure')&&!structure){if(!sansTitresConfirme)throw Object.assign(new Error('groupes_a_revoir'),{code:'groupes_a_revoir'});structure={format:1,blocks:ingredients.map(i=>({kind:'ingredient',ingredient_id:i.id}))};}
   const version = {
     id: versionId, recipe_id: recipeId, kind: parente ? 'adaptation' : 'synthesis', parent_version_id: parente?.id || null, status: 'proposed',
     servings: recette.servings, prep_minutes: null, cook_minutes: null, active_minutes: null, total_minutes: null,
-    ingredients, steps, constraints: {}, changes: parente ? changement : null, notes: null,
+    ingredients, steps, ...(structure?{ingredient_structure:structure}:{}), constraints: {}, changes: parente ? changement : null, notes: null,
     provenance: { source_page_ids: [], source_document_id: null, generated_by: 'ai', model: modele, edition_id: null, convention_snapshot: convention, ...(parente ? { derived_from: parente.id } : {}),
       creation: { demande, filtres, description: recette.description, conseils: recette.tips, notes_restrictions: recette.restrictions_notes, minutes_estimees: recette.estimated_minutes, cree_le: maintenant, usage } },
     verification_state: 'to_verify',

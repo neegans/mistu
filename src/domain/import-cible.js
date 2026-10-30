@@ -4,6 +4,7 @@
 // La sortie du modèle est une DONNÉE HOSTILE déjà validée et bornée par validateParsedRecipe (llm.js) : ici elle est seulement assemblée.
 import { normalizeText } from './units.js';
 import { pagesActivesSeance } from './sources-format.js';
+import { fabriquerStructureLecture } from './structure-ingredients.js';
 import { parseIngredientLine, detectTimers } from './lines.js';
 import { assertVocabulaire, originePhotoAdmise } from './vocabulaire.js';
 import { newId } from '../core/ids.js';
@@ -101,17 +102,19 @@ export const retirerPage = (pageIds, id) => pageIds.filter((p) => p !== id);
 // Lot D, ronde 1 (I-D3, B-7) : la photo d'index de LA référence n'est jamais une page de la recette, même quand la lecture la porte (classée dans le
 // groupe, cochée par « Regrouper en recette ») : écartée des pages lues — ni dans la version, ni dans l'union, ni réécrite (elle garde kind et position).
 const ORIGINES_PHOTO = ['photo', 'image'];
-export function fabriquerExtraction(resultat, { reference, versions = [], pages = [], pageIds = [], edition = null, convention = null, importId = null, modele = null, photo = null, maintenant = null, remplacer = true, reecrirePositions = true } = {}) {
+export function fabriquerExtraction(resultat, { reference, versions = [], versionSource=versions.find(v=>v.id===reference.current_version_id)||null, sansTitresConfirme=false, pages = [], pageIds = [], edition = null, convention = null, importId = null, modele = null, photo = null, maintenant = null, remplacer = true, reecrirePositions = true } = {}) {
   const parId = pages instanceof Map ? pages : new Map((pages || []).map((p) => [p.id, p]));
   const presentes = pageIds.filter((id) => parId.has(id) && id !== reference.index_page_id);
   const ingredients = (resultat.ingredients || []).map((l) => ({ ...parseIngredientLine(l.source_text), uncertain: l.uncertain === true, verification_state: 'to_verify' }));
   const steps = (resultat.steps || []).map((s, i) => ({ id: newId('st'), position: i + 1, text: s.text, ...detectTimers(s.text) }));
   const incomplete = resultat.incomplete === true;
   const missing_page = resultat.missing_page === true;
+  const structure=fabriquerStructureLecture(resultat,ingredients,{newId,versionSource,sansTitresConfirme});
   const version = {
     id: newId('rv'), recipe_id: reference.id, kind: 'extraction', parent_version_id: reference.current_version_id || null, status: null,
     servings: resultat.servings ?? null, prep_minutes: resultat.prep_minutes ?? null, cook_minutes: resultat.cook_minutes ?? null, active_minutes: null, total_minutes: null,
     ingredients, steps, constraints: {}, changes: '', notes: resultat.notes ?? null,
+    ...(structure?{ingredient_structure:structure}:{}),
     provenance: {
       source_page_ids: presentes, source_document_id: presentes.length ? (parId.get(presentes[0]).document_id ?? null) : null, generated_by: 'ai', model: modele ?? null,
       edition_id: edition?.id ?? reference.edition_id ?? null, convention_snapshot: convention ? { id: convention.id, revision: convention.revision, values: convention.values } : null,
@@ -202,7 +205,7 @@ export const modeleBorne = (m) => (typeof m === 'string' && m && Array.from(m).l
 // arrive avec le lot B, spec recette-web § 4.7) et les statuts NON terminés. `importOuvert` : une ligne que la section liste (et que la fiche du
 // livre compte — un import web n'y compte jamais : son edition_id est nul, D-B17).
 // `classement` (lot D) : la ligne d'un classement de photos, reprise dans sa séance ; jamais « Relancer » depuis la section.
-export const KINDS_IMPORT = Object.freeze(['recette', 'index', 'web', 'classement', 'couverture', 'livre', 'thermomix', 'reperes']);
+export const KINDS_IMPORT = Object.freeze(['recette', 'index', 'web', 'classement', 'couverture', 'livre', 'thermomix', 'reperes','traduction']);
 // Les sortes qui portent des PAGES (photos) : les seules que le chemin photo ouvre (repo.ouvrirImport, repo.ajouterPages). Une lecture web naît par
 // demarrerLectureWeb (src/ui/import-web.js), jamais par ce chemin (lot B, P-1).
 // `classement` (lot D) : une ligne de classement porte des photos — `repo.ouvrirImport({ kind: 'classement' })` l'ouvre ; `web` reste hors de cette liste.
@@ -225,6 +228,7 @@ const chaine = (v) => (typeof v === 'string' && v ? v : null);
 export function cibleReprise(ligne) {
   const id = chaine(ligne?.id);
   if (!id) return null;
+  if(ligne.kind==='traduction')return chaine(ligne.recipe_id)&&chaine(ligne.source_version_id)?`/recipes/${encodeURIComponent(ligne.recipe_id)}/edit?kind=translation&format=2&locale=${ligne.target_locale==='en'?'en':'fr'}&v=${encodeURIComponent(ligne.source_version_id)}&import=${encodeURIComponent(id)}`:null;
   // Vague finale (m4) : l'écran ciblé reçoit aussi LA ligne (?import=) — après synchro, une recette peut avoir un import ouvert par appareil.
   if (ligne.kind === 'reperes') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/reperes?import=${encodeURIComponent(id)}` : null;
   if (ligne.kind === 'thermomix') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/thermomix?import=${encodeURIComponent(id)}` : null;
@@ -273,13 +277,14 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     const web = i.kind === 'web';
     const couverture = i.kind === 'couverture';
     const livre = i.kind === 'livre';
-    const recetteId = i.kind === 'recette' || i.kind === 'thermomix' || i.kind === 'reperes' || web ? chaine(i.recipe_id) : null;
+    const recetteId = i.kind === 'recette' || i.kind === 'thermomix' || i.kind === 'reperes' || i.kind==='traduction' || web ? chaine(i.recipe_id) : null;
     const recette = recetteId ? recettes.get(recetteId) ?? null : null;
     const referenceAbsente = !!recetteId && !recette;
-    const type = i.kind === 'reperes' ? 'reperes' : i.kind === 'thermomix' ? 'thermomix' : livre ? 'livre' : couverture ? 'couverture' : i.kind === 'classement' ? 'classement' : i.kind === 'index' ? 'index' : web ? 'web' : recetteId ? 'reference' : 'regrouper';
+    const type = i.kind==='traduction'?'traduction':i.kind === 'reperes' ? 'reperes' : i.kind === 'thermomix' ? 'thermomix' : livre ? 'livre' : couverture ? 'couverture' : i.kind === 'classement' ? 'classement' : i.kind === 'index' ? 'index' : web ? 'web' : recetteId ? 'reference' : 'regrouper';
     const cible = cibleReprise(i);
     let gestes;
-    if (referenceAbsente) gestes = [];
+    if(i.kind==='traduction')gestes=['reprendre']; // récupération même source absente ; résolution exacte dans son éditeur
+    else if (referenceAbsente) gestes = [];
     else if (i.kind === 'thermomix' || i.kind === 'reperes') gestes = ['reprendre', 'ignorer']; // son écran contrôle appareil, vol, annulation et clôture
     else if (i.status === 'en_cours') gestes = tenu ? ['annuler'] : [];
     else if (livre) gestes = ['reprendre', 'ignorer']; // aucun appel au montage ; la route contrôle disponibilité des octets

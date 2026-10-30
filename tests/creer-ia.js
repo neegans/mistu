@@ -8,7 +8,7 @@ import { EN } from '../src/i18n/en.js';
 export async function runCreerIaTests({ eq, ok }) {
   const C = await import('../src/domain/creation-ia.js');
   buildIngredientIndex(INGREDIENTS); // l'index des lignes est global (lines.js:6) : la suite le pose elle-même (F10)
-  eq(APP_VERSION, '0.27.0', 'T1 : APP_VERSION 0.27.0 (lot UI-1)');
+  eq(APP_VERSION, '0.28.0', 'T1 : APP_VERSION 0.28.0 (lot UI-1)');
 
   // --- estCreationIA (C-2, F6)
   const synth = { kind: 'synthesis', provenance: { generated_by: 'ai', creation: { demande: 'x' } } };
@@ -524,7 +524,7 @@ export async function runCreerIaTests({ eq, ok }) {
         const rc = { id: 'rc', original_title: 'Soupe' };
         const ctx = { cook_sessions: [session], versionsById: new Map([['vc', vc]]), recipesById: new Map([['rc', rc]]), ingredientsById: ING_BY_ID, conventionFor: () => null };
         const racine = await renderCook({ id: 'cs1' }, {}, ctx);
-        eq([...racine.querySelectorAll('ul.ingredients li > span:first-child')].map((n) => n.textContent), ['lait de coco', 'lait'], 'P11 : mode cuisine — la ligne non vérifiée est écrite telle quelle, la vérifiée porte le libellé du lexique');
+        eq([...racine.querySelectorAll('ul.ingredients li [data-role=nom-ingredient]')].map((n) => n.textContent), ['lait de coco', 'lait'], 'P11 : mode cuisine — la ligne non vérifiée est écrite telle quelle, la vérifiée porte le libellé du lexique');
       }
     } finally { setUiLocale(localeAvant); }
 
@@ -1485,7 +1485,7 @@ export async function runCreerIaTests({ eq, ok }) {
         const siteB = X.toReadableSite([{ recipe: ficheB, version: versionB, pages: [{ sha256: B }] }], new Map([[B, { mime: 'image/jpeg' }]])).entries;
         const pageB = siteB.find((e) => e.path === `recipes/${ficheB.id}.html`).data;
         const E = '&lt;b&gt;x&lt;/b&gt;';
-        eq([siteB.map((e) => e.data).join('').includes('<b>'), pageB.includes(`<h1>${E}</h1>`), pageB.includes(`, page ${E}`), pageB.includes(`<img src="../images/${E}.`), siteB[0].data.includes(`<a href="recipes/rc_${E}.html">${E}</a>`)],
+        eq([siteB.map((e) => e.data).join('').includes('<b>'), new DOMParser().parseFromString(pageB,'text/html').querySelector('h1')?.textContent===B, pageB.includes(`, page ${E}`), pageB.includes(`<img src="../images/${E}.`), siteB[0].data.includes(`<a href="recipes/rc_${E}.html">${E}</a>`)],
           [false, true, true, true, true], 'site lisible : titre, page tapée, empreinte d’une image et identifiant dans le lien de l’index sont échappés (aucun « <b> » ne sort)');
       }
       // Vague finale (B6) : la comparaison de plats et les rattachements proposés disent la lignée IA d'une fiche origine 'ia', jamais « p. {page} »

@@ -5,7 +5,7 @@ import { mentionCycleRecette } from './corbeille.js';
 // session (C-4), des vues abonnées purgées par isConnected (P6). Rien n'est écrit avant « Garder » ; « Garder » n'est pas rejouable
 // (memoire.gardee posé AVANT l'écriture). Tout ce qui vient du modèle est rendu en TEXTE (el(), jamais innerHTML) ; le jeton de la
 // session ne fait que passer de ctx.sync.auth.jeton() à creer() (R-T3-1) : il n'entre ni dans la mémoire, ni dans l'adresse, ni dans le DOM (C-8).
-import { el, toast } from '../core/dom.js';
+import { el, toast, confirmDialog } from '../core/dom.js';
 import { t, label, getUiLocale } from '../core/i18n.js';
 import { navigate, remplacerAdresse, buildQuery } from '../core/router.js';
 import { borner } from '../core/bornes.js';
@@ -189,9 +189,13 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
   async function garder() {
     const m = memoire;
     if (!m || m.issue?.etat !== 'trouve' || m.gardee || vol) return;
+    if(Object.hasOwn(m.parente||{},'ingredient_structure')&&!m.issue.recette.ingredient_blocks&&!m.sansTitresConfirme){
+      if(!await confirmDialog(t('Garder cette version sans les titres de groupe ?'),{body:el('p',null,t('La proposition ne contient pas les groupes de la version source. Les aliments seront conservés ; les anciens titres resteront dans la version source.'))})||memoire!==m||m.gardee||vol)return;
+      m.sansTitresConfirme=true;
+    }
     let fab;
     try {
-      fab = fabriquerRecetteIA({ recette: m.issue.recette, demande: m.demande, filtres: m.filtres, langue: m.langue, modele: m.issue.modele ?? null, usage: m.issue.usage ?? null, convention: conventionCreation(), parente: m.parente, changement: m.changement, newId: r.newId, maintenant: new Date().toISOString() });
+      fab = fabriquerRecetteIA({ recette: m.issue.recette, demande: m.demande, filtres: m.filtres, langue: m.langue, modele: m.issue.modele ?? null, usage: m.issue.usage ?? null, convention: conventionCreation(), parente: m.parente, changement: m.changement, newId: r.newId, maintenant: new Date().toISOString(),sansTitresConfirme:m.sansTitresConfirme===true });
     } catch (e) { logError('creer_ia.fabriquer', { error: e }); dire(t('La recette n’a pas pu être gardée. Réessaie.')); return; }
     const gardee = { recipeId: fab.version.recipe_id, versionId: fab.version.id, ecrite: false };
     m.gardee = gardee;
@@ -301,7 +305,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
       : el('div', { class: 'status', role: 'status' }, t('Enregistrement de la recette…')));
 
   // L'aperçu est fabriqué comme « Garder » le fera (mêmes lignes, mêmes étapes) mais avec des identifiants jetables : jamais écrit.
-  const apercu = (m) => fabriquerRecetteIA({ recette: m.issue.recette, demande: m.demande, filtres: m.filtres, langue: m.langue, modele: m.issue.modele ?? null, usage: m.issue.usage ?? null, convention: null, parente: m.parente, changement: m.changement, newId: (p) => `${p}_apercu`, maintenant: null }).version;
+  const apercu = (m) => {let seq=0;return fabriquerRecetteIA({ recette: m.issue.recette, demande: m.demande, filtres: m.filtres, langue: m.langue, modele: m.issue.modele ?? null, usage: m.issue.usage ?? null, convention: null, parente: m.parente, changement: m.changement, newId: (p) => `${p}_apercu_${++seq}`, maintenant: null,sansTitresConfirme:true }).version;};
   const demandeEnvoyee = (m) => [m.demande, m.filtres.diets.length ? m.filtres.diets.map((d) => label('diet', d)).join(' ; ') : null, m.filtres.type ? label('recipe_type', m.filtres.type) : null, portionsTexte(m.filtres.servings), m.filtres.maxMinutes ? t('au plus {m} min', { m: m.filtres.maxMinutes }) : null, m.changement ? t('Changement : {c}', { c: m.changement }) : null].filter(Boolean).join(' · ');
   // C-9 / S1 / P9 : les restrictions DEMANDÉES, évaluées par assessVersion (N-8) ; jamais « Compatible » sur une proposition — tout état
   // autre qu'« incompatible » se dit « À vérifier », avec la ligne à retirer quand seul un facultatif bloque. La ligne est celle ÉCRITE.
@@ -334,7 +338,8 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
       el('p', { dataset: { role: 'description-ia' } }, t('Selon l’assistant : {texte}', { texte: rec.description })),
       el('div', { class: 'muted', dataset: { role: 'portions-ia' } }, `${portionsTexte(rec.servings)} · ${t('environ {m} min (estimé par l’assistant)', { m: rec.estimated_minutes })}`),
       ...avertissements.map((a) => el('div', { class: 'status warn' }, String(a))),
-      el('h3', null, t('Ingrédients')), el('ul', { dataset: { role: 'ingredients-ia' } }, ...version.ingredients.map((l) => el('li', null, l.source_text))),
+      rec.ingredient_blocks_issue?el('div',{class:'status warn stack'},el('p',null,t('Les titres de groupe n’ont pas pu être associés aux aliments. La recette reste disponible ; les groupes sont à relire.')),...rec.ingredient_blocks_issue.candidates.map(texte=>el('p',null,texte))):null,
+      el('h3', null, t('Ingrédients')), version.ingredient_structure?el('div',{class:'stack',dataset:{role:'ingredients-ia'}},...version.ingredient_structure.blocks.map(b=>b.kind==='heading'?el('h4',null,b.text):el('ul',null,el('li',null,version.ingredients.find(i=>i.id===b.ingredient_id)?.source_text||'')))):el('ul', { dataset: { role: 'ingredients-ia' } }, ...version.ingredients.map((l) => el('li', null, l.source_text))),
       el('h3', null, t('Étapes')), el('ol', { dataset: { role: 'etapes-ia' } }, ...version.steps.map((s) => el('li', null, s.text))),
       conseils.length ? [el('h3', null, t('Conseils')), el('ul', { dataset: { role: 'conseils-ia' } }, ...conseils.map((c) => el('li', null, t('Selon l’assistant : {texte}', { texte: c }))))] : null,
       notes.length ? [el('h3', null, t('À vérifier avant de servir')), el('ul', { dataset: { role: 'notes-ia' } }, ...notes.map((n) => el('li', null, String(n))))] : null,

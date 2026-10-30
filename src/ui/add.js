@@ -280,7 +280,15 @@ export async function renderAdd(params, query, ctx, { repo = repoModule, navigat
       const owner_id = Object.hasOwn(ctx, 'proprietaireDonnees') ? ctx.proprietaireDonnees : (await repo.get('sync_state', 'user_id'))?.value ?? null;
       const capture = await service.capturerPortee({ owner_id, estCourante });
       if (capture.issue === 'ok' && estCourante()) {
-        brouillons = await renderBrouillonsListe({ service, portee: capture.portee, estCourante, confirmer, messageErreur: texteErreurBrouillon, lien: href => lienAvecOrigine(href) });
+        const services = [];
+        if (typeof repo.muterTraductions === 'function') {
+          const { creerDepotTraductions } = await import('../domain/depot-traductions.js');
+          const traductions = creerDepotTraductions({ repo, getGeneration: getSyncGeneration });
+          const porteeTraductions = await traductions.capturerPortee({ owner_id, estCourante });
+          if (porteeTraductions.issue === 'ok') services.push({ service: traductions, portee: porteeTraductions.portee });
+          else services.push({ service: { listerBrouillons: async () => porteeTraductions }, portee: capture.portee });
+        }
+        brouillons = await renderBrouillonsListe({ service, portee: capture.portee, services, estCourante, confirmer, messageErreur: texteErreurBrouillon, lien: href => lienAvecOrigine(href) });
         root.append(brouillons);
       }
     } catch {

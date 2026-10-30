@@ -1,3 +1,6 @@
+import {preparerGardesVersionsStructurees} from '../domain/versions-structurees.js';
+import {estCleReponseTraduction,validerReponseLocaleTraduction,verifierQuotaReponsesTraduction} from '../domain/traductions-locales-format.js';
+import {verifierCommandeTraduction,ErreurTraduction} from '../domain/traductions-format.js';
 import {selectionRepriseConfirmee} from '../domain/comparaison-sources.js';
 import {canoniqueSources,empreinteSources,projectionSessionSources,projectionIdentitePage,projectionIdentiteDocument,verifierEmpreinteCommandeSources,octetsJsonbSources,LIMITES_SOURCES,validerCaptureSources,validerAppelIndex,ErreurSources} from '../domain/sources-format.js';
 import {estCleSources,validerLigneSources,verifierQuotaSources} from '../domain/sources-locaux.js';
@@ -642,7 +645,8 @@ async function protegerMutationRecettes(puts, conditionsInitiales, recettesIniti
     for (const c of [...contextes.values(), ...contextesEditions.values()]) if ((courant?.value ?? null) !== c.owner_id || (c.contexteValide && !c.contexteValide())) throw new ErreurCycleRecette('compte_change', c.recipe_id);
     return lireCondition(ancienne, courant, 'sync_state', 'user_id');
   } }));
-  return { conditions, recettes: [...contextes.values()].map(({ contexteValide, creation, ...c }) => c), editions: [...contextesEditions.values()].map(({ contexteValide, creation, ...c }) => c) };
+  const structurees=await preparerGardesVersionsStructurees({puts,conditions,deletes,lire:(store,id)=>base.get(store,id),lireReferencesVersion:async id=>({traductions:(await base.getAll('recipe_translations')).filter(r=>r.recipe_version_id===id),journaux:(await base.getAll('imports')).filter(r=>r.kind==='traduction'&&r.source_version_id===id)})});
+  return { conditions:structurees, recettes: [...contextes.values()].map(({ contexteValide, creation, ...c }) => c), editions: [...contextesEditions.values()].map(({ contexteValide, creation, ...c }) => c) };
 }
 
 function conditionsFichiers(fichiers, conditions, now) {
@@ -812,6 +816,27 @@ export async function muterEditeur({metier={},internes={}}={}, {origin,baseAtten
   verifierContexte();
   const sorties={};for(const s of new Set([...Object.keys(stamped),...Object.keys(ecrites||{})]))if(s!=='sync_state'){sorties[s]=[...(stamped[s]||[]),...(ecrites?.[s]||[])];emit('change',{store:s});}
   return {metier:sorties,internes:[...locaux,...(ecrites?.sync_state||[])]};
+}
+
+// Porte L6 : quota local et données métier partagent une transaction, jamais de crypto dans IDB.
+export async function muterTraductions({metier={},internes={},commandes=[]}={}, {origin='local',baseAttendue,contexteValide}={}){
+ const base=db,verifier=()=>{if(base!==baseAttendue||base!==db||typeof contexteValide!=='function'||!contexteValide())throw new ErreurTraduction('contexte_change');};verifier();
+ const fail=()=>{throw new ErreurTraduction('contenu_invalide');},clone=structuredClone;
+ if(!['device','local'].includes(origin)||Object.keys(metier).some(k=>!['puts','conditions','recettes','editions'].includes(k))||Object.keys(internes).some(k=>!['puts','conditions','deletes'].includes(k)))fail();
+ const cmds=clone(commandes);for(const c of cmds)await verifierCommandeTraduction(c);verifier();
+ const batch=metier.puts||{},conditions=Object.fromEntries(Object.entries(metier.conditions||{}).map(([s,cs])=>[s,[...cs]]));
+ if(Object.keys(batch).some(s=>!['recipe_translations','imports'].includes(s))||Object.keys(conditions).some(s=>!['recipes','recipe_versions','recipe_translations','imports','book_editions'].includes(s))||origin==='device'&&(Object.keys(batch).length||Object.keys(conditions).length||cmds.length))fail();
+ const estCle=k=>estCleEditeur(k)||estCleReponseTraduction(k),valider=r=>estCleReponseTraduction(r.key)?validerReponseLocaleTraduction(r):validerLigneEditeur(r),locaux=clone(internes.puts||[]),deletes=[...(internes.deletes||[])],fusions=new Map(),cs=[];
+ for(const r of locaux)valider(r);if(deletes.some(k=>!estCle(k)||k==='editor_library_epoch:v1')||new Set(locaux.map(r=>r.key)).size!==locaux.length||new Set(deletes).size!==deletes.length)fail();let toutes=null;
+ for(const c of internes.conditions||[]){if(c.toutes===true){if(toutes||typeof c.verifier!=='function')fail();toutes=c.verifier;continue;}if(c.key!=='user_id'&&!estCle(c.key)||c.index!=null||c.patch!=null||c.attendus!=null||c.key==='user_id'&&typeof c.fusion!=='function')fail();cs.push(c.fusion?{...c,fusion:(r,l)=>{const next=c.fusion(r,l);if(next?.then)fail();if(next){if(next.key!==c.key||c.key==='user_id'||locaux.some(x=>x.key===c.key))fail();valider(next);fusions.set(next.key,next);}return next;}}:c);}
+ cs.push({toutes:true,verifier:rows=>{verifier();const r=toutes?.(rows);if(r?.then)fail();const news=[...locaux,...fusions.values()],proteges=new Set(news.map(r=>r.key));
+ for(const recu of news.filter(estRecuEditeur)){const finales=new Map(rows.filter(r=>!deletes.includes(r.key)).map(r=>[r.key,r]));for(const r of news)finales.set(r.key,r);const rs=[...finales.values()].filter(r=>r.value?.owner_id===recu.value.owner_id&&r.value?.database_name===recu.value.database_name&&estRecuEditeur(r)).sort((a,b)=>a.value.publication.committed_at.localeCompare(b.value.publication.committed_at)||a.key.localeCompare(b.key));let n=rs.length-LIMITES_BROUILLONS.recus;for(const r of rs)if(n>0&&!proteges.has(r.key)){deletes.push(r.key);n--;}}
+ verifierQuotaEditeur(rows,news.filter(r=>estCleEditeur(r.key)),deletes);verifierQuotaReponsesTraduction(rows,news,deletes);}});conditions.sync_state=cs;
+ const now=syncNow(),taille=r=>{if(octetsJsonbSources(r)>524288)throw new ErreurTraduction('bornes');return r;},stamped=Object.fromEntries(Object.entries(batch).map(([s,rs])=>[s,rs.map(r=>taille({...clone(r),created_at:r.created_at||now,updated_at:now}))]));
+ const protection=await protegerMutationRecettes(stamped,conditions,metier.recettes||[],{origin,editions:metier.editions||[]});verifier();
+ const finales=Object.fromEntries(Object.entries(protection.conditions).map(([s,xs])=>[s,s==='sync_state'?xs:xs.map(c=>c.fusion?{...c,fusion:(...a)=>{const r=c.fusion(...a);return r?taille({...r,created_at:r.created_at||now,updated_at:now}):r;}}:c)]));
+ const ecrites=await base.mutate({origin,puts:{...stamped,...(locaux.length?{sync_state:locaux}:{})},deletes:{sync_state:deletes},conditions:finales,recettes:protection.recettes,editions:protection.editions,translation_commands:cmds});verifier();
+ for(const s of new Set([...Object.keys(stamped),...Object.keys(ecrites||{})]))if(s!=='sync_state')emit('change',{store:s});return{metier:ecrites,internes:[...locaux,...(ecrites?.sync_state||[])]};
 }
 
 // Porte L5 : commandes immuables, fichiers et intention interne partagent le commit.
@@ -1159,7 +1184,7 @@ async function ajouterComplementRecette(files,{source,lecture,nouvelImport,nouve
  if(lecture)conditionUnique(conditions,'imports',lecture.id,ancienne=>({key:lecture.id,fusion:(r,l)=>{if(!egal(r,nouvelleLecture?.attendue||lecture))fail('lecture_changee');lireCondition(ancienne,r,'imports',lecture.id,l);return nouvelleLecture?{...r,status:'ignore',replaced_by_import_id:importId}:{...r,scan_session_id:id,page_ids:[...new Set([...(r.page_ids||[]),...neuves])]};}}));
  if(nouvelleLecture||nouvelImport){const definition=nouvelleLecture?{id:importId,kind:'recette',recipe_id:contexte.recipe_id,edition_id,device_id:deviceId()}:nouvelImport;
   const {ligne}=nouvelleLigneImport({...definition,scan_session_id:id,page_ids:[...new Set([...(nouvelleLecture?lecture.page_ids||[]:nouvelImport.page_ids||[]),...neuves])]});
-  if(nouvelleLecture)ligne.previous_import_id=lecture.id;memoriserBaseImport(ligne,recettes,editions);lignes.imports=[ligne];(conditions.imports||=[]).push({key:ligne.id,absente:true},{index:'recipe_id',valeur:contexte.recipe_id,verifier:rows=>{if(rows.some(r=>r.id!==lecture?.id&&IMPORTS_OUVERTS.includes(r.status)))fail('import_ouvert');}});
+  if(nouvelleLecture)ligne.previous_import_id=lecture.id;memoriserBaseImport(ligne,recettes,editions);lignes.imports=[ligne];(conditions.imports||=[]).push({key:ligne.id,absente:true},{index:'recipe_id',valeur:contexte.recipe_id,verifier:rows=>{if(rows.some(r=>r.id!==lecture?.id&&['recette','web'].includes(r.kind)&&IMPORTS_OUVERTS.includes(r.status)))fail('import_ouvert');}});
  }
  const source_batch=edition_id&&docs.length?{operation_id:'sources_'+op,session_id:id,base_session:null}:null;
  const result=await saveBatch(lignes,{conditions,recettes,editions,fichiers,source_batch});
@@ -1192,7 +1217,7 @@ export async function ajouterPages(files, { edition_id = null, session_id = null
   if (nouvelImport) {
     const deja = await db.get('imports', nouvelImport.id);
     if (deja) throw new TransitionRefusee('imports', nouvelImport.id, deja.status);
-    const ouvert = nouvelImport.recipe_id != null ? (await db.byIndex('imports', 'recipe_id', nouvelImport.recipe_id)).find((i) => IMPORTS_OUVERTS.includes(i?.status)) : null;
+    const ouvert = nouvelImport.recipe_id != null ? (await db.byIndex('imports', 'recipe_id', nouvelImport.recipe_id)).find((i) => ['recette','web'].includes(i?.kind)&&IMPORTS_OUVERTS.includes(i?.status)) : null;
     if (ouvert) throw new TransitionRefusee('imports', 'recipe_id=' + String(nouvelImport.recipe_id), ouvert.status);
   }
   const existante = session_id ? await db.get('scan_sessions', session_id) : null;

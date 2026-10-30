@@ -476,10 +476,14 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   // la main (I-5), et non de la seule couverture des pages (ronde finale 2) — la phrase qui le dit n'est montrée que dans ce cas.
   const etat = { ligne: null, pages: new Map(), question: null, cleQuestion: null, rattache: null, verdict: null, focus: null, occupe: false, ecriteMain: false, seanceRefusee: null, bilan: null, ajout: null, erreurAjout: null };
   const oublierQuestion = () => { etat.question = null; etat.cleQuestion = null; etat.rattache = null; etat.verdict = null; etat.ecriteMain = false; };
-  root.etatRoute = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, pageIds: [...(Array.isArray(etat.ligne?.page_ids) ? etat.ligne.page_ids : [])], vol: !!etat.ligne && volEnCours()?.importId === etat.ligne.id, discordance: etat.verdict });
+  let routeAffichee={importId:null,status:null,pageIds:[],vol:false,discordance:null};
+  const actualiserRoute=()=>{routeAffichee={importId:etat.ligne?.id??null,status:etat.ligne?.status??null,pageIds:[...(Array.isArray(etat.ligne?.page_ids)?etat.ligne.page_ids:[])],vol:!!etat.ligne&&volEnCours()?.importId===etat.ligne.id,discordance:etat.verdict};};
+  root.etatRoute=()=>({...routeAffichee,pageIds:[...routeAffichee.pageIds]});
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
   if (!recetteActiveDansContexte(recipe, ctx)) return mentionCycleRecette(recipe, ctx?.editionsById?.get(recipe.edition_id));
   const contexteRecette = await capturerRecette(repo, recipe, { ctx });
+  const versionSource=structuredClone(recipe.current_version_id?(ctx?.versionsById?.get(recipe.current_version_id)||await repo.get('recipe_versions',recipe.current_version_id)||null):null);
+  const baseVersion=versionSource?canoniqueEditeur(projectionVersionEditeur(versionSource)):null;
   // D-11 : une recette qui a déjà son texte (et pas d'adresse : voir plus haut) n'a pas d'entrée ici — le dire, revenir à la fiche.
   if (recipe.availability === 'available') { toast(t('Cette recette a déjà son texte.')); navigate(`/recipes/${encodeURIComponent(recipe.id)}`); return root; }
 
@@ -668,7 +672,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
       else if (r.raison === 'non_connecte') session = null; // la session a disparu entre le rendu et le clic : la carte revient
     }
     await redessiner();
-    if (r.issue === 'a_verifier') await decider();
+    if (r.issue === 'a_verifier'&&!etat.ligne?.resultat?.ingredient_blocks_issue) await decider();
   }
   async function annuler() { const L = etat.ligne; if (!L) return; await annulerVol(L.id); await redessiner(); }
   async function changerLesPages() {
@@ -707,11 +711,19 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
       const verdict = discordance(resultat, reference);
       etat.verdict = verdict;
       const versions = await repo.byIndex('recipe_versions', 'recipe_id', recipe.id);
+      const parent=versions.find(v=>v.id===reference.current_version_id)||null;
+      if((reference.current_version_id??null)!==(versionSource?.id??null)||(parent?canoniqueEditeur(projectionVersionEditeur(parent)):null)!==baseVersion){toast(t('La version source a changé ou n’est plus disponible. Tes modifications restent dans ce formulaire.'));apres='redessiner';return;}
+      let sansTitresConfirme=false;
+      if(Object.hasOwn(versionSource||{},'ingredient_structure')&&!resultat.ingredient_blocks){
+        const confirmation=cle+'|'+baseVersion;
+        sansTitresConfirme=etat.groupesConfirmes===confirmation||await confirmer(t('Garder cette lecture sans titres de groupe ?'),{body:el('p',null,t('Les ingrédients de cette nouvelle version garderont leur ordre. Les titres de la version originale resteront consultables. La réponse déjà reçue sera conservée si tu annules.'))});
+        if(!sansTitresConfirme){apres='redessiner';return;}etat.groupesConfirmes=confirmation;
+      }
       const pageIds = Array.isArray(L.page_ids) ? L.page_ids : [];
       const pages = (await Promise.all(pageIds.map((id) => repo.get('source_pages', id)))).filter(Boolean);
       const ed = reference.edition_id ? (ctx.editionsById?.get(reference.edition_id) ?? (await repo.get('book_editions', reference.edition_id)) ?? null) : null;
       const conventionId = typeof ctx.conventionFor === 'function' ? ctx.conventionFor(reference) : (ed?.unit_convention_id ?? null);
-      const options = { reference, versions, pages, pageIds, edition: ed, convention: conventionId ? getConvention(conventionId) : null, importId: L.id, modele: modeleBorne(L.model), photo: photoBornee(L), maintenant: maintenant(), reecrirePositions: !issueDUneSeance(L) }; // lot D (§ 4.8.1 point 1, N-1)
+      const options = { reference, versions,versionSource,sansTitresConfirme, pages, pageIds, edition: ed, convention: conventionId ? getConvention(conventionId) : null, importId: L.id, modele: modeleBorne(L.model), photo: photoBornee(L), maintenant: maintenant(), reecrirePositions: !issueDUneSeance(L) }; // lot D (§ 4.8.1 point 1, N-1)
       const sonde = fabriquerExtraction(resultat, options); // pur : lu pour `remplacement` (I-5) avant la décision
       // Ronde finale 2 (garde de couverture) : une lecture qui ne relit pas TOUTES les pages de la version courante (octets absents ici, page retirée de la
       // ligne) ne la remplace jamais d'office — elle perdrait en silence les lignes de ces pages. « Remplacer par cette lecture ? » (I-5) est posée ;
@@ -752,6 +764,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
           verification_state: fab.recipe.verification_state, ingredient_ids: fab.recipe.ingredient_ids, printed_page: c.printed_page ?? fab.recipe.printed_page } : {}),
       };
     } }] };
+    if(versionSource)conditions.recipe_versions=[{key:versionSource.id,fusion:c=>{if(!c||canoniqueEditeur(projectionVersionEditeur(c))!==baseVersion)throw new TransitionRefusee('recipe_versions',versionSource.id,null);return null;}}];
     // Lot D (§ 4.8.1 point 2, N-1) : la séance n'est plus écrite par une copie lue hors transaction — elle entre dans LA transaction par le sac
     // `conditions`, relue dedans (deux enregistrements concurrents gardent leurs deux recipe_ids) ; done seulement quand plus aucune de ses photos n'est
     // sans rôle (statutSeanceApres, sur ses pages relues juste avant : une page arrivée entre-temps compte comme sans rôle) ; disparue → refus.
@@ -939,6 +952,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     }
     if (statut === 'a_verifier') {
       bloc.append(el('p', { class: 'muted', style: { margin: 0 } }, t('Lecture reçue le {d}', { d: formatDate(dateReception(L), { withTime: true }) })));
+      if(L.resultat?.ingredient_blocks_issue)bloc.append(el('div',{class:'status warn stack',dataset:{role:'groupes-extraction-a-relire'}},el('p',null,t('Les titres de groupe n’ont pas pu être associés aux aliments. La recette reste disponible ; les groupes sont à relire.')),...(L.resultat.ingredient_blocks_issue.candidates||[]).map(texte=>el('p',null,texte))));
       if (etat.question === 'discordance') bloc.append(panneauDiscordance());
       else if (etat.question === 'remplacer') bloc.append(panneauRemplacer());
       else bloc.append(el('div', { class: 'row' },
@@ -971,7 +985,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     veille = setTimeout(() => { veille = null; if (root.isConnected) passe().then(() => veiller(false)); }, veilleMs);
   }
   function dessiner() {
-    if (etat.bilan) { root.replaceChildren(enTete(), etat.bilan); return; }
+    if (etat.bilan) { root.replaceChildren(enTete(), etat.bilan);actualiserRoute(); return; }
     const L = etat.ligne;
     const statut = L?.status ?? null;
     const pageIds = Array.isArray(L?.page_ids) ? L.page_ids : [];
@@ -981,6 +995,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     majEnLigne();
     veiller();
     if (etat.focus) { const { role, page } = etat.focus; etat.focus = null; root.querySelector(`button[data-role="${role}"][data-page="${CSS.escape(page)}"]`)?.focus(); }
+    actualiserRoute();
   }
 
   await charger();

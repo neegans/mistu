@@ -1,4 +1,5 @@
 import {estCommandeSources,ciblesCommandeSources,CLE_SOURCE_CONFIRMEE} from './commandes-sources.js';
+import {estCommandeProtegee,ciblesCommandeProtegee,estCommandeTraduction,idsVersionsSourcesTraduction,estPhaseJournalTraduction} from './commandes-traduction.js';
 // Envoi d'une passe (spec § 5.3) : la file est lue, dédoublonnée, relue, envoyée par lots ; chaque réponse est
 // appliquée en UNE transaction (retraits, réécritures non capturées, conflits, quarantaine). I5 : une fiche n'est
 // « envoyée » que par l'absence d'entrée la concernant.
@@ -45,7 +46,7 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
   // avec les compteurs du moteur et « À envoyer » de Réglages). Puis les deux retenues de l'envoi : la quarantaine
   // attend un geste de la personne, une heure de reprise pas encore venue attend son heure.
   async function lireFile() {
-    const miennes = await fileDe(db, getUserId()),sources=miennes.some(estCommandeSources);
+    const miennes = await fileDe(db, getUserId()),sources=miennes.some(e=>estCommandeProtegee(e)||estPhaseJournalTraduction(e));
     // Une phase en recul reste visible au composeur : ni ses suivantes, ni les lecteurs
     // de ses sources ne peuvent dépasser un accusé perdu. Cela inclut leurs bases ordinaires.
     return miennes.filter((e) => sources||commandeCycle(e)||e.lifecycle_blocked||((!e.quarantined_at || e.last_error==='cycle') && prete(e)))
@@ -76,7 +77,8 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
   }
 
   async function appliquer(lot, reponse, entreesParSeq) {
-    if(estCommandeSources(lot.elements[0]))return appliquerSourcesL5(lot,reponse,entreesParSeq);
+    if(estCommandeProtegee(lot.elements[0]))return appliquerSourcesL5(lot,reponse,entreesParSeq);
+    if(lot.seqs.some(seq=>estPhaseJournalTraduction(entreesParSeq.get(seq))))return appliquerJournalTraduction(lot,reponse,entreesParSeq);
     if (estLotSources(lot.elements[0])) return appliquerSources(lot, reponse, entreesParSeq);
     if(lot.elements[0]?.op==='lifecycle') return appliquerCommande(lot,reponse,entreesParSeq);
     const owner=getUserId();
@@ -138,21 +140,35 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     return effets;
   }
 
+  async function appliquerJournalTraduction(lot,reponse,entreesParSeq){
+    const effets={retirer:[],reecrire:{},conflits:[],quarantaine:[],retirerConflits:[]},owner=getUserId(),entry=entreesParSeq.get(lot.seqs[0]);
+    if(lot.elements.length!==1||lot.seqs.length!==1||!estPhaseJournalTraduction(entry))return effets;
+    const meme=r=>r.store===entry.store&&r.id===entry.id,rejete=(reponse.rejected||[]).find(meme),accuse=[...(reponse.accepted||[]),...(reponse.adjusted||[])].some(meme);
+    if(!rejete&&!accuse)return effets;
+    const conditions={sync_state:[gardeCompteCycle(owner,getUserId)],outbox:[{key:entry.seq,fusion:r=>{if(JSON.stringify(r)!==JSON.stringify(entry))throw Error('Phase de traduction changée pendant envoi');return null;}}]};
+    if(rejete){
+      const conflit={id:'translation-journal:'+entry.id+':'+entry.seq,kind:'translation',store:entry.store,record_id:entry.id,user_id:owner,local:structuredClone(entry.snapshot),server:rejete.server??null,reason:rejete.reason,at:new Date(maintenant()).toISOString()};
+      effets.conflits.push(conflit);await db.mutate({origin:'remote',puts:{outbox:[{...entry,lifecycle_blocked:true,last_error:rejete.reason||'conflit'}],sync_conflicts:[conflit]},conditions});
+    }else{effets.retirer.push(entry.seq);await db.mutate({origin:'remote',deletes:{outbox:[entry.seq]},conditions});}
+    return effets;
+  }
+
   async function appliquerSourcesL5(lot,reponse,entreesParSeq){
-    const c=lot.elements[0],owner=getUserId(),entree=lot.seqs.map(s=>entreesParSeq.get(s)).find(e=>estCommandeSources(e)&&e.payload.operation_id===c.operation_id);
+    const c=lot.elements[0],owner=getUserId(),entree=lot.seqs.map(s=>entreesParSeq.get(s)).find(e=>estCommandeProtegee(e)&&e.payload.operation_id===c.operation_id);
     const effets={retirer:[],reecrire:{},conflits:[],quarantaine:[],retirerConflits:[]};if(!entree)return effets;
     const match=r=>r.store===c.store&&r.id===c.id&&r.operation_id===c.operation_id&&r.payload_sha256===c.payload_sha256;
     const ack=(reponse.accepted||[]).find(match),refus=(reponse.rejected||[]).find(match);if(!ack&&!refus)return effets;
     const puts={},deletes={},conditions={sync_state:[gardeCompteCycle(owner,getUserId)],outbox:[{key:entree.seq,fusion:r=>{if(JSON.stringify(r)!==JSON.stringify(entree))throw Error('Intention source modifiée pendant envoi');return null;}}]};
     if(ack){
-      const attendus=c.op==='source_transfer'?(c.phase==='part'?c.rows.map(r=>({store:r.store,id:r.id})):c.phase==='finish'?[{store:c.store,id:c.id}]:[]):ciblesCommandeSources(c),rows=ack.server_rows;
+      const attendus=c.op==='source_transfer'?(c.phase==='part'?c.rows.map(r=>({store:r.store,id:r.id})):c.phase==='finish'?[{store:c.store,id:c.id}]:[]):ciblesCommandeProtegee(c),rows=ack.server_rows;
       if(!Array.isArray(rows)||rows.length!==attendus.length||new Set(rows.map(cleDe)).size!==rows.length||rows.some(r=>!attendus.some(a=>cleDe(a)===cleDe(r))||r.deleted_at||r.data?.id!==r.id||!Number.isFinite(Date.parse(r.updated_at))||!Number.isFinite(r.server_seq)))return effets;
       for(const r of rows){const key=CLE_SOURCE_CONFIRMEE(r.store,r.id);conditions.sync_state.push({key,fusion:current=>current?.value?.user_id===owner&&current.value.server_seq>r.server_seq?null:{key,value:{user_id:owner,data:r.data,server_seq:r.server_seq,updated_at:r.updated_at,deleted_at:null}}});}
       deletes.outbox=[entree.seq];effets.retirer=[entree.seq];
     }else{
-      const file=await fileDe(db,owner),cles=new Set(ciblesCommandeSources(c).map(cleDe));
-      puts.outbox=file.filter(e=>e.seq>=entree.seq&&(e.seq===entree.seq||estCommandeSources(e)&&ciblesCommandeSources(e.payload).some(r=>cles.has(cleDe(r))))).map(e=>({...e,lifecycle_blocked:true,last_error:refus.reason||'source_changed'}));
-      const conflit={id:'source:'+c.operation_id,store:c.store,record_id:c.id,operation_id:c.operation_id,user_id:owner,local:c,server:refus.server||null,reason:refus.reason||'source_changed',at:reponse.server_time||new Date().toISOString(),kind:'source'};puts.sync_conflicts=[conflit];effets.conflits=[conflit];
+      const file=await fileDe(db,owner),cles=new Set(ciblesCommandeProtegee(c).map(cleDe));
+      puts.outbox=file.filter(e=>e.seq>=entree.seq&&(e.seq===entree.seq||estCommandeProtegee(e)&&ciblesCommandeProtegee(e.payload).some(r=>cles.has(cleDe(r))))).map(e=>({...e,lifecycle_blocked:true,last_error:refus.reason||'source_changed'}));
+      const kind=estCommandeTraduction(c)?'translation':'source';
+      const conflit={id:kind+':'+c.operation_id,store:c.store,record_id:c.id,operation_id:c.operation_id,user_id:owner,local:c,server:refus.server||null,reason:refus.reason||'source_changed',at:reponse.server_time||new Date().toISOString(),kind};puts.sync_conflicts=[conflit];effets.conflits=[conflit];
       const serveur=refus.server;if(serveur?.data?.id===c.id&&Number.isFinite(serveur.server_seq)){const key=CLE_SOURCE_CONFIRMEE(c.store,c.id);conditions.sync_state.push({key,fusion:current=>current?.value?.user_id===owner&&current.value.server_seq>serveur.server_seq?null:{key,value:{user_id:owner,data:serveur.data,server_seq:serveur.server_seq,updated_at:serveur.updated_at,deleted_at:serveur.deleted_at??null}}});}
     }
     await db.mutate({puts,deletes,conditions,origin:'remote'});return effets;
@@ -366,8 +382,13 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
       const owner=getUserId(),key='source-capability:'+owner,cached=await db.get('sync_state',key);
       if(cached?.value?.protocol!==1){const r=typeof transport.capacites==='function'?await transport.capacites():null;if(r?.erreur||r?.capacites?.source_revisions!==1){bilan.erreur=r?.erreur||{type:'incompatible'};return bilan;}await db.mutate({origin:'remote',puts:{sync_state:[{key,value:{protocol:1}}]},conditions:{sync_state:[gardeCompteCycle(owner,getUserId)]}});}
     }
+    if(file.some(e=>estCommandeTraduction(e)||estPhaseJournalTraduction(e))){
+      const owner=getUserId(),key='translation-capability:'+owner,cached=await db.get('sync_state',key);
+      if(cached?.value?.protocol!==1){const r=typeof transport.capacites==='function'?await transport.capacites():null;if(r?.erreur||r?.capacites?.recipe_language!==1){bilan.erreur=r?.erreur||{type:'incompatible'};return bilan;}await db.mutate({origin:'remote',puts:{sync_state:[{key,value:{protocol:1}}]},conditions:{sync_state:[gardeCompteCycle(owner,getUserId)]}});}
+    }
     const entreesParSeq = new Map(file.map((e) => [e.seq, e]));
-    const { lots, retenues, abandonnees } = await composerLots(file, (store, id) => db.get(store, id));
+    const sources=await db.getSnapshot(['imports','recipe_translations']);
+    const { lots, retenues, abandonnees } = await composerLots(file, (store, id) => db.get(store, id),{versionsSources:idsVersionsSourcesTraduction(sources,file)});
     bilan.retenues = retenues.length;
     bilan.abandonnees = abandonnees.length;
     await marquerRetenues(retenues, entreesParSeq);

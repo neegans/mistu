@@ -676,7 +676,7 @@ export async function runCarnetTests({ eq, ok }) {
       pPart.remove();
       // --- Autres gestes : TOUT l'ancien contenu de controls et de la rangée d'actions, sauf « Commencer à cuisiner » et « Corriger » (qui y reste aussi) ; pas l'Export
       const boutonsDetails = textes(details, 'button, a');
-      eq(['Créer ma version', 'Corriger', '−', '+', 'Avec quoi on mange ça ?', 'Ajouter à mon repas', 'Liste d’épicerie', 'Rattacher à un plat', 'Original', 'Métrique', 'US', 'FR', 'EN'].filter((x) => !boutonsDetails.includes(x)), [], 'fiche T3 : « autres gestes » porte les anciens boutons de controls (versions, portions, unités, langue) ET de la rangée d’actions');
+      eq(['Créer ma version', 'Corriger', '−', '+', 'Avec quoi on mange ça ?', 'Ajouter à mon repas', 'Liste d’épicerie', 'Rattacher à un plat', 'Original', 'Métrique', 'US'].filter((x) => !boutonsDetails.includes(x)), [], 'fiche T3 : « autres gestes » porte les anciens boutons de controls (versions, portions, unités) ET de la rangée d’actions');
       eq([boutonsDetails.includes('Commencer à cuisiner'), boutonsDetails.includes('Exporter JSON-LD'), boutonsDetails.includes('Exporter YAML (Paprika)'), !!q(details, '#servings-val'), q(details, '.chip.neutral')?.textContent, !!q(details, 'select'), details.querySelector('.row.between') !== null],
         [false, false, false, true, 'Rapide · V1', false, true], 'fiche T3 : ni « Commencer à cuisiner » ni l’Export dans le details ; les portions et les puces V1 y sont ; une seule version → badge, pas de select ; la .row.between (épingle creer-ia) y est');
       const gestes = q(tete, '[data-role="fiche-gestes"]'); const principal = q(gestes, '[data-role="geste-principal"]');
@@ -826,7 +826,7 @@ export async function runCarnetTests({ eq, ok }) {
       await versions(version('rc_lu', { provenance: { source_page_ids: [], generated_by: 'ai', model: null, edition_id: null, convention_snapshot: null, import_id: 'imp_lu', lu_le: DATE, source_url: 'https://site.test/lu', url_finale: 'https://site.test/lu', source_kind: 'jsonld', site: 'Le site' } }));
       const pLu = await renderRecipe({ id: 'rc_lu' }, {}, await ctxPour(), { matchMedia: fauxMatchMedia(true).matchMedia });
       eq([[...(q(pLu, '[data-role="fiche-etat"]')?.children ?? [])].map((c) => c.dataset.role ?? c.className), q(pLu, '[data-role="fiche-etat"]')?.children?.[1]?.querySelector('[data-role="etat-verification"]') !== null],
-        [['stack', 'row', 'fiche-gestes', 'resume-reperes detail', 'bandeau-web', 'bandeau-lecture'], true], 'fiche T3 / I2 : les bandeaux restent dans l’état de l’en-tête après le titre et les états ; Mes notes les suit');
+        [['stack', 'row', 'fiche-gestes', 'lecture-langue stack', 'resume-reperes detail', 'bandeau-web', 'bandeau-lecture'], true], 'fiche T3 / I2 : les bandeaux restent dans l’état de l’en-tête après le titre et les états ; Mes notes les suit');
       // --- Le sous-titre reste provenanceText (R-UI-P2) : « Du web · » / « De mon livre · » sont les préfixes de la CARTE-PLAT (ligneSource, T2), pas de la fiche — tests/creer-ia.js:1397 épingle « Mon livre — A. B. · page 58 » en header p.
       eq([q(pL, 'header p.muted')?.textContent, q(pH, 'header p.muted')?.textContent], ['Source personnelle', 'site.test'], 'fiche T3 : le sous-titre est provenanceText, inchangé — « Source personnelle » sans livre ni adresse, l’hôte RECALCULÉ pour une fiche web (R-UI-P2 ; § 4.2 amendé par T6)');
       // --- La photo en tête : dans la colonne photo, sans style en ligne (la feuille rend 8:5 pleine colonne)
@@ -1855,34 +1855,35 @@ export async function runCarnetTests({ eq, ok }) {
         await repo.saveBatch({ recipes: [italienne, inconnue], recipe_versions: [version, { ...version, id: inconnue.current_version_id, recipe_id: inconnue.id }] }, {conditions:{recipes:[{key:italienne.id,absente:true},{key:inconnue.id,absente:true}]}});
         const avant = { fiche: await repo.get('recipes', italienne.id), version: await repo.get('recipe_versions', version.id) };
         const scene = document.createElement('div'); document.body.append(scene);
+        const anglaiseDisponible={id:'carnet-tr-en',recipe_version_id:version.id,locale:'en',alignment_format:1,translated_content:{title:'Bread',ingredients:['Flour'],steps:['Knead.']}};await repo.save('recipe_translations',anglaiseDisponible);
         const ctx = async () => ({ ...await getData(true), sync: {} });
         const bouton = (node, texte) => [...node.querySelectorAll('button')].find(b => b.textContent === texte);
-        const champLangue = node => [...node.querySelectorAll('label.field')].find(l => l.querySelector('span')?.textContent === 'Langue de lecture');
+        const champLangue=node=>node.querySelector('[data-role=langue-recette]');
         const selection = node => [...champLangue(node).querySelectorAll('button.active')].map(b => b.textContent);
-        const lienTraduire = node => [...node.querySelectorAll('a')].find(a => a.textContent === 'Traduire');
+        const lienTraduire = node => [...node.querySelectorAll('a')].find(a => a.textContent === 'Traduire moi-même');
         const queryDuLien = lien => Object.fromEntries(new URLSearchParams(lien.getAttribute('href').split('?')[1]));
         try {
           const fiche = await renderRecipe({ id: italienne.id }, {}, await ctx()); scene.append(fiche);
           const details = fiche.querySelector('[data-role=autres-gestes]'); details.open = true;
           eq(selection(fiche), ['Original'], 'Langue mobile : la sélection initiale est Original');
-          bouton(champLangue(fiche), 'FR').click();
-          eq(selection(fiche), ['FR'], 'Langue mobile : FR seul devient visuellement actif après le choix');
-          ok(fiche.textContent.includes('Aucune traduction FR pour cette version.'), 'Langue mobile : original italien sans traduction française dit son absence');
+          bouton(champLangue(fiche), 'Français').click();
+          eq(selection(fiche), ['Français'], 'Langue mobile : FR seul devient visuellement actif après le choix');
+          ok(fiche.querySelector('[data-role=texte-etape]')?.textContent==='Impastare.'&&!!fiche.querySelector('[data-role=traduction-manquante]'), 'Langue mobile : original italien sans traduction française dit son absence');
           const cibleFr = queryDuLien(lienTraduire(fiche));
           eq([cibleFr.kind, cibleFr.v, cibleFr.locale], ['translation', version.id, 'fr'], 'Langue mobile : le lien de traduction transporte exactement la version et FR choisies');
           let editeur = await renderRecipeEdit({ id: italienne.id }, cibleFr, await ctx());
-          eq(editeur.querySelector('h1')?.textContent, 'Traduire — FR', 'Langue mobile : italien vers FR ouvre bien l’éditeur français');
-          bouton(champLangue(fiche), 'EN').click();
-          eq(selection(fiche), ['EN'], 'Langue mobile : EN seul devient visuellement actif après FR');
+          eq([editeur.querySelector('h1')?.textContent,cibleFr.format],['Traduire — Français','2'],'Langue mobile : italien vers FR ouvre le nouvel éditeur français explicite');editeur.dispose?.();
+          bouton(champLangue(fiche), 'Anglais').click();
+          eq(selection(fiche), ['Anglais'], 'Langue mobile : EN seul devient visuellement actif après FR');
           eq(queryDuLien(lienTraduire(fiche)).locale, 'en', 'Langue mobile : le prochain lien suit EN sans conserver FR');
           bouton(champLangue(fiche), 'Original').click();
-          eq([selection(fiche), !!lienTraduire(fiche)], [['Original'], false], 'Langue mobile : revenir à Original retire l’avis de traduction absente');
-          bouton(champLangue(fiche), 'FR').click();
+          eq([selection(fiche), !!fiche.querySelector('[data-role=traduction-manquante]')], [['Original'], false], 'Langue mobile : revenir à Original retire l’avis de traduction absente');
+          bouton(champLangue(fiche), 'Français').click();
           bouton(details, 'Métrique').click();
-          eq([selection(fiche), details.open, queryDuLien(lienTraduire(fiche)).locale], [['FR'], true, 'fr'], 'Langue mobile : changer les unités conserve le choix FR et le volet ouvert');
+          eq([selection(fiche), details.open, queryDuLien(lienTraduire(fiche)).locale], [['Français'], true, 'fr'], 'Langue mobile : changer les unités conserve le choix FR et le volet ouvert');
 
           const manque = await renderRecipe({ id: inconnue.id }, { lang: 'fr' }, await ctx()); scene.append(manque);
-          ok(manque.textContent.includes('Aucune traduction FR pour cette version.'), 'Langue mobile : une langue originale absente ne fait pas croire qu’une traduction FR existe');
+          ok(manque.querySelector('[data-role=texte-etape]')?.textContent==='Impastare.'&&!!manque.querySelector('[data-role=traduction-manquante]'), 'Langue mobile : une langue originale absente ne fait pas croire qu’une traduction FR existe');
           const lienInconnu = lienTraduire(manque);
           const cibleInconnue = lienInconnu ? queryDuLien(lienInconnu) : {};
           eq(cibleInconnue.locale, 'fr', 'Langue mobile : sans langue originale, le lien conserve aussi la demande FR');
@@ -1902,7 +1903,7 @@ export async function runCarnetTests({ eq, ok }) {
           for (const [champ, texte] of [[titre, 'Pain'], [ingredients, 'Farine'], [etapes, 'Pétrir.']]) { champ.value = texte; champ.dispatchEvent(new Event('input', { bubbles: true })); }
           bouton(editeur, 'Enregistrer la traduction').click();
           let traductions = [];
-          for (let i = 0; i < 50; i++) { traductions = await repo.all('recipe_translations'); if (traductions.length) break; await new Promise(r => setTimeout(r, 5)); }
+          for (let i = 0; i < 50; i++) { traductions = (await repo.all('recipe_translations')).filter(x=>x.locale==='fr'); if (traductions.length) break; await new Promise(r => setTimeout(r, 5)); }
           eq(traductions.map(tr => [tr.recipe_version_id, tr.locale, tr.origin, tr.translated_content]), [[version.id, 'fr', 'manual', { title: 'Pain', ingredients: ['Farine'], steps: ['Pétrir.'] }]], 'Langue mobile : la traduction saisie reste manuelle et liée à la version française demandée');
           eq({ fiche: await repo.get('recipes', italienne.id), version: await repo.get('recipe_versions', version.id) }, avant, 'Langue mobile : choisir une langue et enregistrer une traduction ne réécrit ni fiche ni original culinaire');
           eq(appels, 0, 'Langue mobile : aucun appel IA ou réseau pour ces gestes');

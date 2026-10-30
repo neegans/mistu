@@ -1,9 +1,10 @@
 // Modèle de saisie local : une seule représentation, sans réanalyse implicite du texte source.
 // Les identités de recette/version, cycles, empreintes et écritures appartiennent au service.
 import { detectTimers, parseIngredientLine } from './lines.js';
+import { validerStructureIngredients, fabriquerStructureIngredients, deplacerBlocIngredients } from './structure-ingredients.js';
 
 export const CHAMPS_METADATA_RECETTE = ['display_title','original_title','original_language','type','cuisines','tags','printed_page','source_label'];
-export const CHAMPS_CONTENU_RECETTE = ['servings','yield_text','prep_minutes','cook_minutes','active_minutes','total_minutes','ingredients','steps','changes','notes','status'];
+export const CHAMPS_CONTENU_RECETTE = ['servings','yield_text','prep_minutes','cook_minutes','active_minutes','total_minutes','ingredients','ingredient_structure','steps','changes','notes','status'];
 const NOMBRES = ['servings','prep_minutes','cook_minutes','active_minutes','total_minutes'];
 const LIGNE = ['id','source_text','quantity','unit_id','unit_text','unit_candidates','name_text','preparation','optional','ingredient_id','verification_state','evidence','match_locale','ingredient_candidates','uncertain','substituted_from'];
 const ETAPE = ['id','position','text','timers'];
@@ -41,6 +42,7 @@ export function poserLectureRecette(modele,resultat,{newId}={}) {
   if(resultat.printed_page!=null&&!p.metadata.printed_page)p.metadata.printed_page=resultat.printed_page;
   p.contenu.ingredients=(resultat.ingredients||[]).map(i=>({...parseIngredientLine(i.source_text),id:id('ri'),uncertain:i.uncertain===true}));
   p.contenu.steps=(resultat.steps||[]).map((s,i)=>({id:id('st'),position:i+1,text:s.text,...detectTimers(s.text)}));
+  const structure=fabriquerStructureIngredients(resultat,p.contenu.ingredients,{newId:id});if(structure)p.contenu.ingredient_structure=structure;
   if(!p.contenu.notes&&typeof resultat.notes==='string')p.contenu.notes=resultat.notes;
   return p;
 }
@@ -56,7 +58,7 @@ export function validerModeleRecette(payload,{publication=false}={}) {
     }
     for(const [k,v] of Object.entries(c)) {
       if(NOMBRES.includes(k)) {if(!(v===null||typeof v==='string'||Number.isFinite(v)))return refus();}
-      else if(!['ingredients','steps'].includes(k)&&!texte(v)) return refus();
+      else if(!['ingredients','steps','ingredient_structure'].includes(k)&&!texte(v)) return refus();
     }
     if(!Array.isArray(c.ingredients)||!Array.isArray(c.steps))return refus();
     for(const [rows,keys,step] of [[c.ingredients,LIGNE,false],[c.steps,ETAPE,true]]) {
@@ -76,6 +78,7 @@ export function validerModeleRecette(payload,{publication=false}={}) {
       }
     }
     if(publication) {
+      if(Object.hasOwn(c,'ingredient_structure')&&!validerStructureIngredients(c.ingredient_structure,c.ingredients).ok)return refus();
       for(const k of NOMBRES) if(Object.hasOwn(c,k)) { const n=nombre(c[k]);if(n===undefined||n!==null&&(n<0||k==='servings'&&n===0))return refus();c[k]=n; }
       if(Object.hasOwn(m,'printed_page')) {const n=nombre(m.printed_page);if(n===undefined||n!==null&&(!Number.isInteger(n)||n<1))return refus();m.printed_page=n;}
       if(Object.hasOwn(c,'yield_text')&&c.yield_text!==null&&Array.from(c.yield_text).length>200)return refus();
@@ -103,8 +106,8 @@ export function modifierIngredient(modele,id,patch) {
 }
 export function confirmerIngredient(modele,id,verifie) {const p=copie(modele),l=p.contenu.ingredients.find(i=>i.id===id);if(l){l.verification_state=verifie?'verified':'to_verify';if(verifie&&Object.hasOwn(l,'uncertain'))l.uncertain=false;}return p;}
 export function modifierEtape(modele,id,text) {const p=copie(modele),s=p.contenu.steps.find(x=>x.id===id);if(s&&s.text!==text){s.text=text;delete s.timers;Object.assign(s,detectTimers(text));}return p;}
-export function deplacerElement(modele,liste,id,sens) {const p=copie(modele),rows=p.contenu[liste];if(!['ingredients','steps'].includes(liste))return p;const i=rows.findIndex(x=>x.id===id),j=i+sens;if(i>=0&&j>=0&&j<rows.length&&[-1,1].includes(sens)){[rows[i],rows[j]]=[rows[j],rows[i]];if(liste==='steps')rows.forEach((s,k)=>s.position=k+1);}return p;}
-export function retirerElement(modele,liste,id) {const p=copie(modele);if(['ingredients','steps'].includes(liste)){p.contenu[liste]=p.contenu[liste].filter(x=>x.id!==id);if(liste==='steps')p.contenu.steps.forEach((s,k)=>s.position=k+1);}return p;}
+export function deplacerElement(modele,liste,id,sens) {if(liste==='ingredients'&&Object.hasOwn(modele.contenu,'ingredient_structure'))return deplacerBlocIngredients(modele,id,sens).modele||copie(modele);const p=copie(modele),rows=p.contenu[liste];if(!['ingredients','steps'].includes(liste))return p;const i=rows.findIndex(x=>x.id===id),j=i+sens;if(i>=0&&j>=0&&j<rows.length&&[-1,1].includes(sens)){[rows[i],rows[j]]=[rows[j],rows[i]];if(liste==='steps')rows.forEach((s,k)=>s.position=k+1);}return p;}
+export function retirerElement(modele,liste,id) {const p=copie(modele);if(['ingredients','steps'].includes(liste)){p.contenu[liste]=p.contenu[liste].filter(x=>x.id!==id);if(liste==='steps')p.contenu.steps.forEach((s,k)=>s.position=k+1);if(liste==='ingredients'&&Array.isArray(p.contenu.ingredient_structure?.blocks))p.contenu.ingredient_structure.blocks=p.contenu.ingredient_structure.blocks.filter(b=>b.kind!=='ingredient'||b.ingredient_id!==id);}return p;}
 
 export function construireContenuRecette(payload,{base=null,intention='correction',sourceSansThermomix=null,journal=null}={}) {
   const validation=validerModeleRecette(payload,{publication:true});if(!validation.ok)return null;
@@ -126,6 +129,7 @@ export function construireContenuRecette(payload,{base=null,intention='correctio
     ligne.evidence='manual';
   }
   c.constraints=copie(base?.constraints||{});c.provenance=copie(base?.provenance||{});
+  if(base?.id&&Object.hasOwn(c.provenance,'derived_from'))c.provenance.derived_from=base.id;
   if(c.provenance.import_id&&!Object.hasOwn(c.provenance,'lu_le'))c.provenance.lu_le=typeof base?.created_at==='string'&&Number.isFinite(Date.parse(base.created_at))?new Date(base.created_at).toISOString():null;
   c.verification_state=c.ingredients.some(l=>l.verification_state!=='verified')||!base||!egal(c.steps,base.steps||[])?'to_verify':'verified';
   if(base?.provenance?.thermomix) {

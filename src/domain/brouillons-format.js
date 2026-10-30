@@ -1,4 +1,5 @@
 // Format local des éditeurs : indépendant du dépôt, des vues et de la synchronisation.
+import {validerBrouillonTraduction} from './traductions-locales-format.js';
 import { sha256Hex } from '../core/hash.js';
 import { newId } from '../core/ids.js';
 export const PREFIXE_BROUILLON='editor_draft:v1:';
@@ -30,7 +31,7 @@ const hash=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
 const ferme=(x,keys)=>objet(x)&&Object.keys(x).every(k=>keys.includes(k));
 const idOuNull=x=>x===null||idEditeur(x);
 const ids=x=>Array.isArray(x)&&x.every(idEditeur)&&new Set(x).size===x.length;
-const cheminsRecette=['display_title','original_title','original_language','type','cuisines','tags','printed_page','source_label'].map(k=>'metadata.'+k).concat(['servings','yield_text','prep_minutes','cook_minutes','active_minutes','total_minutes','ingredients','steps','changes','notes','status'].map(k=>'contenu.'+k),'source_sans_thermomix');
+const cheminsRecette=['display_title','original_title','original_language','type','cuisines','tags','printed_page','source_label'].map(k=>'metadata.'+k).concat(['servings','yield_text','prep_minutes','cook_minutes','active_minutes','total_minutes','ingredients','ingredient_structure','steps','changes','notes','status'].map(k=>'contenu.'+k),'source_sans_thermomix');
 const cheminsLivre=['book.title','book.author','book.cuisines','book.tags','edition.isbn','edition.publisher','edition.year','edition.language','edition.unit_convention_id'];
 const projections={recipe_versions:'version-v1',source_pages:'source-v1',source_documents:'source-v1',scan_sessions:'session-v1',imports:'journal-v1'};
 export function estRecuEditeur(row){try{return validerLigneEditeur(row).value.state==='committed';}catch{return false;}}
@@ -39,6 +40,7 @@ export function validerLigneEditeur(row){
  if(!objet(row)||Object.keys(row).some(k=>!['key','value'].includes(k))||!estCleEditeur(row.key))throw new ErreurBrouillon('contenu_invalide');
  if(row.key===CLE_EPOQUE_EDITEUR){if(!idEditeur(row.value))throw new ErreurBrouillon('contenu_invalide');return row;}
  const d=row.value;
+ if(d?.kind==='recipe_translation')return validerBrouillonTraduction(row);
  if(!objet(d)||d.format!==1)throw new ErreurBrouillon('format_inconnu');
  const communs=['id','format','kind','owner_id','database_name','library_epoch','revision','state','created_at','saved_at','publication'];
  const etendus=['entity_id','base_version_id','edition_id','book_id','import_id','base_recipe_cycle_id','base_edition_cycle_id','base_association','base_source_signature','base_fields','changed_fields','pointer_decision','payload','intention'];
@@ -48,7 +50,8 @@ export function validerLigneEditeur(row){
  }else{
   const chemins=d.kind==='book_metadata'?cheminsLivre:cheminsRecette;
   if(!['metadata','correction','adaptation','extraction'].includes(d.intention)||!idEditeur(d.entity_id)||!['base_version_id','edition_id','book_id','import_id','base_recipe_cycle_id','base_edition_cycle_id'].every(k=>idOuNull(d[k]))||!objet(d.payload)||!objet(d.base_fields)||!ferme(d.base_association,['edition_id','book_id','source_page_ids','lecture_page_ids','source_document_id','scan_session_id'])||!ferme(d.base_source_signature,['format','records'])||d.base_source_signature.format!==1||!Array.isArray(d.base_source_signature.records)||!Array.isArray(d.changed_fields)||!d.changed_fields.every(p=>chemins.includes(p))||new Set(d.changed_fields).size!==d.changed_fields.length)throw new ErreurBrouillon('contenu_invalide');
-  if(Object.keys(d.base_fields).length!==chemins.length||Object.keys(d.base_fields).some(p=>!chemins.includes(p)))throw new ErreurBrouillon('contenu_invalide');
+  const ancienSansStructure=d.kind!=='book_metadata'&&!Object.hasOwn(d.base_fields,'contenu.ingredient_structure')&&!Object.hasOwn(d.payload.contenu||{},'ingredient_structure');
+  if(Object.keys(d.base_fields).length!==chemins.length-(ancienSansStructure?1:0)||Object.keys(d.base_fields).some(p=>!chemins.includes(p)))throw new ErreurBrouillon('contenu_invalide');
   for(const f of Object.values(d.base_fields))if(!ferme(f,['present','sha256','modele_sha256'])||typeof f.present!=='boolean'||!hash(f.sha256)||!hash(f.modele_sha256))throw new ErreurBrouillon('contenu_invalide');
   const a=d.base_association;
   if(!['edition_id','book_id','source_document_id','scan_session_id'].every(k=>idOuNull(a[k]))||!ids(a.source_page_ids)||!ids(a.lecture_page_ids)||a.edition_id!==d.edition_id||a.book_id!==d.book_id)throw new ErreurBrouillon('contenu_invalide');

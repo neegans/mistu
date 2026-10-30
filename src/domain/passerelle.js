@@ -55,7 +55,7 @@ function classerReponse(statut, corps) {
 // Un échange avec la fonction : POST (corps) ou GET (sans corps). Ne lève jamais ; toute exception inattendue est `interne`
 // (le journal est tenu par l'appelant : aucun texte d'erreur ne sort d'ici). Aucun `await` avant le fetch : un abandon extérieur
 // arrive donc toujours à un fetch déjà posé.
-async function echanger({ methode, corps = null, fetch: f = globalThis.fetch, session, config, signal, tentativeMs, corpsMax, corpsErreurMax }) {
+async function echanger({ methode, corps = null, fetch: f = globalThis.fetch, session, config, signal, tentativeMs, corpsMax, corpsErreurMax, captureReponse = false }) {
   try {
     if (!sessionValide(session)) return echec('non_connecte');
     const conf = config === undefined ? currentConfig() : config;
@@ -80,23 +80,38 @@ async function echanger({ methode, corps = null, fetch: f = globalThis.fetch, se
       try { r = await f(url, { ...options, signal: ctl.signal }); } // fonction LIBRE : jamais deps.fetch(...) (Illegal invocation)
       catch { return echec(ctl.signal.aborted ? motifAbandon() : 'reseau'); }
       if (!r || typeof r.status !== 'number') return echec('interne');
-      // Une réponse sans flux lisible NI text() n'est pas une panne réseau : c'est une forme impossible.
-      if (typeof r.text !== 'function' && !(r.body && typeof r.body.getReader === 'function')) return echec('interne', r.status);
+      // La capture facultative accepte aussi un lecteur d’octets sans flux. text() seul reste compatible,
+      // mais ne fournit jamais une preuve des octets HTTP avant décodage.
+      if (typeof r.text !== 'function' && !(r.body && typeof r.body.getReader === 'function') && !(captureReponse && typeof r.arrayBuffer === 'function')) return echec('interne', r.status);
       const succes = r.status === 200;
-      const borne = succes ? cmax : emax;
-      let texte = null;
+      const capturer = succes && captureReponse;
+      const plafondCapture = Number.isFinite(cmax) && cmax >= 0 ? Math.min(Math.floor(cmax), LIMITES_PASSERELLE.corps) : LIMITES_PASSERELLE.corps;
+      const borne = succes ? (capturer ? plafondCapture : cmax) : emax;
+      let texte = null, reponseBrute = null;
       try {
         const morceaux = await lireBornee(r, borne);
-        if (morceaux !== null) texte = morceaux === false ? await r.text() : await new Blob(morceaux).text();
+        if (morceaux !== null) {
+          if (capturer && (morceaux !== false || typeof r.arrayBuffer === 'function')) {
+            const buffer = morceaux === false ? await r.arrayBuffer() : await new Blob(morceaux).arrayBuffer();
+            if (buffer instanceof ArrayBuffer && buffer.byteLength <= borne) {
+              reponseBrute = new Uint8Array(buffer).slice();
+              // Le brut reste récupérable même si ses octets ne forment pas un texte UTF-8 valide.
+              // Aucun caractère de remplacement n’est admis comme proposition issue de ce décodage.
+              try { texte = new TextDecoder('utf-8', { fatal: true }).decode(reponseBrute); } catch { texte = null; }
+            }
+          } else texte = morceaux === false ? await r.text() : await new Blob(morceaux).text();
+        }
       } catch { return echec(ctl.signal.aborted ? motifAbandon() : 'reseau', r.status); }
+      const avecBrut = resultat => capturer ? { ...resultat, reponseBrute } : resultat;
       // Un fetch sourd au signal (ou une réponse déjà arrivée) ne rend jamais un résultat après un abandon extérieur.
-      if (signal?.aborted) return echec('annule', r.status);
+      if (signal?.aborted) return avecBrut(echec('annule', r.status));
+      if (capturer && ctl.signal.aborted) return avecBrut(echec(motifAbandon(), r.status));
       if (texte !== null && (typeof texte !== 'string' || texte.length > borne)) texte = null;
       let json = null;
       if (texte !== null) { try { json = JSON.parse(texte); } catch { json = null; } }
       if (succes) {
-        if (!json || typeof json !== 'object' || Array.isArray(json)) return echec('reponse_illisible', 200);
-        return { statut: 200, corps: json, raison: null, quota: null, ecrite: false };
+        if (!json || typeof json !== 'object' || Array.isArray(json)) return avecBrut(echec('reponse_illisible', 200));
+        return avecBrut({ statut: 200, corps: json, raison: null, quota: null, ecrite: false });
       }
       // Un corps d'erreur n'est JAMAIS relayé : seul son champ `erreur` (et le nombre du quota) classe l'échec.
       const { raison, quota, ecrite } = classerReponse(r.status, json);
@@ -127,10 +142,14 @@ export function echecDomaine({ raison, quota = null, ecrite = false } = {}) {
 //   raison ∈ non_connecte | non_admis | quota | requete | trop_lourd | delai | serveur | reseau | reponse_illisible | annule | interne | null
 //   (null = 200, `corps` = le JSON de la réponse). `quota` = le nombre du quota du jour quand la passerelle l'a écrit, sinon null ;
 //   `ecrite` = le corps d'erreur portait un champ `erreur` écrit par la passerelle (faux : erreur d'Anthropic relayée, ou pas de corps).
-export async function appelerAssistant(outil, corps, { fetch, session, config, signal, tentativeMs, corpsMax, corpsErreurMax } = {}) {
+// L6 : captureReponse:true ajoute reponseBrute (Uint8Array complet, 200 seulement, ≤2Mio) ou null.
+// La conservation durable appartient à l’appelant ; un brut reçu ne prouve ni parsing réussi ni publication.
+export async function appelerAssistant(outil, corps, { fetch, session, config, signal, tentativeMs, corpsMax, corpsErreurMax, captureReponse = false } = {}) {
+  const capturer = captureReponse === true;
+  const resultat = r => capturer ? { reponseBrute: null, ...r } : r;
   let envoi;
-  try { envoi = JSON.stringify({ outil, corps }); } catch { return echec('interne'); } // calculé hors du réseau : jamais `reseau`
-  return echanger({ methode: 'POST', corps: envoi, fetch, session, config, signal, tentativeMs, corpsMax, corpsErreurMax });
+  try { envoi = JSON.stringify({ outil, corps }); } catch { return resultat(echec('interne')); } // calculé hors du réseau : jamais `reseau`
+  return resultat(await echanger({ methode: 'POST', corps: envoi, fetch, session, config, signal, tentativeMs, corpsMax, corpsErreurMax, captureReponse: capturer }));
 }
 
 // GET → { statut, corps: { modele, quotaJour } | null, raison, quota, ecrite } : l'état de l'assistant, sans appeler le fournisseur

@@ -1,5 +1,6 @@
 // Formats d'échange (spec §31.2) : Recipe/JSON-LD, YAML compatible avec l'import documenté de Paprika, copie HTML lisible.
 // Les durées, portions ou compatibilités inconnues sont omises, jamais fabriquées.
+import {lireStructureIngredients} from './structure-ingredients.js';
 import { estThermomix, etiquetteThermomix, gardeThermomix, AVERTISSEMENT_TM7 } from './thermomix.js';
 import { EN } from '../i18n/en.js';
 import { lireRendementTexte } from './rendement.js';
@@ -16,6 +17,20 @@ function ingredientLine(ri, locale) {
   return [q, ri.unit_id ? unitLabel(ri.unit_id, locale) : ri.unit_text, ri.name_text, ri.preparation ? `, ${ri.preparation}` : ''].filter(Boolean).join(' ').trim();
 }
 
+// Les écrans fournissent leur projection déjà choisie. Sans elle, l'export historique reste documentaire.
+function lectureExport(bundle, locale) {
+  const p=bundle.lecture;
+  if(p&&p.recipe_id===bundle.recipe.id&&p.version_id===bundle.version?.id)return p;
+  const v=bundle.version||{},r=bundle.recipe,segment=texte=>({texte:String(texte??''),langReelle:r.original_language||null,etat:'original'});
+  const ingredients=(v.ingredients||[]).map(ri=>({kind:'ingredient',id:ri.id,texte:ingredientLine(ri,locale),principal:segment(ri.name_text||ri.source_text),preparation:segment(ri.preparation),sansQuantiteCalculee:false}));
+  const structure=lireStructureIngredients(v),byId=new Map(ingredients.map(i=>[i.id,i]));
+  return{titre:segment(r.display_title||r.original_title),notes:segment(v.notes),rendement:segment(lireRendementTexte(v)),ingredients,blocs:structure.etat==='courante'?structure.blocks.map(b=>b.kind==='heading'?{kind:'heading',...segment(b.text)}:byId.get(b.ingredient_id)):ingredients,etapes:(v.steps||[]).map(s=>({...s,...segment(s.text)})),manque:false,locale:r.original_language||locale,scaled:{servings:v.servings}};
+}
+const manqueSegment=s=>s?.etat==='manquant'||s?.etat==='perime';
+const avertissementLecture=p=>p.manque?'Passages non traduits : les textes correspondants restent dans leur langue d’origine.':null;
+const annotationLigne=i=>i.sansQuantiteCalculee&&!i.ingredient?.name_text?'Texte conservé aux quantités d’origine ; quantité non recalculable.':null;
+function languesLecture(p){const segments=[p.titre,p.notes,p.rendement,...p.blocs.filter(x=>x.kind==='heading'),...p.ingredients.flatMap(x=>[x.principal,...(!x.sansQuantiteCalculee?[x.preparation]:[])]),...p.etapes].filter(x=>x?.texte);if(segments.some(x=>!x.langReelle))return undefined;const langues=[...new Set(segments.map(x=>x.langReelle))];return langues.length===1?langues[0]:langues.length?langues:undefined;}
+function lignesIngredients(p){return p.blocs.map(i=>i.kind==='heading'?i.texte:[i.texte,annotationLigne(i),manqueSegment(i.principal)?'Passage non traduit ; texte original.':null].filter(Boolean).join(' — '));}
 function isoDuration(minutes) {
   if (!Number.isInteger(minutes) || minutes < 0 || minutes > LIMITES_REPERES.minutes) return undefined;
   const m = minutes;
@@ -89,22 +104,23 @@ export function toJsonLd(bundle, { locale = 'fr', documentaire = false } = {}) {
   const document = documentThermomix(version, documentaire);
   const ia = lignesIA(recipe, version, locale, document);
   const reperes = lignesReperes(recipe, version, locale), durees = dureesExport(recipe, version);
-  const title = recipe.display_title || recipe.original_title;
+  const lecture=lectureExport(bundle,locale),title=lecture.titre.texte;
   const obj = {
-    '@context': 'https://schema.org', '@type': 'Recipe', name: title, inLanguage: recipe.original_language || undefined,
+    '@context': 'https://schema.org', '@type': 'Recipe', name: title, inLanguage: languesLecture(lecture),
     author: book?.author ? { '@type': 'Person', name: book.author } : undefined,
     isBasedOn: book ? `${book.title}${recipe.printed_page ? `, p. ${recipe.printed_page}` : ''}${edition?.isbn ? ` (ISBN ${edition.isbn})` : ''}` : undefined,
-    recipeYield: lireRendementTexte(version) ?? (version?.servings ? String(version.servings) : undefined),
+    recipeYield: lecture.rendement.texte || (lecture.scaled?.servings ? String(lecture.scaled.servings) : version?.servings ? String(version.servings) : undefined),
     prepTime: isoDuration(durees.prep), cookTime: isoDuration(durees.cuisson), totalTime: isoDuration(durees.total),
     recipeCategory: recipe.type || undefined,
     recipeCuisine: recipe.cuisines?.length ? recipe.cuisines.join(', ') : undefined,
-    recipeIngredient: (version?.ingredients || []).map((ri) => ingredientLine(ri, locale)),
-    recipeInstructions: document ? undefined : (version?.steps || []).map((s, i) => ({ '@type': 'HowToStep', position: i + 1, text: s.text })),
+    recipeIngredient: lecture.ingredients.map(i=>i.texte),
+    recipeInstructions: document ? undefined : lecture.etapes.map((s, i) => ({ '@type': 'HowToStep', position: i + 1, text: s.texte })),
     description: ia ? [ia[0], version?.changes || null, ...ia.slice(1)].filter(Boolean).join(' ')
       : version?.kind === 'adaptation' ? `Adaptation personnelle (${version.status === 'tested' ? 'testée' : 'proposée'}) de la recette originale.${version.changes ? ' ' + version.changes : ''}` : undefined,
   };
   if (document) obj['cuisineos:document_conserve'] = document;
-  if (reperes.length) obj.description = [obj.description, ...reperes].filter(Boolean).join(' ');
+  const groupes=lecture.blocs.some(x=>x.kind==='heading')?'Les titres de groupes sont conservés dans les exports lisibles, pas dans recipeIngredient.':null;
+  if(reperes.length||lecture.notes.texte||lecture.manque||groupes)obj.description=[obj.description,...reperes,lecture.notes.texte,avertissementLecture(lecture),groupes].filter(Boolean).join(' ');
   obj['cuisineos:provenance'] = {
     recipe_id: recipe.id, version_id: version?.id, version_kind: version?.kind, version_status: version?.status,
     book: book?.title, edition_isbn: edition?.isbn, printed_page: recipe.origine === 'ia' ? undefined : recipe.printed_page, exported_at: new Date().toISOString(),
@@ -127,9 +143,9 @@ export function toPaprikaYaml(bundles, { locale = 'fr', documentaire = false } =
     const document = documentThermomix(version, documentaire);
     const ia = lignesIA(recipe, version, locale, document);
     const reperes = lignesReperes(recipe, version, locale), durees = dureesExport(recipe, version);
-    const title = recipe.display_title || recipe.original_title;
+    const lecture=lectureExport({recipe,version,...b},locale),title=lecture.titre.texte;
     const lines = [`- name: ${yamlStr(title)}`];
-    const rendement = lireRendementTexte(version);
+    const rendement=lecture.rendement.texte;
     if (rendement || version?.servings) lines.push(`  servings: ${yamlStr([version?.servings ? `${version.servings} portions` : null, rendement].filter(Boolean).join(' · '))}`);
     // S8 : hors livre, la source est l'hôte RECALCULÉ depuis l'adresse — jamais `source_label` stocké, qu'une
     // archive ou le serveur peut avoir rempli avec n'importe quoi (S7). Un export est lu par un autre logiciel.
@@ -145,13 +161,15 @@ export function toPaprikaYaml(bundles, { locale = 'fr', documentaire = false } =
     if (ia) notes.push(...ia);
     else if (version?.kind === 'adaptation') notes.push(`Adaptation personnelle (${version.status === 'tested' ? 'testée' : 'proposée'}), distincte de l’original.`);
     notes.push(...reperes);
+    if(lecture.notes.texte)notes.push(lecture.notes.texte);
+    if(lecture.manque)notes.push(avertissementLecture(lecture));
     if (version?.changes) notes.push(`Changements : ${version.changes}`);
     if (edition?.isbn) notes.push(`ISBN ${edition.isbn}`);
     notes.push(`Exporté de Cuisine OS — recette ${recipe.id}, version ${version?.id || '—'}, langue ${recipe.original_language || '—'}`);
     if (document) notes.push(texteTM('Texte conservé pour relecture :', locale), ...document.instructions);
     lines.push(`  notes: ${yamlBlock(notes)}`);
-    lines.push(`  ingredients: ${yamlBlock((version?.ingredients || []).map((ri) => ingredientLine(ri, locale)))}`);
-    lines.push(`  directions: ${yamlBlock(document ? [texteTM(DOCUMENT_THERMOMIX, locale)] : (version?.steps || []).map((s) => s.text))}`);
+    lines.push(`  ingredients: ${yamlBlock(lignesIngredients(lecture))}`);
+    lines.push(`  directions: ${yamlBlock(document ? [texteTM(DOCUMENT_THERMOMIX, locale)] : lecture.etapes.map(s=>[s.texte,manqueSegment(s)?'Passage non traduit ; texte original.':null].filter(Boolean).join(' — ')))}`);
     return lines.join('\n');
   });
   return docs.join('\n') + '\n';
@@ -161,6 +179,7 @@ export function toPaprikaYaml(bundles, { locale = 'fr', documentaire = false } =
 // page (dans l'adresse d'une image) : une ligne reçue ou restaurée peut porter du balisage, exécuté à l'ouverture du site exporté.
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+function htmlSegment(s){return `<span${s.langReelle?` lang="${esc(s.langReelle)}"`:''} style="white-space:pre-wrap">${esc(s.texte)}</span>${manqueSegment(s)?'<small> — Passage non traduit ; texte original.</small>':''}${s.citationSource?'<small> — Réglages traduits ; noms d’aliments cités dans la langue source.</small>':''}`;}
 const HTML_CSS = 'body{font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#1d231f;background:#f6f1e7;line-height:1.5}h1,h2{color:#1f4d3a}.meta{color:#5f6b63;font-size:.9rem}img{max-width:100%;border-radius:8px}li{margin:.2rem 0}a{color:#1f4d3a}.badge{font-size:.75rem;background:#d7e3d8;padding:.1rem .4rem;border-radius:6px}';
 
 // Retourne les entrées ZIP d'une copie lisible : index.html, recipes/<id>.html, images/<sha>.<ext>
@@ -173,7 +192,7 @@ export function toReadableSite(bundles, filesBySha, { locale = 'fr', documentair
     const etiquette = document ? texteTM(DOCUMENT_THERMOMIX, locale) : estThermomix(version) ? texteTM(etiquetteThermomix(version), locale) : etiquetteCreationIA(version, recipe);
     const ia = lignesIA(recipe, version, locale, document);
     const reperes = lignesReperes(recipe, version, locale), durees = dureesExport(recipe, version);
-    const title = recipe.display_title || recipe.original_title;
+    const lecture=lectureExport({recipe,version,...b},locale),title=lecture.titre.texte;
     const file = `recipes/${recipe.id}.html`;
     const imgs = [];
     for (const p of pages) {
@@ -183,16 +202,18 @@ export function toReadableSite(bundles, filesBySha, { locale = 'fr', documentair
       usedImages.set(path, f);
       imgs.push(path);
     }
-    const body = `<!doctype html><html lang="${esc(recipe.original_language || locale)}"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${HTML_CSS}</style></head><body>
+    const body = `<!doctype html><html lang="${esc(typeof languesLecture(lecture)==='string'?languesLecture(lecture):'')}"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${HTML_CSS}</style></head><body>
 <p><a href="../index.html">← Index</a></p>
-<h1>${esc(title)}</h1>
+<h1>${htmlSegment(lecture.titre)}</h1>
 <p class="meta">${book ? esc(`${book.title}${book.author ? ` — ${book.author}` : ''}`) : esc(libelleSource(recipe) || 'Source personnelle')}${recipe.printed_page && recipe.origine !== 'ia' ? `, page ${esc(recipe.printed_page)}` : ''}
 ${etiquette ? ` · <span class="badge">${esc(etiquette)}</span>` : version?.kind === 'adaptation' ? ' · <span class="badge">Adaptation personnelle</span>' : version ? ' · <span class="badge">Original</span>' : ''}</p>
 ${version?.servings ? `<p class="meta">${esc(`${version.servings} portions`)}${durees.prep != null ? ` · préparation ${durees.prep} min` : ''}${durees.cuisson != null ? ` · cuisson ${durees.cuisson} min` : ''}</p>` : ''}${ia ? ia.slice(1).map((l) => `<p>${esc(l)}</p>`).join('') : ''}
-${lireRendementTexte(version) ? `<p class="meta">${esc(lireRendementTexte(version))}</p>` : ''}
+${lecture.rendement.texte ? `<p class="meta">${htmlSegment(lecture.rendement)}</p>` : ''}
+${lecture.manque?`<p>${esc(avertissementLecture(lecture))}</p>`:''}
+${lecture.notes.texte?`<p>${htmlSegment(lecture.notes)}</p>`:''}
 ${reperes.map(l => `<p>${esc(l)}</p>`).join('')}
-${version ? `<h2>Ingrédients</h2><ul>${(version.ingredients || []).map((ri) => `<li>${esc(ingredientLine(ri, locale))}</li>`).join('')}</ul>
-<h2>${document ? esc(texteTM('Texte conservé pour relecture :', locale)) : 'Préparation'}</h2><ol>${(document ? document.instructions : (version.steps || []).map(s => s.text)).map(text => `<li>${esc(text)}</li>`).join('')}</ol>` : '<p><em>Référence d’index seulement : la recette n’a pas encore été numérisée.</em></p>'}
+${version ? `<h2>Ingrédients</h2><ul>${lecture.blocs.map(i=>i.kind==='heading'?`<li style="list-style:none"><h3>${htmlSegment(i)}</h3></li>`:`<li>${esc(i.texte)}${annotationLigne(i)?`<small> — ${esc(annotationLigne(i))}</small>`:''}${manqueSegment(i.principal)?'<small> — Passage non traduit ; texte original.</small>':''}</li>`).join('')}</ul>
+<h2>${document ? esc(texteTM('Texte conservé pour relecture :', locale)) : 'Préparation'}</h2><ol>${(document ? document.instructions.map(texte=>({texte,langReelle:recipe.original_language})) : lecture.etapes).map(s => `<li>${htmlSegment(s)}</li>`).join('')}</ol>` : '<p><em>Référence d’index seulement : la recette n’a pas encore été numérisée.</em></p>'}
 ${version?.changes ? `<h2>Changements</h2><p>${esc(version.changes)}</p>` : ''}
 ${imgs.length ? `<h2>Pages originales</h2>${imgs.map((p) => `<p><img src="../${esc(p)}" alt="Page originale"></p>`).join('')}` : ''}
 <p class="meta">Exporté de Cuisine OS le ${esc(new Date().toLocaleDateString(locale === 'en' ? 'en-CA' : 'fr-CA'))}. Identifiant ${esc(recipe.id)}.</p>
@@ -207,3 +228,15 @@ ${imgs.length ? `<h2>Pages originales</h2>${imgs.map((p) => `<p><img src="../${e
   entries.unshift({ path: 'index.html', data: index });
   return { entries, images: usedImages };
 }
+
+// Copies documentaires du même choix de lecture, sans journal ni appel supplémentaire.
+export function toMarkdown(bundle,{locale='fr',documentaire=true}={}){
+ const {recipe,version}=bundle,p=lectureExport(bundle,locale),doc=documentThermomix(version,documentaire);
+ const lignes=[`# ${p.titre.texte}`,...lignesIA(recipe,version,locale,doc)||[],avertissementLecture(p),p.rendement.texte,'## Ingrédients'];
+ for(const b of p.blocs)lignes.push(b.kind==='heading'?`### ${b.texte}`:`- ${b.texte}${annotationLigne(b)?` — ${annotationLigne(b)}`:''}${manqueSegment(b.principal)?' — Passage non traduit ; texte original.':''}`);
+ lignes.push('## Préparation',...(doc?doc.instructions.map(texte=>({texte})):p.etapes).map((s,i)=>`${i+1}. ${s.texte}${manqueSegment(s)?' — Passage non traduit ; texte original.':''}`));
+ if(p.notes.texte)lignes.push('## Notes',p.notes.texte);
+ lignes.push(...lignesReperes(recipe,version,locale),`Source : ${bundle.book?.title||libelleSource(recipe)||recipe.original_title||''}`,`Recette ${recipe.id} · version ${version?.id||'—'}`);
+ return lignes.filter(Boolean).join('\n\n')+'\n';
+}
+export function toRecipeText(bundle,options={}){return toMarkdown(bundle,options).replace(/^#{1,3} /gm,'');}

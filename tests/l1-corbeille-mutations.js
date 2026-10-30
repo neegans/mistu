@@ -53,7 +53,7 @@ export async function runL1CorbeilleMutationsTests({ eq, ok }) {
       const recipe = { ...donnees().recipes[0], source_url: 'https://exemple.test/pain' };
       const row = { ...fabriquerImportWeb({ id: 'imp-cycle-web', signet: recipe, deviceId: repo.deviceId() }), status: 'a_verifier',
         resultat: { source_kind: 'jsonld', page: { url_finale: recipe.source_url }, recette: { title: 'Pain', ingredients: [{ source_text: 'Sel' }], steps: [{ text: 'Mélanger.' }] } } };
-      await db.mutate({ puts: { recipes: [{ ...recipe, lifecycle_id: 'restaure-web', trashed_at: null }], imports: [row] }, origin: 'remote' });
+      await db.mutate({ puts: { recipes: [{ ...recipe, lifecycle_id: 'restaure-web', trashed_at: null }],recipe_versions:donnees().recipe_versions, imports: [row] }, origin: 'remote' });
       const avant = await lire(repo, db);
       eq((await enregistrerLecture(row.id, { repo, remplacer: false })).issue, 'refuse', 'L1 web : Ajouter sans remplacer refuse un résultat d’avant retrait');
       eq(await lire(repo, db), avant, 'L1 web : refus sans version seule ni envoi');

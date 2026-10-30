@@ -1,11 +1,14 @@
 // Service worker : coquille applicative en cache pour consultation hors connexion des recettes déjà chargées.
 // Les nouvelles demandes IA et les recherches de métadonnées ne fonctionnent pas hors connexion (spec §15).
 importScripts('./sw-rules.js');
-const VERSION = 'cuisine-os-v0.27.0-1';
+const VERSION = 'cuisine-os-v0.28.0-1';
 // Tous les modules de production sont inclus ; tests/ reste chargé à la demande.
 // La complétude de cette liste est vérifiée par tests/sync.js (graphe d'imports depuis src/app.js) : un chemin
 // manquant ferait répondre 404 à cache.addAll et l'installation entière échouerait.
 const SHELL = [
+  './src/domain/depot-traductions.js', './src/domain/journal-traductions.js', './src/domain/traductions-archive.js', './src/domain/traductions-locales-format.js', './src/domain/versions-structurees.js', './src/sync/commandes-traduction.js',
+  './src/domain/structure-ingredients.js', './src/domain/traductions-format.js', './src/domain/plan-traduction.js', './src/domain/lecture-recette.js',
+  './src/domain/lecture-traduction.js', './src/ui/traduction-editeur.js',
   './src/domain/comparaison-sources.js', './src/domain/transfert-premiere-liaison.js',
   './src/domain/index-application.js', './src/domain/index-stockage.js', './src/domain/revisions-source.js', './src/domain/sources-locaux.js', './src/domain/transferts-source.js', './src/sync/commandes-sources.js', './src/ui/index-vol.js',
   './src/domain/brouillons-editeur.js', './src/domain/brouillons-format.js', './src/domain/editeur-recette.js', './src/domain/edition-livre.js', './src/ui/brouillon-editeur.js', './src/ui/livre-editeur.js', './src/ui/recette-editeur.js', './src/ui/sortie-editeur.js',

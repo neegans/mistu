@@ -95,3 +95,33 @@ Résultats à reprendre lors de la fermeture A :903 segments nécessitent38 port
 ## Raccord de contrat revue4
 
 Avant construction, suivre l’[annexe normative](../specs/2026-10-29-l6-protocole-traductions.md). Root possède captureReponse dans passerelle.js ; B structure pure/éditeur/extraction/provider+plan+orchestration assistée/UI ; C projecteur commun/lecture/voix/exports/substitution ; A format2/projections/captures/dépôt/publication/journalréception/repo/SQL/archive. Les API consommateurs sont figées au §6 de l’annexe. Ajouter rouges réels pour raw HTTP200 illisible/annulation après corps complet, barrière de quota avant nouvel appel,24refs/32portions et8entrées/8Mio, receipt_floor forgé/FIFO, restorehistorique sansrebase, locale JS↔SQL et ACKperdu à deuxmoteurs. Ne pas attribuer les prototypes25+33assertions à des preuves de transaction.
+
+
+## 6. Réception locale — 30 octobre 2026
+
+Version0.28.0/cache0.28.0-1, DB6, archive5. Contrat3ca2255 puis construction sur base publique8e6a82f. Revue technique en trois volets, sans attribuer une relecture personnelle à Neegan. Autorisation générale de poursuivre et publier conservée.
+
+### Comportements livrés localement
+
+- Titres de groupes explicites, sans les compter comme aliments ; édition, extraction et dérivations conservent ordre et identités. Un retrait de titre depuis un parent structuré demande une décision explicite ; réponse déjà reçue conservée.
+- Original/français lisibles sur fiche, cuisine et exports. Rendement et titre utilisent le même projecteur ; voix injectée reçoit exactement le texte affiché et la langue déclarée. Les réglages Thermomix restent issus de leurs valeurs validées.
+- Traduction par passages, trous visibles, coût préparé avant appel explicite. Réponse durable avant portion suivante ; réserve bornée et libération explicite. Un quota après réception permet récupération des octets exacts puis réessai d’écriture sans second appel.
+- Brouillons repris explicitement, concurrence entre onglets, comparaison des valeurs et copies récupérables. Corrections manuelles gardent les autres propositions. Plusieurs adoptions du même journal conservent leur union et leurs provenances.
+- Gardes JS/SQL, commandes signées, CAS de toutes les candidates, titres et source séparés, journal résolu atomiquement. Ancien client ne peut réécrire une traduction protégée, sa réponse ou sa source. Réglages montrent les copies refusées avec leur accès utile, sans faux choix générique.
+- Archive5 restaure captures historiques, groupes, résultats et provenances ; photos/notes conservées. Première liaison suit le même graphe versions→journaux→traductions. Les bruts et brouillons restent explicitement propres à l’appareil.
+
+### Preuves relues
+
+**10161/10161** navigateur, épingle10160 ; hausse689 depuis9472, aucun bloc interrompu ni assertion retirée. Zéro erreur JavaScript/requête extérieure. Node **232/232**, générateur `--check`0, syntaxe/diff propres. Les listes de migrations du témoin de copie Node incluent désormais0011 ; ce raccord a rougi avant correction.
+
+Base locale `mistu_l6_livraison_root`, créée depuis template0 UTF8, puis les onze migrations métier dans l’ordre. Authentification synthétique et cron sans ordonnanceur documentés ; aucune donnée privée. Régression L5 **327 contrôles**. L6 :56 vecteurs JS/SQL,24 gardes versions,93 formes/transitions journal,18 publications (dont129 publications réelles pour le FIFO128),17 publications/résolutions avec provenance assistant,4 limites SQL et4 limites JS. Total L6SQL212 ; **132 contrôles ACL**, plus vraie création/modification de version structurée sous rôle authenticated. Les ACL de composition ont été corrigées après rouges : validateur de version réautorisé, droits PUBLIC/anon des RPC fermés.
+
+Deux connexions PostgreSQL : **16 contrôles L6** (publication concurrente, titre REST, source REST) et **10 contrôles L5** ; seconde opération attend le verrou propriétaire, puis refuse au motif exact sans écriture partielle. Deux vrais moteurs Chrome/IndexedDB→PostgreSQL : **30 contrôles,12 RPC**, trois phases journal, confirmation de publication perdue puis rejeu exact, archive5 et restauration historique, réception par autre moteur, aucun écho après amorçage. Le replay serveur inclut les journaux confirmés ; sa première réponse incomplète a été détectée par la garde client.
+
+Parcours de la vraie application : **15 mesures/28 gestes** de lecture, **7 mesures/20 gestes** d’éditeur ; largeurs320/390/768/900/1280 et texte200 %. Original/français, quantités recalculées, voix injectée, deux onglets concurrents, récupération réelle de texte, quota simulé, publication et rechargement réseau coupé. Photo décodable et note personnelle conservées,12 nouveaux modules dans le cache unique. Le harnais attend maintenant explicitement le chargement de l’image avant d’annoncer son décodage ; il ne confond plus l’apparition du titre avec la fin de chargement de la photo. Débordement du message de connexion à200 % reproduit puis corrigé. Captures mobiles de l’éditeur et de la lecture réellement relues.
+
+### Limites et publication
+
+Aucun fournisseur payé ni compte privé utilisé ; pas d’iPhone/Safari physique, de voix audible ou de Thermomix réel testé. La qualité linguistique d’une réponse future ne découle pas de la validation de son format. Les captures et révisions historiques sont conservées : un nouveau geste d’import du même ancien ZIP après restauration fraîche peut refuser une divergence, sans convertir artificiellement ses reçus historiques en preuve actuelle.
+
+Preuves et scripts dans `.superpowers/sdd/2026-10-29-l6/`, rapports A/B/C et journaux SQL séparés. Migration0011 et publication0.28.0 encore non appliquées au moment de ce reçu local. L7–L10 et E1 restent à réaliser.

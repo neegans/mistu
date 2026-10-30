@@ -1,3 +1,4 @@
+import {preparerLectureRecette,projeterLectureRecette} from '../domain/lecture-recette.js';
 import { lireCycleRecette } from '../domain/cycle-recette.js';
 import { capturerRecette } from './recette-garde.js';
 import { mentionCycleRecette } from './corbeille.js';
@@ -10,7 +11,7 @@ import * as repo from '../model/repo.js';
 import { scaleVersion } from '../domain/scaling.js';
 import { createTimerLaunch, describeDuration, TIMER_STATE_HELP } from '../domain/timers.js';
 import { label } from '../core/i18n.js';
-import { qtyEl, section, field, etiquetteIA, estExtractionNonRelue, contexteFichiers, empreintesPhotos, fichierPhoto, timerBlock } from './components.js';
+import { qtyEl, section, field, select, segmented, ingredientLectureEl, segmentLectureEl, etiquetteIA, estExtractionNonRelue, contexteFichiers, empreintesPhotos, fichierPhoto, timerBlock } from './components.js';
 import { estCreationIA, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
 import { deviceId } from './import.js';
 import { estThermomix } from '../domain/thermomix.js';
@@ -41,6 +42,12 @@ export async function renderCook(params, query, ctx, deps = {}) {
   }
   const blocageThermomix = panneauGardeThermomix(items);
   if (blocageThermomix) return blocageThermomix;
+  await Promise.all(items.map(async it=>{it.lecture=await preparerLectureRecette({recipe:it.recipe,version:it.version,traductions:ctx.recipe_translations||[]});}));
+  let langueLecture=session.lang||ctx.settings?.reading_locale||'original',langueConfirmee=langueLecture,languesEnVol=Promise.resolve(),numeroLangue=0;
+  const speech=deps.speechSynthesis??globalThis.speechSynthesis,Utterance=deps.SpeechSynthesisUtterance??globalThis.SpeechSynthesisUtterance;
+  const arreterVoix=()=>{try{speech?.cancel();}catch{}};
+  const traductionsChoisies=new Map();
+  const lectureDe=it=>projeterLectureRecette(it.lecture,{locale:langueLecture,servings:it.servings,system:session.units||'original',convention_id:it.convention_id,ingredientsById:ctx.ingredientsById,translationId:traductionsChoisies.get(it.version.id)||null});
   let activeIdx = Math.max(0, items.findIndex((it) => it.version.id === (session.active_version_id || session.selected_version_ids[0])));
   let selectionConfirmee = activeIdx, selectionNumero = 0, selections = Promise.resolve(), dispose = false;
   let progress = session.progress || {};
@@ -54,7 +61,7 @@ export async function renderCook(params, query, ctx, deps = {}) {
   const fichiers = await (deps.repo ?? repo).getFiles(empreintesPhotos(items.map(it => it.recipe), photos));
   const nettoyages = [];
   const nettoyer = () => { for (const photo of area.querySelectorAll('[data-role="photo-visible"]')) photo.dispose?.(); for (const fn of nettoyages.splice(0)) fn(); };
-  root.dispose = () => { dispose = true; nettoyer(); };
+  root.dispose = () => { dispose = true; arreterVoix(); nettoyer(); };
   const title = items.length === 1 ? (items[0].recipe.display_title || items[0].recipe.original_title) : t('Repas — {n} recettes', { n: items.length });
   const titre = el('h1', null, title);
   const fiche = el('a', { class: 'btn' }, t('Fiche'));
@@ -65,6 +72,11 @@ export async function renderCook(params, query, ctx, deps = {}) {
       el('span', { class: 'muted', style: { fontSize: '.85rem' } }, t('Progression conservée sur cet appareil')),
       el('button', { class: 'btn', onClick: finish }, t('Terminer')),
       fiche)), etatSelection);
+  const langues=[{value:'original',label:t('Original')},{value:'fr',label:t('Français')},...((items.some(it=>it.recipe.original_language?.startsWith('en'))||(ctx.recipe_translations||[]).some(x=>x.locale==='en'))?[{value:'en',label:t('Anglais')}]:[])];
+  const langueChoix=segmented(langues,langueLecture,valeur=>{
+    const it=items[activeIdx],numero=++numeroLangue;langueLecture=valeur;arreterVoix();draw();
+    languesEnVol=languesEnVol.then(async()=>{const attendue=langueConfirmee;await modifierSession(it,courant=>{if((courant.lang||ctx.settings?.reading_locale||'original')!==attendue)throw Error('langue_changee');return{...courant,lang:valeur};});langueConfirmee=valeur;}).catch(()=>{if(!dispose&&numero===numeroLangue){langueLecture=langueConfirmee;draw();etatSelection.textContent=t('La langue de lecture n’a pas pu être enregistrée. Réessaie.');etatSelection.hidden=false;}});
+  });langueChoix.dataset.role='langue-cuisine';langueChoix.setAttribute('role','group');langueChoix.setAttribute('aria-label',t('Langue de lecture'));root.append(langueChoix);
   // C-2 / R-CRE-10 : toute fiche origine 'ia' (et toute création) dit sa lignée EN TÊTE, sous la rangée du titre (cook.js n'a pas de
   // pageHeader — P16) — une correction dit « Corrigée par toi — d’après une création IA » ; dans un repas, chacune est nommée par son
   // titre. L'avertissement C-9 (« n'a pas cuisiné cette recette ») reste réservé aux versions estCreationIA.
@@ -99,7 +111,7 @@ export async function renderCook(params, query, ctx, deps = {}) {
   draw();
   return root;
 
-  function stepsOf(it) { return it.version.steps || []; }
+  function stepsOf(it) { return lectureDe(it).etapes.map(s=>({...s,text:s.texte})); }
   function modifierSession(it, fusion) {
     const refuser = () => { throw new Error('Recette de la session devenue indisponible'); };
     const contexteValide = () => { if (getSyncGeneration() !== generation) refuser(); };
@@ -156,9 +168,12 @@ export async function renderCook(params, query, ctx, deps = {}) {
   }
 
   function draw() {
+    arreterVoix();
     const courant = items[activeIdx];
     fiche.setAttribute('href', `#/recipes/${courant.recipe.id}?v=${courant.version.id}`);
-    titre.textContent = items.length === 1 ? title : `${title} · ${courant.recipe.display_title || courant.recipe.original_title}`;
+    const projection=lectureDe(courant);
+    titre.textContent=items.length===1?projection.titre.texte:`${title} · ${projection.titre.texte}`;
+    [...langueChoix.children].forEach((b,i)=>{b.classList.toggle('active',langues[i].value===langueLecture);b.setAttribute('aria-pressed',String(langues[i].value===langueLecture));});
     boutonsRecettes.forEach((bouton, i) => { bouton.classList.toggle('active', i === activeIdx); bouton.setAttribute('aria-pressed', String(i === activeIdx)); });
     boutonPlan.classList.toggle('active', planOpen); boutonPlan.setAttribute('aria-pressed', String(planOpen));
     nettoyer();
@@ -170,30 +185,33 @@ export async function renderCook(params, query, ctx, deps = {}) {
     const step = steps[idx];
     const ingUl = el('ul', { class: 'ingredients list plain' });
 
-    for (const ri of it.scaled.ingredients) {
-      const ing = ri.ingredient_id ? ctx.ingredientsById.get(ri.ingredient_id) : null;
-      const li = el('li', null, el('span', null, ing && ri.verification_state === 'verified' ? ing.labels.fr.label : (ri.name_text || ri.source_text), ri.preparation ? el('span', { class: 'muted' }, `, ${ri.preparation}`) : null), qtyEl(ri, { system: session.units || 'original', convention_id: it.convention_id, ingredient: ing && ri.verification_state === 'verified' ? ing : null }));
-      ingUl.append(li);
-    }
+    for(const ligne of projection.blocs)ingUl.append(ligne.kind==='heading'?el('li',{class:'ingredient-heading',dataset:{role:'ingredient-heading'}},segmentLectureEl(ligne)):ingredientLectureEl(ligne));
     const ingredients = el('details', { class: 'ingredients-cuisine', dataset: { role: 'ingredients-cuisine' } },
       el('summary', null, t('Ingrédients de la recette')),
       el('div', { class: 'muted' }, it.servings ? t('{n} portions', { n: it.servings }) : ''), ingUl,
       ...it.scaled.notes.map(n => el('small', { class: 'muted' }, n)));
     const right = el('div', { class: 'stack' });
+    if(projection.candidates.length>1){const choix=select([{value:'',label:t('Original')},...projection.candidates.map((x,i)=>({value:x.id,label:t('Traduction {n}',{n:i+1})}))],traductionsChoisies.get(it.version.id)||'',id=>{traductionsChoisies.set(it.version.id,id);arreterVoix();draw();});choix.dataset.role='choix-traduction';right.append(field(t('Plusieurs traductions existent. Choisis celle à lire.'),choix));}
     const personnelle = noteEnCuisine(it.recipe);
     if (personnelle) right.append(personnelle);
     right.append(el('div', { class: 'progress' }, el('div', { style: { width: steps.length ? `${Math.round(progress.done_step_ids.filter((id) => steps.some((s) => s.id === id)).length / steps.length * 100)}%` : '0%' } })));
     if (!step) right.append(el('div', { class: 'step-big' }, t('Aucune étape numérisée pour cette version.')));
     else {
-      right.append(el('div', { class: 'step-big' }, el('div', { class: 'muted', style: { fontSize: '.9rem', marginBottom: '.4rem' } }, `${t('Étape')} ${idx + 1} / ${steps.length}`), el('div', { style: { whiteSpace: 'pre-line' }, dataset: { role: 'texte-etape' } }, step.text), // m10 : étape entière, sauts de ligne gardés
+      right.append(el('div', { class: 'step-big' }, el('div', { class: 'muted', style: { fontSize: '.9rem', marginBottom: '.4rem' } }, `${t('Étape')} ${idx + 1} / ${steps.length}`), segmentLectureEl(step,{role:'texte-etape'}), // m10 : étape entière, sauts de ligne gardés
         null));
       for (const tm of step.timers || []) right.append(timerCard(tm, it, step));
     }
-    const speak = 'speechSynthesis' in window && step ? el('button', { class: 'btn', onClick: () => { const u = new SpeechSynthesisUtterance(step.text); u.lang = (it.recipe.original_language || 'fr') === 'en' ? 'en-CA' : 'fr-CA'; speechSynthesis.cancel(); speechSynthesis.speak(u); } }, t('Lire à voix haute')) : null;
+    const etatVoix=el('span',{class:'muted',role:'status',dataset:{role:'etat-voix'}});
+    const speak=speech&&Utterance&&step?el('button',{class:'btn',onClick:()=>{
+      arreterVoix();if(!step.langReelle){etatVoix.textContent=t('Langue du texte inconnue : aucune voix choisie automatiquement.');return;}
+      const langues=step.langReelle.toLowerCase(),voices=speech.getVoices?.()||[],voice=voices.find(v=>v.lang?.toLowerCase()===langues)||voices.find(v=>v.lang?.toLowerCase().split('-')[0]===langues.split('-')[0]);
+      if(!voice){etatVoix.textContent=t('Aucune voix disponible pour la langue de ce texte.');return;}
+      try{const u=new Utterance(step.text);u.lang=voice.lang;u.voice=voice;u.onstart=()=>{if(!dispose&&etatVoix.isConnected)etatVoix.textContent=t('Lecture en cours');};u.onend=()=>{if(!dispose&&etatVoix.isConnected)etatVoix.textContent='';};u.onerror=()=>{if(!dispose&&etatVoix.isConnected)etatVoix.textContent=t('La lecture vocale n’a pas démarré. Réessaie.');};speech.speak(u);}catch{etatVoix.textContent=t('La lecture vocale n’a pas démarré. Réessaie.');}
+    }},t('Lire à voix haute')):null;
     const navigation = el('div', { class: 'controls navigation-cuisine' },
       el('button', { class: 'btn', disabled: idx === 0, onClick: () => go(it, idx - 1) }, `← ${t('Précédent')}`),
       idx < steps.length - 1 ? el('button', { class: 'btn primary', onClick: () => go(it, idx + 1, step) }, `${t('Suivant')} →`) : el('button', { class: 'btn primary', onClick: () => { if (step) markDone(step); finish(); } }, t('Terminer')));
-    right.append(ingredients, el('div', { class: 'row' }, speak, el('small', { class: 'muted' }, t('Commandes vocales : à venir après validation sur iOS. Pour une minuterie, parle à Siri directement.'))));
+    right.append(ingredients, ...(projection.manque?[el('p',{class:'status warn'},t('Les passages non traduits restent dans leur langue d’origine.'))]:[]), el('div', { class: 'row' }, speak, etatVoix, el('small', { class: 'muted' }, t('Commandes vocales : à venir après validation sur iOS. Pour une minuterie, parle à Siri directement.'))));
     const sha = photoPrincipale(it.recipe, photos)?.sha256;
     const photo = el('details', { class: 'photo-cuisine', dataset: { role: 'photo-cuisine' } }, el('summary', null, t('Voir la photo du plat')));
     photo.append(photoVisible(sha, { fichier: fichierPhoto(it.recipe, photos, fichiers), ctxF, classe: 'photo-cuisine-image', personnelle: !!photos.get(it.recipe.id) }) || el('p', { class: 'muted' }, t('Aucune photo pour cette recette.')));

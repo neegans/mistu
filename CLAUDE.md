@@ -3715,3 +3715,11 @@ Publication autorisée mais pas encore effectuée dans ce reçu local. L6–L10/
 56 fonctions et droits clients conformes, cinq triggers/RLS et deux tables privées conformes. Les54 différences de droits service_role proviennent des ACL par défaut Supabase, mesurées ; aucun client n’hérite de ce rôle serveur privilégié. Aucun patch ni réapplication.
 Code66734c5 poussé par avance rapide dans main ; Pages construit à22 h50 HAE (02:50:20UTC).72 fichiers publics identiques, suite publique9472/9472, zéro erreur JavaScript/requête extérieure.
 Parcours publics16+12 mesures, douze modules en cache unique0.27.0-1, images/historique et comparaison conservés après recharge hors ligne. Rapports et reçu SQL dans le dossier L5 ; aucun compte privé, contenu métier serveur ou appel assistant réel. L6–L10/E1 restent à réaliser.
+
+
+## L6 — Groupes et français — réception locale du 30 octobre 2026
+
+[Spec](docs/superpowers/specs/2026-10-29-l6-ingredients-groupes-traductions-design.md), [protocole](docs/superpowers/specs/2026-10-29-l6-protocole-traductions.md), [rapport](docs/superpowers/plans/2026-10-29-l6-ingredients-groupes-traductions.md).
+Groupes explicites préservés par les éditeurs et dérivations ; original/français dans fiche/cuisine/exports, traduction partielle et provenance par passage. Réponses payées durables et récupérables, réessai de conservation sans nouvel appel, comparaison et publication atomique, sources protégées JS/SQL, archive5 historique et phases de synchronisation exactes.
+0.28.0/cache0.28.0-1, DB6, archive5 ; migration0011 additive,0001–0010 intactes. 10161/10161 navigateur (épingle10160,+689), Node232/232, générateur0, syntaxe/diff propres. PostgreSQL neufUTF8 :327 contrôles L5,212 L6 +132ACL et vraie écriture client ;26 contrôles de concurrence réelle. Deux moteurs/SQL30 contrôles et12RPC, confirmation perdue/rejeu, archive et aucun écho. Parcours lecture15/28 et éditeur7/20, deux onglets/quota/récupération,12 modules en cache et rechargement vraiment hors ligne.
+Publication autorisée, en préparation à ce reçu ; version publique encore0.27.0. Bruts/brouillons locaux hors archive, réimport d’ancien ZIP soumis à comparaison après révision fraîche ; aucun essai physique iPhone/Safari/TM7 ni appel assistant réel. L7–L10/E1 restent à terminer.
