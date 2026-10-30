@@ -36,8 +36,14 @@ Un contrôle réel hors ligne a aussi révélé que Chrome pouvait résoudre `re
 
 ## Livraison et limites de preuve
 
-Livraison générée **0.32.0-7**,208 fichiers /3 636 335 octets ; empreinte `fd435b143c1c342b2b95b6a9a0af1a74db068d3e9db8f3c5ca386699525ebb09`. Réception locale terminée ; publication et réception publique en préparation à ce reçu.
+Livraison générée **0.32.0-7**,208 fichiers /3 636 335 octets ; empreinte `fd435b143c1c342b2b95b6a9a0af1a74db068d3e9db8f3c5ca386699525ebb09`. Réception locale puis publique terminée ; détails ci-dessous.
 
 Preuves locales dans `.superpowers/sdd/2026-10-30-traduction-guidee/` et `.superpowers/sdd/2026-10-30-actualisation/transition/`. Les essais utilisent des bases jetables et un fournisseur simulé, avec les modules produit réels. Aucun accès au compte ou à la recette Trinity privée de Neegan, aucun appel payé ; sa traduction doit être lancée dans son application. La qualité linguistique du fournisseur réel n’est pas certifiée par la simulation. La traduction porte sur le contenu présent et ne reconstitue pas une page manquante.
 
 Parcours de régression locaux : langue **24/24** (320/390/1280, commandes et persistance), recherche **10/10** (version7 affichée, recherche réelle, échec hors ligne et résultat conservé). Captures relues. Les contre-épreuves indépendantes confirment la péremption après reprise et la libération d’une seule réservation interrompue, avec journal et seconde réservation conservés.
+
+## Réception publique
+
+Code **90f1deb80049731f4d4d3cd33897b43931f60d4e**, main promue par avance rapide. GitHub Pages construit le30octobre à **13:35:44UTC (09h35 HAE)**. **239 fichiers publics identiques**, empreintes et types MIME conformes ; livraison0.32.0-7. Preuve copiée dans `traduction-guidee/publication-fichiers.json`. Suite publique finale **11684/11684**, zéro erreur JavaScript, requête extérieure ou échec HTTP ; concurrence des sources limitée à8, aucune erreur transitoire. Les erreurs console des pannes simulées sont conservées dans le reçu brut.
+
+Parcours publics finaux : **47/47** traduction guidée (390/1280, aperçu, enregistrement, fiche française et même candidate après rechargement réellement hors ligne), **24/24** langue et **10/10** recherche de mise à jour. Captures relues ; zéro erreur JavaScript/requête extérieure. Le worker installé est bien celui de GitHub Pages0.32.0-7. Aucun appel après rechargement ; deux appels simulés pour les deux tailles. Le document du parcours guidé et l’identité sont des fixtures, les modules produit proviennent intégralement du site public sans substitution.
