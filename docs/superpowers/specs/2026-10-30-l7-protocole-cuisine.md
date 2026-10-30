@@ -172,23 +172,143 @@ Restore : cible absente ou seedmétieridentique, sinon refus avant écriture. Pr
 
 Clôture : garder UNE transaction locale `enregistrerCuissons` pour fichiers, cook_history, dernierdonequalifié et sessiondone. Aucune mutation de progression seulement en mémoire avant dialogue. Le transport n’est actuellement pas atomique pour tout le bilan multi-recettes : ne pas ajouter cette promesse dans L7. Envoyer les historiques requis avant session/finish, qui vérifie le manifeste exact des IDs/preuves, puis clôture ; crash avant finish laisse historique présent et sessionactive clairement à reprendre. Il ne faut pas recopier jusqu’à100 historiques/images dans une commande768Kio : cela réduirait les volumes déjà admis. Si le produit exigeait l’atomicité serveur de l’ensemble, il faudrait un lot distinct avec staging ; ce n’est pas nécessaire à la spec actuelle.
 
-## 7. APIs de domaine proposées et réception
+## 7. APIs figées pour A/B/C et propriété des fichiers
+
+### 7.1 Modules et portée
+
+A fournit `src/domain/cuisine-format.js` (formes, projections, commandes et calcul pur), `src/domain/cuisine-persistance.js` (service/capacités/CAS) et, si nécessaire pour garder le service lisible, `src/domain/cuisine-archive.js` (restore). A possède aussi `domain/timers.js`, `domain/thermomix-session.js`, repo/DB, sync, backup/schema archive et générateur SQL0012. B possède `ui/cook.js`, `ui/home.js`, les producteurs de `ui/recipe.js`/`ui/meals.js` et le raccord `ui/cuisson.js`. C possède `ui/minuteurs-session.js`, `domain/ecran-allume.js`, `components.timerBlock`, gestes Siri/Raccourcis/voix. Root possède observations de base/app, CSS/i18n/cache/versions/runner. Aucun second dépôt de minuteries dans l’UI.
 
 ```js
-creerServiceCuisine({repo,getGeneration,maintenant,newId})
- .capturerPortee({owner_id,estCourante})
- .lireSession({sessionId,portee})
- .preparerLancement({portee,affiche,ordinal,choix,channel})
- .conserverLancement({intention})
- .preparerAncre({portee,lancementAffiche,sessionAffichee,versionAffichee})
- .conserverAncre({intention})
- .signalerDemande({portee,lancementAffiche,etat})
- .preparerProgression({portee,affiche,versionId,currentStepId,doneAdd})
- .appliquerSession({intention})
- .lireMinuteurs({portee,sessionId})
+import {creerServiceCuisine} from '../domain/cuisine-persistance.js';
+const service = creerServiceCuisine({repo,getGeneration:getSyncGeneration,maintenant:nowIso,newId});
+const capture = await service.capturerPortee({
+ owner_id:ctx.proprietaireDonnees ?? null,
+ estCourante:()=>!dispose
+});
 ```
 
-Préparateurs capturent dates/IDs avantawait et retournent intentionsopaques réessayables ; retour `{issue:'conserve'|'deja_conserve'|'refuse'|'echec',raison?,...}`. Le reste calculé est une projection, jamais un état métier stocké. Lire les actifs puis historique paginé sans tronquer la liste active. Invalidation interonglets uniquement aprèscommit, contenu non fiable relu dansDB ; rootCook met à jour sans remount des minuteurs, sans réacquérir WakeLock, sans relancer voix. Choix candidateL6 local au montage, reprise aprèsvrai reload demande un choix si plusieurs candidates.
+**Propriétaire des données : ctx.proprietaireDonnees**, capturé par getData depuis `sync_state.user_id`, jamais `ctx.sync.user?.id`. Une déconnexion n’efface pas le propriétaire durable. capturerPortee capture DB et génération avant son premier await, compare propriétaire durable et époque de bibliothèque comme L6, puis retourne `{issue:'ok',portee}`. Portee est opaque, non reconstructible ; chaque lecture/intention est liée à cette portée. Pas d’adoption silencieuse d’un owner relu après un await. getGeneration et estCourante sont injectés ; maintenant renvoie une dateISOUTC, newId reçoit un préfixe.
+
+### 7.2 Lecture affichée et projection de session
+
+```js
+service.lireSession({portee,sessionId})
+// -> {issue:'ok',lecture,affiche,projection}
+```
+
+lecture est une capacité opaque ; affiche/projection sont des copies de lecture, jamais une base acceptée en retour depuis le formulaire. B rend cette affiche pour que le geste porte réellement les données montrées. Forme affiche :
+
+```js
+{
+ session, // ligne complète exacte, y compris champs legacy
+ versions:[{version_id,version:null|row,recipe:null|row,edition:null|row}],
+ traductions:[] // candidates des versions de la session, copies exactes pour le projecteur L6
+}
+```
+
+versions conserve ordre/IDs de selected_version_ids, y compris absents. projection :
+
+```js
+{
+ session_id,status,etat:'active'|'terminee'|'invalide',
+ progress_format:'legacy'|'v2'|'invalide',
+ active_version_id:null|string,active_par_defaut:boolean,active_indisponible:boolean,
+ lang:'original'|'fr'|'en',
+ versions:[{
+   version_id,etat:'disponible'|'version_absente'|'recette_absente'|'source_invalide'|'thermomix_bloque',
+   servings:null|number,current_step_id:null|string,display_step_id:null|string,
+   done_step_ids:[],total_steps:null|number,execution_autorisee:boolean,raison:null|string
+ }],
+ absents:[],ambigus:[{step_id,version_ids:[],raison}],
+ done_count:number,total_steps:null|number
+}
+```
+
+current_step_id est la preuve conservée ; display_step_id peut être la première étape connue seulement quand aucun pointeur n’existe, sans écrire ce choix. Pointeur explicite disparu : display_step_id null et motif. Actif explicite disparu : pas de fallback ; actif legacy absent/null peut choisir la première version admise, avec active_par_defaut true. Total null si toute la sélection ne peut être comptée, jamais un faux100%. B/Home utilisent les faits qualifiés de projection. Le projecteur L6 reçoit affiche, pas un second texte traduit par A.
+
+### 7.3 Gestes de session
+
+```js
+service.preparerSelection({portee,lecture,versionId})
+service.preparerLangue({portee,lecture,lang})
+service.preparerProgression({portee,lecture,versionId,currentStepId,doneAdd:[]})
+// -> {issue:'ok',intention}
+service.appliquerSession({intention})
+// -> {issue:'conserve'|'deja_conserve',lecture,affiche,projection,operation_ids:[]}
+```
+
+Les préparateurs capturent le geste et réservent IDs/dates avant leur premier await, puis vérifient les bases de lecture sans adopter une source plus récente. Intention peut contenir adoption pure+geste, sans exposer cette mécanique au formulaire. Un réessai reçoit la même intention. Les gestes rapides sont sérialisés côté B ; une base périmée ne devient pas une lecture externe fraîche implicitement. Le résultat confirmé fournit la lecture actualisée pour le geste suivant. Pas d’état succès avant commit.
+
+### 7.4 Clôture : raccord exact de enregistrerCuissons
+
+```js
+service.preparerFin({portee,lecture,doneAdd:[{version_id,step_ids:[]}],
+                    cuissons:rows,endedAt})
+// -> {issue:'ok',intention}
+service.terminerSession({intention,
+ metier:{puts:{},conditions,recettes:[],editions:[]},fichiers:[]})
+// -> {issue:'conserve'|'deja_conserve',lecture,affiche,projection,rows,operation_ids:[]}
+```
+
+B garde la validation de forms/photos, les IDs stables de cook_history, les lignes `rows` produites aujourd’hui, et les conditions d’existence/identité de recettes, versions, historiques et fichiers. Il appelle preparerFin **au clic Enregistrer du bilan**, après validation, jamais à l’ouverture/annulation du dialogue. endedAt est le même instant que celui employé pour les cuissons du jour. Toutes selected_version_ids correspondent au manifeste rows ; aucune version absente filtrée pour clôturer artificiellement une sélection incomplète.
+
+Dans le cas session, B retire uniquement son ancienne fusion cook_sessions et passe les autres conditions/fichiers à terminerSession ; A vérifie leur périmètre, ajoute les fusions session/adoption/finish et commit tout dans **une seule transaction locale** via repo. Les fusions cook_history ne peuvent fabriquer des lignes différentes de cuissons capturées ; les écritures de recettes/versions sont interdites dans cette porte, leurs conditions restent readonly. A réutilise les gardes métier et conditionsFichiers, sans contournement. Pas d’écriture séparée de dernierdone, session ou outbox. Hors session, enregistrerCuissons garde son chemin actuel inchangé.
+
+Le bouton Terminer de navigation transmet seulement l’étape effectivement affichée dans doneAdd ; le bouton d’en-tête transmet[] ; aucun autre done inventé. Le dialogue conserve la lecture capturée à son ouverture, et préparerFin refuse une clôture/source/cycle concurrent au clic final. Les erreurs gardent formulaires/photos et intention exacte pour réessai ; une modification de saisie après erreur exige une nouvelle préparation.
+
+### 7.5 Lecture et projection de minuteries
+
+```js
+service.lireMinuteurs({portee,sessionId,curseur:null,limiteHistorique:30})
+// -> {issue:'ok',session_id,actifs:[],demandes:[],historique:[],
+//     prochainCurseur:null|opaque,totalHistorique,observed_at}
+// chaque élément : {lancement,affiche}
+```
+
+lancement est une capacité opaque liée à la ligne montrée ; affiche : `{ligne,etat:'en_cours'|'ecoule'|'sans_suivi'|'invalide',raison:null|string,synchronisation:'locale'|'en_attente'|'confirmee'|'conflit',confirmee:null|row}`. ligne est une copie exacte, jamais une autorisation de mutation. La confirmation n’est nommée que si elle vient réellement d’ACK/pull ; en conflit elle reste distincte de la branche locale. Les lignes inconnues restent lisibles avec motif et sans commande active.
+
+Lecture par index cook_session_id, y compris sessiondone ou source devenue indisponible ; tous suivis encore actifs **et toutes demandes sans ancre** sont retournés indépendamment de la pagination historique. Historique comprend écoulés/invalides, ordre stable. limiteHistorique entier1..200 ; curseur opaque lié à portée/session. Aucune DB lue à chaque tick.
+
+```js
+import {projeterSuiviMinuteur} from '../domain/cuisine-format.js';
+projeterSuiviMinuteur(ligne,maintenantMs)
+// -> {etat:'en_cours'|'ecoule'|'sans_suivi'|'invalide',
+//     reste_ms:null|number,reste_secondes:null|integer,raison:null|string}
+```
+
+Fonction pure, ceil du reste ; invalide/sansancre ne devient jamais0. Le diagnostic Date.now/performance.now, les abonnements et l’annonce unique d’expiration appartiennent au contrôleur C, hors donnée métier.
+
+### 7.6 Préparer, conserver, ancrer et signaler une demande
+
+```js
+service.preparerLancement({portee,lecture,versionId,stepId,ordinal,
+ choix:'min'|'max',channel:'mirror'|'shortcut'|'siri',
+ snapshots:{recipe_title,task_label}})
+// -> {issue:'ok',intention,apercu:{duration_seconds,source_timer,mirror,channel}}
+service.conserverLancement({intention})
+// -> {issue:'conserve'|'deja_conserve',lancement,affiche,
+//     raccourci:null|{url},operation_ids:[]}
+service.preparerAncre({portee,lecture,lancement})
+// -> {issue:'ok',intention,apercu:{nouveau_lancement:boolean,mirror,duration_seconds}}
+service.conserverAncre({intention})
+// -> {issue:'conserve'|'deja_conserve',lancement,affiche,operation_ids:[]}
+service.preparerSignalement({portee,lancement,etat})
+// -> {issue:'ok',intention}
+service.signalerDemande({intention})
+// -> {issue:'conserve'|'deja_conserve',lancement,affiche,operation_ids:[]}
+```
+
+choix min désigne aussi la durée unique sans maximum ; max exige une plage valide. Aucun seconds transmis par l’UI comme autorité : A relit la minuterie à l’ordinal exact de la version montrée. snapshots sont les libellés affichés, bornés/échappés, sans rôle dans la preuve de durée. Les textes des phrases Siri et liens utilisent les fonctions existantes timers.js et la durée normalisée identique.
+
+preparerLancement est appelé **au geste effectif** : préparer la demandeShortcut, démarrer le miroir, ou « J’ai demandé à Siri ». Montrer une phrase Siri avant déclaration n’écrit rien et ne réserve pas une date de départ. Une demandeShortcut n’expose un lien actif qu’après conserverLancement. Le second clic natif peut appeler preparerSignalement puis signalerDemande sans attendre avant l’ouverture ; erreur d’écriture visible, jamais prétendue confirmationHorloge, aucun lien relancé au réessai.
+
+preparerAncre : format1 sansmirror ajoute la première ancre ; legacy sansmirror crée un **nouvel ID** channelmirror avec legacy_launch_id, et garde la vieille ligne intacte. Même API, nouveau_lancement annonce le cas. Sessiondone/sourceinexécutable refuse un nouveau suivi ; les anciens suivis continuent à être projetés. L’intention conserve instant/date même en cas de quota ; réessayer ne redémarre pas le temps.
+
+### 7.7 Erreurs, abonnements et notification après commit
+
+Lectures/préparations retournent `{issue:'refuse',raison,reessayable:false}` pour garde métier ou `{issue:'echec',raison,reessayable:true}` pour panne. Commits ajoutent si utile `{confirmation:null|affiche,conflit:null|opaque}` ; l’UI garde l’intention pour réessai exact, aucun plan nouveau ni geste externe implicite. Motifs communs : contexte_change,compte_change,bibliotheque_remplacee,session_absente,session_terminee,source_changee,cycle_change,progression_changee,ancre_changee,handoff_change,forme_invalide,bornes,quota_stockage,stockage_indisponible. Les réussites signifient conservation locale ; synchronisation est le champ séparé d’affiche.
+
+Root fournit `core/observations-base.js::signalerCommit(base,magasins)` et ses abonnements. A appelle signalerCommit dans core/db.js **après commit réussi seulement**, chemins conditionné/simple, avec magasins réellement écrits via puts/deletes/clear/fusions ; pas de message métier/owner et aucun signal sur abort. B expose `node.actualiserCuisine()` ; C expose `panneau.actualiser()`/`detruire()` et conserve ses contrôleurs. Une invalidation entraîne relecture service dans la même portée ; elle ne redémarre ni son, ni voix, ni WakeLock. Résultat tardif d’une ancienne portée ignoré.
 
 Rouges indispensables avant construction : ancreeffacée par vieuxput; deux ancres sous mêmeID; ACKcreateperdu après ancredistante; progressionmêmeIDstep dansdeuxversions; deux pointeurs d’unemêmeversion; progrèsdisjointA/B; ABAtoken; dernierdoneannulé; source/compte/époque/sessiondone avantcommit; REST/tombale/alias; restoreclosed/collision; sourcelegacytimer modifiée; capacitéabsente; deuxvraismoteurs avec retourhorsligne. PostgreSQLUTF8 neuf + ACLcomposition + deuxconnexions sous vraiownerlock. Mesurer1000lancements et sessionàborne réelle, sans timer àchaquetick.
 
