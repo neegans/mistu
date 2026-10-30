@@ -1,3 +1,4 @@
+import {runAuditConflitsTests} from './audit-conflits.js';
 import {runL10DiagnosticActualisationTests} from './l10-diagnostic.js';
 import {runL10HorsLigneActualisationTests} from './l10-hors-ligne.js';
 import {runL10ConservationTests} from './l10-conservation.js';
@@ -691,7 +692,8 @@ try { await runL7MinuteursCommandesTests({eq,ok}); } catch (e) { ok(false, 'runL
 try { await runL7MinuteursDepotEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursDepotEcranTests : ' + (e.stack || e)); }
 try { await runL7MinuteursEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursEcranTests : ' + (e.stack || e)); }
 try { await runL7VoixTests({eq,ok}); } catch (e) { ok(false, 'runL7VoixTests : ' + (e.stack || e)); }
-eq(results.length, 11683,'compte d’assertions : une assertion qui disparait est un rouge');
+try { await runAuditConflitsTests({eq,ok}); } catch (e) { ok(false, 'runAuditConflitsTests : ' + (e.stack || e)); }
+eq(results.length, 11718,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

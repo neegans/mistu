@@ -162,7 +162,7 @@ export async function runCorrectifsImportsSyncReponsesTests({ eq, ok }) {
       return mutation(options);
     };
     let refus = null; try { await garderIci(db, c); } catch (e) { refus = e; }
-    ok(!!refus, 'Ancien conflit : changement compte pendant résolution refuse atomiquement');
+    eq(refus?.message, 'Compte du conflit changé', 'Ancien conflit : changement compte pendant résolution refuse atomiquement');
     eq((await db.get('imports', base.id)).updated_at, base.updated_at, 'Ancien conflit : aucun contenu réhorodaté pour le nouveau compte');
     ok(!!await db.get('sync_conflicts', c.id), 'Ancien conflit : copie conservée après refus de compte');
   }));

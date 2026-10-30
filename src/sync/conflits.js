@@ -16,6 +16,33 @@ import { lireCycleRecette } from '../domain/cycle-recette.js';
 import { lireCycleEdition, lireEtatRecette, memeExceptionEdition } from '../domain/cycle-edition.js';
 import {estCommandeProtegee,ciblesCommandeProtegee} from './commandes-traduction.js';
 
+// Les gardes composées voient toutes l'instantané transactionnel, jamais une fiche transformée
+// par une garde précédente. Une vérification sans écriture ne doit pas effacer une fusion calculée.
+export function fusionnerConditions(a = {}, b = {}) {
+  const resultat = {};
+  for (const conditions of [a, b]) for (const [store, gardes] of Object.entries(conditions)) {
+    const liste = resultat[store] ||= [];
+    for (const garde of gardes) {
+      const index = liste.findIndex(c => garde.toutes === true ? c.toutes === true
+        : garde.key != null && c.key != null && String(c.key) === String(garde.key));
+      if (index < 0) { liste.push({ ...garde }); continue; }
+      const precedente = liste[index];
+      if (garde.toutes === true && typeof precedente.verifier === 'function' && typeof garde.verifier === 'function') {
+        liste[index] = { toutes: true, verifier: (...args) => {
+          for (const c of [precedente, garde]) if (c.verifier(...args)?.then) throw new TypeError('Une vérification transactionnelle reste synchrone');
+        } };
+      } else if (typeof precedente.fusion === 'function' && typeof garde.fusion === 'function') {
+        liste[index] = { key: precedente.key, fusion: (...args) => {
+          const premiere = precedente.fusion(...args), seconde = garde.fusion(...args);
+          if (premiere != null && seconde != null) throw new TypeError('Deux fusions écrivent la même fiche ' + store + '/' + String(garde.key));
+          return seconde ?? premiere ?? null;
+        } };
+      } else throw new TypeError('Conditions incompatibles sur ' + store + '/' + String(garde.key));
+    }
+  }
+  return resultat;
+}
+
 const cibleSource=(entry,conflit,owner)=>estCommandeProtegee(entry)&&(entry.user_id==null||entry.user_id===owner)&&
   [{store:entry.store,id:entry.id},...ciblesCommandeProtegee(entry.payload)].some(r=>r.store===conflit.store&&r.id===conflit.record_id);
 const refusSource=()=>{throw Object.assign(new Error('Une intention de sources attend sa comparaison'),{code:'SOURCE_CONFLICT_READONLY'});};
@@ -31,7 +58,7 @@ async function muterConflit(db,options){try{await db.mutate(options);return true
 async function protectionContenu(db,conflit,copie){
   const sources=await protectionSources(db,conflit);if(!sources)return null;
   const metier=await protectionContenuMetier(db,conflit,copie);if(!metier)return null;
-  const conditions={...metier.conditions};for(const [store,cs]of Object.entries(sources))conditions[store]=[...(conditions[store]||[]),...cs];
+  const conditions=fusionnerConditions(metier.conditions,sources);
   return {...metier,conditions};
 }
 async function protectionContenuMetier(db,conflit,copie) {
@@ -185,7 +212,7 @@ export async function purgerAnciens(db, maintenantMs = Date.now(), joursMax = 30
   // Un `at` illisible ne se date pas : le conflit reste plutôt que d'être retiré par accident (la personne le voit
   // dans Réglages et peut trancher). Origine 'remote' : un retrait de journal n'est pas un geste sur les données.
   const candidats = (await db.getAll('sync_conflicts')).filter((c) => !['cycle','import_cloture','source','translation','cooking','inventory'].includes(c.kind) && Date.parse(c.at) < limite);
-  const vieux=[],conditions={};for(const c of candidats){const garde=await protectionSources(db,c);if(!garde)continue;vieux.push(c.id);for(const [store,cs]of Object.entries(garde))(conditions[store]||=[]).push(...cs);}
+  const vieux=[];let conditions={};for(const c of candidats){const garde=await protectionSources(db,c);if(!garde)continue;vieux.push(c.id);conditions=fusionnerConditions(conditions,garde);}
   if (vieux.length&&!await muterConflit(db,{ deletes: { sync_conflicts: vieux }, origin: 'remote', conditions }))return 0;
   return vieux.length;
 }

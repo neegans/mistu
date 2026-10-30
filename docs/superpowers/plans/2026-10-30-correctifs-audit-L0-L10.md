@@ -40,18 +40,18 @@
 **Interfaces :**
 - Produit : `fusionnerConditions(a, b)` (exportée de `src/sync/conflits.js`, pure) : rend `{ [store]: Condition[] }` ; pour deux conditions de même `store` et même `key` (ou deux `toutes:true`), rend UNE condition dont `fusion`/`verifier` appelle les deux dans l'ordre (a puis b) ; sinon concatène.
 
-- [ ] **Étape 1 : écrire les tests rouges** dans `tests/audit-conflits.js` (fixture `withDatabase` de `tests/backup.js`, aucune capture) :
+- [x] **Étape 1 : écrire les tests rouges** dans `tests/audit-conflits.js` (fixture `withDatabase` de `tests/backup.js`, aucune capture) :
   - `audit B1 : garderIci tranche un conflit recipes` : fiche `recipes` `{id:'r1', title:'Ici', edition_id:null, updated_at}` + `sync_state` `user_id:'u1'` + conflit `{id:'recipes:r1', store:'recipes', record_id:'r1', kind:'donnees', user_id:'u1', local:{…title:'Ici'}, server:{data:{…title:'Ailleurs'}, updated_at}, at}` → `eq(await garderIci(db, conflit), true)` ; `eq((await db.get('recipes','r1')).title, 'Ici')` ; `eq(await db.get('sync_conflicts','recipes:r1'), undefined)`.
   - `audit B1 : garderAilleurs tranche un conflit recipes` : même fixture → `true`, titre `'Ailleurs'`.
   - `audit B1 : conflit recipes sans version locale` : `local:null` → `garderIci` rend `true` et la fiche est une tombale (absente de `recipes`).
   - `audit B1 : conflit imports Thermomix` : ligne `imports` `kind:'thermomix'` au statut `a_verifier` + conflit `kind:'donnees'` → `garderAilleurs` rend `true`.
   - `audit B1 : fusionnerConditions compose deux gardes de même clé` : deux conditions `sync_state/user_id` dont la seconde lève → la condition fusionnée lève avec le message de la seconde ; deux `outbox` `toutes:true` → un seul élément, les deux `verifier` appelés (compteur).
   - `audit B1 : purgerAnciens avec deux conflits anciens` : deux conflits `books` `kind:'donnees'` datés 2020 → `eq(await purgerAnciens(db, Date.now()), 2)` et aucun conflit restant.
-- [ ] **Étape 2 : lancer la suite, constater les rouges** : les quatre premiers lèvent `TypeError: Deux conditions sur la même fiche sync_state/user_id` (voir `docs/audits/…/preuves/conflits-typeerror.json`).
-- [ ] **Étape 3 : implémenter `fusionnerConditions(a, b)`** dans `src/sync/conflits.js` et l'utiliser dans `protectionContenu` (à la place de la concaténation `[...(conditions[store]||[]), ...cs]`) et dans `purgerAnciens` (accumuler par `fusionnerConditions(conditions, garde)`). Pour `sync_conflicts`, les clés diffèrent (un conflit chacune) : concaténation naturelle.
-- [ ] **Étape 4 : remplacer le refus « n'importe quelle exception »** de `tests/correctifs-imports-sync.js:164-166` par `eq(refus?.message, 'Compte du conflit changé', …)`.
-- [ ] **Étape 5 : suite complète verte**, total épinglé remis à la valeur mesurée.
-- [ ] **Étape 6 : commit** `fix(sync): fusionner les conditions des conflits, trancher les conflits de recette (audit B1)`.
+- [x] **Étape 2 : lancer la suite, constater les rouges** : les quatre premiers lèvent `TypeError: Deux conditions sur la même fiche sync_state/user_id` (voir `docs/audits/…/preuves/conflits-typeerror.json`).
+- [x] **Étape 3 : implémenter `fusionnerConditions(a, b)`** dans `src/sync/conflits.js` et l'utiliser dans `protectionContenu` (à la place de la concaténation `[...(conditions[store]||[]), ...cs]`) et dans `purgerAnciens` (accumuler par `fusionnerConditions(conditions, garde)`). Pour `sync_conflicts`, les clés diffèrent (un conflit chacune) : concaténation naturelle.
+- [x] **Étape 4 : remplacer le refus « n'importe quelle exception »** de `tests/correctifs-imports-sync.js:164-166` par `eq(refus?.message, 'Compte du conflit changé', …)`.
+- [x] **Étape 5 : suite complète verte**, total épinglé remis à la valeur mesurée.
+- [x] **Étape 6 : commit** `fix(sync): fusionner les conditions des conflits, trancher les conflits de recette (audit B1)`.
 
 ### Tâche 2 : La purge des imports à 30 jours épargne les lignes gérées (B2)
 
