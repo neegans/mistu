@@ -1,6 +1,6 @@
 # Correctifs de l’audit — lot C
 
-Référence : [plan fourni par Neegan](2026-10-30-correctifs-audit-L0-L10.md), tâche 8 ; [lentille SQL/RLS](../../audits/2026-10-30-audit-codex-L0-L10/lentilles/sql-rls.md). Branche `correctifs-audit-c`, base `402f5bb` (reçu public de B). Le « go » de Neegan autorise la publication de B et la construction de C. **Aucune application de 0014 sur le serveur n’est autorisée ou effectuée.**
+Référence : [plan fourni par Neegan](2026-10-30-correctifs-audit-L0-L10.md), tâche 8 ; [lentille SQL/RLS](../../audits/2026-10-30-audit-codex-L0-L10/lentilles/sql-rls.md). Branche `correctifs-audit-c`, base `402f5bb` (reçu public de B). Le reçu local ci-dessous précédait l’autorisation de publication. Le nouveau « deploy et enchaine ensuite le reste » de Neegan autorise maintenant la publication de C ; **0014 appliquée le 30 octobre à 21:08:02.695270 UTC**, postflight conforme. Voir la réception distante ajoutée en fin de document.
 
 ## Périmètre et décisions de construction
 
@@ -75,8 +75,19 @@ Les identités Auth et Storage sont des fixtures locales. `cron.schedule` enregi
 
 Preuves dans `.superpowers/sdd/2026-10-30-audit-c/` : `preuves-rouges-finales.json`, `preuves-vertes-finales.json`, `application-vert.json`, `migrations-avant.json`, `regressions-root.json`, `preflight-orphelin.json`, `revue/reception-independante.json`, `suite-locale.log`, `generateur-rouge.log`, `node-final.log`. Les empreintes 0001–0013 sont aussi épinglées dans le test du générateur.
 
-## Geste distant restant
+## Geste distant restant au reçu local (historique)
 
 **0014 écrite, non appliquée : geste de Neegan, après son postflight de 0011–0013.** La procédure est dans [supabase/README.md](../../../supabase/README.md), étape 15. Les traces historiques de 0011–0013 ont été rapprochées dans [RESULTATS-mitsu.md](../../../supabase/proofs/RESULTATS-mitsu.md), avec des sections explicitement laissées à compléter par Neegan pour le contrôle actuel. Ce rapprochement documentaire n’est pas une nouvelle vérification du serveur.
 
 **Lot C terminé localement, non publié.** Le code et les preuves sont prêts pour relecture ; les lots D à G restent à traiter. La version publique demeure B 0.32.2-2.
+
+
+## Publication du lot C
+
+Sur l’autorisation « deploy et enchaine ensuite le reste », **0014 appliquée le 30 octobre 2026 à 21:08:02.695270 UTC**. Sauvegarde quotidienne Supabase `COMPLETED` à 06:29:06.782 UTC ; préflight complet de 0001–0013 conforme. Une différence de locale dans le tri du harnais a été isolée en lecture seule, puis corrigée par `COLLATE "C"` explicite ; aucun SQL métier n’a changé. Application atomique avec gardes de catalogue avant/après, puis postflight dans une transaction distincte : **zéro écart produit**, droits serveur supplémentaires distingués, deux FK privées validées, nettoyage des transferts actif à 04:30 UTC. Revue indépendante **10/10**. [Reçu SQL détaillé](../../../supabase/proofs/RESULTATS-mitsu.md).
+
+Code **`98a02d3740e1a75d311891c40d835935473e6ce3`** promu par avance rapide et publié ; Pages construit à **21:08:49 UTC (17 h 08 HAE)**. **0.32.3-1**, manifeste et 251 fichiers publics identiques au commit, octets/empreintes/MIME conformes. Suite publique complète encore en cours à ce reçu ; suite locale 12063/12063 déjà reçue sur ce code.
+
+Parcours public ciblé **13/13**, deux mesures 390/1280 sans débordement et quatre captures relues : démarrage, cache exact de 212 ressources plus métadonnée séparée, API native de persistance appelée une fois et refus correctement affiché, deux onglets, recette et note conservées après rechargement réellement hors ligne. Zéro erreur JavaScript/requête extérieure. Les 105 scénarios simulés de B ne sont pas attribués à cette nouvelle réception. Aucun compte privé, appel payé ou appareil physique utilisé.
+
+Preuves : `.superpowers/sdd/2026-10-30-audit-c/publication/`, `publication-fichiers.json`, `reception/public-c.resultat.json`, quatre PNG et `parcours-public.log`. La construction autorisée se poursuit avec D, puis E–G.

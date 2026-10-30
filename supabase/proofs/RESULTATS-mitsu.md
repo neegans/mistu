@@ -584,7 +584,9 @@ Capacités vérifiées dans la transaction d’application : recipe_lifecycle1, 
 Traces : `.superpowers/sdd/2026-10-29-l5/production-application.json`, `catalogue-reception.json`, `privileges-serveur.json`. Aucun redéploiement de la fonction assistant.
 
 
-## Rapprochement documentaire `0011`–`0013` — lot C, 30 octobre 2026
+## Rapprochement documentaire `0011`–`0013` — reçu local historique du lot C
+
+État avant le « deploy et enchaine ensuite le reste » de Neegan. Les attentes ci-dessous sont remplacées par le contrôle distant reçu dans la section suivante.
 
 Les traces locales d’application et de comparaison déjà produites lors de L6–L8 ont été relues pour combler l’absence de ces sections. **Ce rapprochement n’est pas un nouveau postflight distant et n’est pas attribué à Neegan.** Aucune requête ni migration n’a été exécutée sur `mitsu` pendant le lot C. Le contrôle actuel par Neegan reste requis avant `0014` (README, étape 15).
 
@@ -608,8 +610,21 @@ Date actuelle, sauvegarde, 33 fonctions attendues dans le reçu L7 et définitio
 
 Date actuelle, sauvegarde, fonctions et triggers L8, capacité `inventory_changes:1`, ACL clients et héritages, tables privées et transferts orphelins : **non relevés à nouveau dans le lot C**. Résultat du contrôle actuel : à consigner.
 
-## Migration `0014_maintenance_et_bornes.sql` — NON appliquée
+## Migration `0014_maintenance_et_bornes.sql` — reçu local avant autorisation
 
 **0014 écrite, non appliquée : geste de Neegan, après son postflight de 0011–0013.** Les preuves du lot C concernent uniquement PostgreSQL local jetable. Aucun nettoyage de tombales, purge de compte, ajout de clé étrangère ou nouvelle tâche cron n’a été exécuté sur le serveur. La future date d’application, l’empreinte approuvée, la sauvegarde et le postflight devront être ajoutés ici au moment du geste.
 
 Reçu local final de C : fichier 0014 de 43 341 octets, SHA256 `94b168bb1543ec544a35854b45c09b558342db551eca7ba2ce2c6b5d66c7ab7a` ; 35/35 scénarios dédiés et 27/27 anciens prouveurs SQL sur PostgreSQL jetable. Cette empreinte identifie le fichier prêt à relire, **pas une application distante**. [Compte rendu](../../docs/superpowers/plans/2026-10-30-correctifs-audit-c-reception.md).
+
+
+## Publication autorisée de 0014 — 30 octobre 2026
+
+Sur « deploy et enchaine ensuite le reste » de Neegan, Codex a appliqué 0014 à **21:08:02.695270 UTC (17 h 08 HAE)**, puis contrôlé le catalogue dans une nouvelle transaction de lecture seule. SQL approuvé : **43 341 octets**, SHA256 **`94b168bb1543ec544a35854b45c09b558342db551eca7ba2ce2c6b5d66c7ab7a`**. La sauvegarde quotidienne Supabase du **30 octobre à 06:29:06.782 UTC** est déclarée `COMPLETED` par l’API de sauvegardes ; aucune restauration ni extraction de données privées n’a été faite.
+
+Préflight actuel de 0001–0013 : **169 fonctions**, **88 triggers**, **110 politiques**, **30 tables**, **61 contraintes**, sept capacités à 1, propriétaires, droits clients et séparation des rôles conformes au socle local. Aucun propriétaire de transfert privé orphelin. Les 167 droits `EXECUTE` supplémentaires du seul `service_role` sont listés séparément ; aucun écart client/PUBLIC n’est toléré. Anon et authenticated n’héritent ni de ce rôle ni des propriétaires de fonctions. Ce relevé actuel couvre les postflights 0011–0013 attendus ci-dessus.
+
+L’enveloppe d’application conserve exactement les **43 072 octets intérieurs** de la migration (SHA256 `126941d1d939542800a8621d9f119455a5812eb8fe71587cf86fbfa673700993`), dans une seule transaction : garde de catalogue avant, SQL, garde après, puis COMMIT. Empreinte de l’enveloppe : `215b5fc4a3834cd8cd61842b435297ab3eabfca9e52a4aedf4249c9090453543`. Délais : verrou 5 s, requête 60 s. Le premier essai de garde, strictement en lecture seule, a refusé le tri JSON de la locale distante ; le diagnostic a isolé `en_US.UTF-8` face à `C`. Le tri `COLLATE "C"` explicite a résolu ce défaut du harnais, sans changement du SQL ni réduction des contrôles. La garde corrigée a été reçue avant toute application.
+
+Postflight : **zéro écart produit**, sept gardes exactes, fonction administrative réservée au rôle serveur, deux clés étrangères privées vers `auth.users` avec cascade validées, nettoyage des transferts enregistré et actif à **04:30 UTC**, purge des tombales maintenue à **04:15 UTC**. Revue indépendante **10/10**. Le catalogue prouve l’enregistrement des tâches, pas leur prochaine exécution. Aucun appel de purge ou de suppression administrative, aucune preuve avec fixtures ni déploiement assistant sur le serveur.
+
+Traces ignorées : `.superpowers/sdd/2026-10-30-audit-c/publication/`, notamment `backups-before.json`, `catalogue-distant-avant.json`, `comparaison-avant.json`, `diagnostic-collation.json`, `gardes-distantes-avant-c.json`, `application-distante.json`, `catalogue-distant-apres.json`, `comparaison-apres.json` et `revue-postflight-agent1.json`.
