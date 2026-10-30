@@ -1,4 +1,7 @@
-# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L10 REÇU LOCALEMENT
+# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — CORRECTIF DE RÉCEPTION L10
+
+**Correctif de réception publique L10 — prêt à publier en 0.32.0-3.** La première publication `a54a4ce`/0.32.0-2 est construite et233 fichiers ont été comparés. Le parcours public du diagnostic a révélé un refresh moteur qui remplaçait le panneau pendant la collecte. La rétention locale du panneau protège maintenant l’attente et le résultat visible, sans état sale ni blocage de navigation. Deux échecs causaux de remontage reproduits avant correction ;5/5 contrôles ciblés et une vérification supplémentaire d’échec de collecte.
+**11504/11504** locaux, épingle11503 (+242 depuis L9), zéro erreur JavaScript/requête extérieure. Node271/271 conservé, générateur livraison et syntaxe des fichiers modifiés verts. Manifeste **208 fichiers / 3 605 358 octets**, SHA256 `3aba9c0835db05cbafe896061a2424c0cba93b5af65df4e40ac549e761ef2d78`. APP_VERSION0.32.0, DB6/archive7 inchangés, aucun SQL. Réception publique finale à rejouer ; le timeout du premier harnais public n’est pas présenté comme un succès. Voir §10 du [rapport L10](docs/superpowers/plans/2026-10-30-l10-hors-ligne-volumes.md).
 
 **L10 — hors ligne, mises à jour et volumes : réception locale terminée, publication en préparation.**
 [Spec](docs/superpowers/specs/2026-10-29-l10-hors-ligne-volumes-design.md), [rapport](docs/superpowers/plans/2026-10-30-l10-hors-ligne-volumes.md).

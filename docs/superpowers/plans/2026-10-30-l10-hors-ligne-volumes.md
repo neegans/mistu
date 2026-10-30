@@ -187,3 +187,20 @@ Le dernier défaut B reproduit était la perte des choix du panneau au refresh d
 Le démarrage retirait trop tard `aria-busy` : l’écran de connexion était déjà disponible mais restait annoncé occupé. Le témoin causal précède sa correction ; la vraie porte, la vraie application et le reload hors ligne sont maintenant reçus. Le titre d’un plat à320px/texte200% disposait de quelques pixels à côté de sa vignette ; il passe désormais sous la photo avec **124px** de largeur. La preuve historique375px/texte normal reste verte. Captures finales relues par root/B/C.
 
 **APP_VERSION0.32.0, DB6 et archive7 inchangés ; aucune migration SQL.** README et AGENTS décrivent désormais l’inventaire généré et les vérifications exécutables. Publication autorisée par la poursuite/déploiement du contexte ; son résultat doit être ajouté après comparaison des fichiers publics et parcours réels. Aucun essai physique iPhone/Safari/PWA, lecteur vocal, éviction OS ou transfert Cookidoo/TM7 n’est revendiqué.
+
+
+## 10. Première publication et correctif du diagnostic
+
+Le code `a54a4ce` a été poussé dans main ; Pages construit le30octobre à **07:42:11 UTC (03 h42 HAE)**. Les **233 fichiers** contrôlés sont identiques (ensemble du manifeste plus worker et tests modifiés). Réception publique repas **34 contrôles/5 mesures**, présentation **24 configurations**, archive et volumes réussis ; les captures publiques ont été ouvertes et relues. Le worker réel confirme0.32.0-2 et son empreinte.
+
+La réception publique du diagnostic a révélé un défaut absent du profil local sans moteur : l’abonnement propre à Réglages demandait un rendu300ms après un état moteur, y compris pendant la collecte. Deux passages, dont un instrumenté, prouvent que le panneau connecté au clic était ensuite démonté et remplacé par un panneau vide. Aucun compte ni donnée privée n’était utilisé ; la configuration publique suffisait à créer le moteur.
+
+Correctif minimal : le panneau expose une rétention de vue pendant sa collecte et tant que son texte reste visible. L’abonnement existant la respecte, à côté de ses gardes archive/assistant. Aucun nouvel état sale, aucune écriture, aucun blocage de navigation ; dispose ou sortie du DOM libèrent la rétention. Une collecte refusée sans résultat la libère aussi. Les commandes et changements de compte explicites gardent leur chemin. Les compteurs de Réglages restent un instantané après le diagnostic jusqu’au prochain rendu volontaire ; la pastille globale continue de suivre le moteur.
+
+Témoin permanent dans le vrai `renderSettings`, base jetable et moteur injecté : au repos le rendu est demandé ; émission avant le clic puis collecte lente, résultat affiché et dispose sont distingués. Avant correction : deux refus de remontage échouent et leur compteur cumulé entraîne un troisième échec ; après correction :5/5. Une assertion supplémentaire vérifie l’échec de collecte sans texte. Revue indépendante en lecture seule favorable ; aucun élargissement du protocole de synchronisation.
+
+La première suite publique a atteint sa limite d’attente de180secondes sans bilan ; aucun succès ne lui est attribué. Le harnais public reçoit un plafond de600secondes pour relire les sources depuis le réseau, en gardant toutes les assertions et en journalisant sa progression. La réception doit être rejouée sur la livraison corrigée, pas déduite du passage local.
+
+Nouvelle livraison réservée : **0.32.0-3**, **208 fichiers / 3 605 358 octets**, SHA256 `3aba9c0835db05cbafe896061a2424c0cba93b5af65df4e40ac549e761ef2d78`. DB6/archive7 inchangés, aucune migration SQL ni appel assistant réel.
+
+Réception locale du correctif : **11504/11504**, épingle11503, zéro erreur JavaScript/requête extérieure. Générateur livraison et syntaxe des fichiers modifiés verts ; Node271/271 reste applicable (aucun outil Node modifié). Aucun scénario retiré. Publication corrigée puis réception publique complète encore attendues à ce point.

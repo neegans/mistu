@@ -30,5 +30,44 @@ export async function runL10DiagnosticCollecteTests({eq,ok}){
     const tardif=creerPanneauDiagnostic({collecter:async()=>{await attente;return d;},navigateur:{clipboard:{writeText:async()=>{throw Error('refus');}}}});document.body.append(tardif);
     try{tardif.querySelector('button').focus();tardif.querySelector('button').click();autre.focus();continuer();await attendre(()=>tardif.textContent.includes('Copie impossible'));ok(document.activeElement===autre,'L10 diagnostic écran : refus tardif ne vole pas un nouveau focus');}
     finally{continuer();tardif.dispose();tardif.remove();autre.remove();}
+    const rate=creerPanneauDiagnostic({collecter:async()=>{throw Error('lecture refusee');}});document.body.append(rate);
+    try{rate.querySelector('button').click();await attendre(()=>rate.textContent.includes('Le diagnostic n’a pas pu être relu.'));eq([rate.retientVue(),rate.querySelector('textarea').hidden],[false,true],'L10 diagnostic : collecte refusée sans résultat libère la rétention');}
+    finally{rate.dispose();rate.remove();}
+  });
+}
+
+// Le moteur existe sur l'hôte public même sans compte : son abonnement Réglages
+// ne doit pas détruire une collecte ou le texte que la personne vient de demander.
+export async function runL10DiagnosticActualisationTests({eq,ok}) {
+  const {renderSettings} = await import('../src/ui/settings.js');
+  const etat = await import('../src/ui/state.js');
+  await withRepo(async (repo) => {
+    const avant = etat.getSyncState(), adresse = location.href, historique = history.state;
+    const stockage = navigator.storage, description = Object.getOwnPropertyDescriptor(stockage, 'estimate');
+    let terminer, estimationCommencee = false, listener = null, rendus = 0, root = null;
+    const attente = new Promise(resolve => { terminer = resolve; });
+    const moteur = {etat: () => ({enCours:false}), onEtat(fn) { listener = fn; return () => { listener = null; }; }};
+    const compter = () => { rendus++; };
+    const pause = () => new Promise(resolve => setTimeout(resolve, 360));
+    try {
+      history.replaceState(historique, '', '#/settings');
+      Object.defineProperty(stockage, 'estimate', {configurable:true, value:() => { estimationCommencee = true; return attente; }});
+      etat.setSyncState({...avant, moteur, user:null, guard:null});
+      root = await renderSettings({}, {}, {settings:await repo.getSettings(), sync:{user:null, auth:null, guard:null}});
+      document.body.append(root);window.addEventListener('cuisineos:refresh', compter);
+      listener();await pause();eq(rendus, 1, 'L10 diagnostic : Réglages au repos continue de suivre le moteur');rendus = 0;
+      const panneau = root.querySelector('.diagnostic-app');listener();panneau.querySelector('button').click();
+      await attendre(() => estimationCommencee);await pause();
+      eq(rendus, 0, 'L10 diagnostic : le moteur ne remonte pas Réglages pendant la collecte');
+      terminer({usage:1, quota:2});await attendre(() => panneau.querySelector('textarea').value && !panneau.querySelector('button').disabled);
+      ok(!panneau.querySelector('textarea').hidden, 'L10 diagnostic : texte demandé disponible après la collecte');
+      listener();await pause();eq(rendus, 0, 'L10 diagnostic : le résultat affiché reste disponible après un état moteur');
+      root.dispose();root.remove();listener();await pause();
+      eq(rendus, 1, 'L10 diagnostic : dispose libère la rétention sans bloquer une navigation');
+    } finally {
+      terminer({});window.removeEventListener('cuisineos:refresh', compter);root?.dispose();root?.remove();
+      if (description) Object.defineProperty(stockage, 'estimate', description); else delete stockage.estimate;
+      history.replaceState(historique, '', adresse);listener?.();etat.setSyncState(avant);
+    }
   });
 }

@@ -1,3 +1,4 @@
+import {runL10DiagnosticActualisationTests} from './l10-diagnostic.js';
 import {runL10HorsLigneActualisationTests} from './l10-hors-ligne.js';
 import {runL10ConservationTests} from './l10-conservation.js';
 import {runL10ReponseBruteTests} from './l10-conservation.js';
@@ -669,6 +670,7 @@ try { await runL10LivraisonTests({eq,ok}); } catch (e) { ok(false, 'runL10Livrai
 try { await runL10MiseAJourTests({eq,ok}); } catch (e) { ok(false, 'runL10MiseAJourTests : ' + (e.stack || e)); }
 try { await runL10ReessaiFichierTests({eq,ok}); } catch (e) { ok(false, 'runL10ReessaiFichierTests : ' + (e.stack || e)); }
 try { await runL10HorsLigneActualisationTests({eq,ok}); } catch (e) { ok(false, 'runL10HorsLigneActualisationTests : ' + (e.stack || e)); }
+try { await runL10DiagnosticActualisationTests({eq,ok}); } catch (e) { ok(false, 'runL10DiagnosticActualisationTests : ' + (e.stack || e)); }
 try { await runL7ObservationsBaseTests({eq,ok}); } catch (e) { ok(false, 'runL7ObservationsBaseTests : ' + (e.stack || e)); }
 
 try { await runL7CuisineArchiveTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineArchiveTests : ' + (e.stack || e)); }
@@ -683,7 +685,7 @@ try { await runL7MinuteursCommandesTests({eq,ok}); } catch (e) { ok(false, 'runL
 try { await runL7MinuteursDepotEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursDepotEcranTests : ' + (e.stack || e)); }
 try { await runL7MinuteursEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursEcranTests : ' + (e.stack || e)); }
 try { await runL7VoixTests({eq,ok}); } catch (e) { ok(false, 'runL7VoixTests : ' + (e.stack || e)); }
-eq(results.length, 11497,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 11503,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

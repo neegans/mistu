@@ -92,7 +92,10 @@ export function creerPanneauDiagnostic({collecter=collecterDiagnosticApp,navigat
   }},t('Copier le diagnostic'));
   const root=section(t('Diagnostic à partager'),el('p',null,t('Ce diagnostic contient des versions, des compteurs et des états, sans texte de recette, photo ni identité du compte. Les tailles du navigateur sont des estimations.')),
     el('p',{class:'muted'},t('Les fichiers comptés sont ceux référencés dans cette bibliothèque. Leur présence ne certifie pas leur lecture hors ligne. Une valeur inconnue reste indiquée comme telle.')),bouton,etat,texte);
-  root.classList.add('diagnostic-app');root.dispose=()=>{detruit=true;};return root;
+  root.classList.add('diagnostic-app');
+  // Lecture ponctuelle : préserver son attente et son résultat sans déclarer une saisie à enregistrer.
+  root.retientVue=()=>!detruit&&root.isConnected&&(enCours||!texte.hidden);
+  root.dispose=()=>{detruit=true;};return root;
 }
 
 // Injections (lot G, tâche 2) : createArchive, pickFiles (le choix de l’archive à restaurer) et telechargerArchive (l’enregistrement de l’archive
@@ -126,7 +129,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
   const conflits = (await repo.db.getAll('sync_conflicts')).filter(c=>c.kind!=='cooking'||c.user_id===(ctx.proprietaireDonnees??null)&&(!c.resolution||c.recovery));
   // Le moteur est posé par le démarrage (L3, tâche 9) : tant qu'il n'est pas là, rien de L3 n'est affiché.
   const moteur = getSyncState().moteur || null;
-  suivreMoteurDeLaPage(moteur);
+  suivreMoteurDeLaPage(moteur,diagnostic);
   // Lot G (§ 4.1) : les erreurs de fichiers et le snapshot (pour nomFichier) sont lus au rendu, comme la quarantaine — seulement s'il y a un moteur.
   // Ronde 1 : le snapshot (sept magasins, `files` entier) n'est lu que s'il y a une erreur à nommer — c'est son seul usage. Réglages se redessine
   // au plus toutes les 300 ms pendant une passe : sans cette garde, l'écran relirait `files` à chaque fois (S-12 contournée par l'écran).
@@ -796,13 +799,13 @@ export function suivreMoteur({ moteur, surReglages, rafraichir, occupe = () => f
 // dans le nœud rendu, parce que c'est le seul endroit qui survit au remplacement de la vue.
 let abonnementMoteur = null;
 
-function suivreMoteurDeLaPage(moteur) {
+function suivreMoteurDeLaPage(moteur,diagnostic) {
   abonnementMoteur?.();
   abonnementMoteur = suivreMoteur({
     moteur,
     surReglages: () => currentPath() === '/settings',
     rafraichir: refresh,
-    occupe: () => archiveOperation || occupeParAssistant(), // K-12 : ni sous une archive, ni sous les doigts
+    occupe: () => archiveOperation || occupeParAssistant() || diagnostic?.retientVue(),
   });
 }
 
