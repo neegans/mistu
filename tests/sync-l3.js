@@ -1868,7 +1868,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/^0\.32\.3-[1-9]\d*$/.test(source.release), 'manifeste : livraison incrémentée (format MAJOR.MINOR.PATCH-N), la livraison conserve son identité immuable');
+    ok(/^0\.32\.4-[1-9]\d*$/.test(source.release), 'manifeste : livraison incrémentée (format MAJOR.MINOR.PATCH-N), la livraison conserve son identité immuable');
     // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
     // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
     // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever). Le contrôle porte

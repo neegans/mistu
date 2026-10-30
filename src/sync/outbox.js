@@ -107,11 +107,75 @@ export async function reprendreEnvoi(db, entree) {
   await db.mutate({ puts: { outbox: [{ ...entree, quarantined_at: null, last_error: null, tries: 0, next_try_at: null }] }, origin: 'device' });
 }
 
+// Ces envois portaient jusqu'ici une interdiction d'abandon sans porte de sortie documentaire.
+// Les sources L5 et les commandes de cycle gardent leur arbitrage spécialisé ci-dessous.
+export const estEnvoiDocumente = e => estCommandeTraduction(e)||estPhaseJournalTraduction(e)||estCommandeCuisine(e)||estCommandeInventaire(e);
+export const peutAbandonnerEnvoi = e => estEnvoiDocumente(e)&&!!e.quarantined_at&&['forme','refus'].includes(e.last_error);
+const EPOQUE_ENVOI='editor_library_epoch:v1';
+const egalEnvoi=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
+const envoiChange=()=>{throw Object.assign(new Error('L’envoi ou sa bibliothèque a changé'),{code:'SYNC_ENVOI_CHANGED'});};
+const kindEnvoi=e=>estCommandeInventaire(e)?'inventory':estCommandeCuisine(e)?'cooking':'translation';
+const contenuEnvoi=e=>e.payload??e.snapshot??null;
+
+// Capturé avant la confirmation ou le transport : un résultat tardif ne peut viser une nouvelle bibliothèque.
+export async function preparerContexteEnvoi(db,entree,{owner,getUserId,estCourante}={}) {
+ const base=db.idb,compte=await db.get('sync_state','user_id'),epoque=await db.get('sync_state',EPOQUE_ENVOI);
+ const proprietaire=owner===undefined?(compte?.value??null):owner;
+ if(!estEnvoiDocumente(entree)||!estDeCeCompte(entree,proprietaire)||(compte?.value??null)!==proprietaire)return null;
+ const connue=SYNC_STORES.includes(entree.store),locale=connue?await db.get(entree.store,entree.id):null;
+ const verifier=()=>{if(db.idb!==base||(getUserId&&getUserId()!==proprietaire)||(estCourante&&!estCourante()))envoiChange();};
+ verifier();
+ return{db,base,compte,epoque,owner:proprietaire,entree:structuredClone(entree),locale:structuredClone(locale??null),connue,verifier};
+}
+
+export function conditionsContexteEnvoi(c,{fiche=true,entree=true}={}) {
+ const garde=attendu=>courant=>{c.verifier();if(!egalEnvoi(courant,attendu))envoiChange();return null;};
+ return{sync_state:[{key:'user_id',fusion:garde(c.compte)},{key:EPOQUE_ENVOI,fusion:garde(c.epoque)}],
+  ...(entree?{outbox:[{key:c.entree.seq,fusion:garde(c.entree)}]}:{}),
+  ...(fiche&&c.connue?{[c.entree.store]:[{key:c.entree.id,fusion:garde(c.locale)}]}:{})};
+}
+
+function copieEnvoi(c,origine,at){
+ const e=c.entree,id=[origine,c.owner??'local',c.epoque?.value??'sans-epoque',e.seq].map(encodeURIComponent).join(':');
+ return{id,kind:kindEnvoi(e),store:e.store,record_id:e.id,user_id:c.owner,operation_id:e.payload?.operation_id??null,
+  local:structuredClone(contenuEnvoi(e)),copie_locale:structuredClone(c.locale),entree:structuredClone(e),server:null,
+  reason:origine==='refus_http'?'refus':e.last_error,origine,at};
+}
+
+// Seules nos copies HTTP de cette intention exacte sont résolues. Les conflits métier restent intacts.
+export async function preparerResolutionEnvois(db,entree,owner,choix,at){
+ const correspond=c=>c.origine==='refus_http'&&c.user_id===owner&&c.entree?.seq===entree.seq&&c.store===entree.store&&c.record_id===entree.id&&egalEnvoi(c.local,contenuEnvoi(entree));
+ const lire=rows=>rows.filter(correspond).sort((a,b)=>a.id.localeCompare(b.id));
+ const copies=lire(await db.getAll('sync_conflicts'));
+ return{copies:copies.filter(c=>!c.resolution).map(c=>({...c,resolution:{choix,at}})),
+  condition:{toutes:true,verifier:rows=>{if(!egalEnvoi(lire(rows),copies))envoiChange();}}};
+}
+
+export async function documenterRefusEnvoi(c,at){
+ const copie=copieEnvoi(c,'refus_http',at),ancienne=await c.db.get('sync_conflicts',copie.id);
+ if(ancienne&&(!egalEnvoi(ancienne.local,copie.local)||ancienne.user_id!==c.owner))envoiChange();
+ const conditions=conditionsContexteEnvoi(c);
+ conditions.sync_conflicts=[{key:copie.id,fusion:row=>{if(!egalEnvoi(row,ancienne))envoiChange();return null;}}];
+ await c.db.mutate({origin:'remote',puts:{outbox:[{...c.entree,quarantined_at:at,last_error:'refus'}],sync_conflicts:[ancienne??copie]},conditions});
+ return ancienne??copie;
+}
+
+async function abandonnerEnvoiDocumente(db,e,c){
+ if(!c||c.db!==db||!peutAbandonnerEnvoi(e)||!egalEnvoi(e,c.entree))return false;
+ try{
+  const at=syncNow(),copie={...copieEnvoi(c,'abandon_envoi',at),resolution:{choix:'abandon',at}},resolution=await preparerResolutionEnvois(db,e,c.owner,'abandon',at);
+  const conditions=conditionsContexteEnvoi(c);
+  conditions.sync_conflicts=[resolution.condition,{key:copie.id,fusion:row=>{if(row)envoiChange();return null;}}];
+  await db.mutate({origin:'remote',puts:{sync_conflicts:[...resolution.copies,copie]},deletes:{outbox:[e.seq]},conditions});
+  return true;
+ }catch(error){if(error.code==='SYNC_ENVOI_CHANGED')return false;throw error;}
+}
+
 // « Abandonner cet envoi » retire l'entrée et RIEN d'autre : la fiche reste sur cet appareil, simplement elle n'ira
 // pas au serveur. Une écriture ultérieure de cette fiche la remettra en file, comme n'importe quelle écriture.
-export async function retirerEnvoi(db, seq) {
+export async function retirerEnvoi(db, seq, {contexte}={}) {
   const e=await db.get('outbox',seq);
-  if(estCommandeTraduction(e)||estPhaseJournalTraduction(e)||estCommandeCuisine(e)||estCommandeInventaire(e))return false;
+  if(estEnvoiDocumente(e))return abandonnerEnvoiDocumente(db,e,contexte);
   if (estLotSources(e)) {
     const owner = (await db.get('sync_state', 'user_id'))?.value ?? null;
     if (!estDeCeCompte(e, owner)) return false;

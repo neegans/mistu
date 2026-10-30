@@ -7,7 +7,7 @@ import { t, getUiLocale } from '../core/i18n.js';
 import { refresh, currentPath } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { logError } from '../core/log.js';
-import { reprendreEnvoi, retirerEnvoi, fileDe, estDeCeCompte } from '../sync/outbox.js';
+import {reprendreEnvoi,retirerEnvoi,fileDe,estDeCeCompte,estEnvoiDocumente,peutAbandonnerEnvoi,preparerContexteEnvoi} from '../sync/outbox.js';
 import {obtenirControleLivraison} from '../core/livraison.js';
 import {creerRechercheMiseAJour} from './mise-a-jour.js';
 import {projeterDiagnosticApp,texteDiagnosticApp} from '../domain/diagnostic-app.js';
@@ -133,7 +133,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
   // plus bas : ce qu'elles protègent, c'est tout ce qui attend encore sur cet appareil, à qui qu'il appartienne.
   const file = await fileDe(repo.db, sync.user?.id || null);
   const quarantaine = file.filter((e) => e.quarantined_at);
-  const conflits = (await repo.db.getAll('sync_conflicts')).filter(c=>c.kind!=='cooking'||c.user_id===(ctx.proprietaireDonnees??null)&&(!c.resolution||c.recovery));
+  const conflits = (await repo.db.getAll('sync_conflicts')).filter(c=>c.kind!=='cooking'||c.user_id===(ctx.proprietaireDonnees??null)&&(!c.resolution||c.recovery||['refus_http','abandon_envoi'].includes(c.origine)));
   // Le moteur est posé par le démarrage (L3, tâche 9) : tant qu'il n'est pas là, rien de L3 n'est affiché.
   const moteur = getSyncState().moteur || null;
   suivreMoteurDeLaPage(moteur,{retientVue:()=>diagnostic.retientVue()||miseAJour.retientVue()});
@@ -628,12 +628,16 @@ export async function reessayerEnvoi({ db, seq, moteur = null, reprendre = repre
 // « Abandonner cet envoi » : la seule façon de vider une entrée que le serveur refuse. La confirmation dit les deux
 // moitiés de la vérité — l'envoi est abandonné, la fiche reste ici. L'entrée est relue d'abord : rien n'est demandé
 // pour une entrée déjà partie.
-export async function abandonnerEnvoi({ db, seq, confirm, retirer = retirerEnvoi }) {
+export async function abandonnerEnvoi({ db, seq, confirm, retirer = retirerEnvoi, estCourante=()=>repo.db===db }) {
   const entree = await db.get('outbox', seq);
   if (!entree) return false;
-  const message = t('L’envoi de cette fiche sera abandonné ; la fiche reste sur cet appareil.');
+  const documentee=estEnvoiDocumente(entree);
+  if(documentee&&!peutAbandonnerEnvoi(entree))return false;
+  const contexte=documentee?await preparerContexteEnvoi(db,entree,{estCourante}):null;
+  if(documentee&&!contexte)return false;
+  const message=documentee?t('L’envoi sera abandonné. Une copie de la modification restera consultable dans Réglages ; la fiche reste sur cet appareil.'):t('L’envoi de cette fiche sera abandonné ; la fiche reste sur cet appareil.');
   if (!(await confirm(message, { danger: true, okLabel: t('Abandonner cet envoi') }))) return false;
-  return (await retirer(db, seq)) !== false;
+  return (await retirer(db,seq,{contexte}))!==false;
 }
 
 // Trancher un conflit (spec § 5.5) : le conflit est RELU au moment du geste — l'autre bouton, un autre onglet ou la
@@ -901,7 +905,7 @@ export function syncSectionL3(model, gestes = {}) {
     for (const q of quarantaine) {
       noeuds.push(el('div', { class: 'status warn', dataset: { quarantaine: String(q.seq) } },
         el('p', null, `${q.libelle} — ${q.motif}`),
-        rangee(bouton('reessayer', t('Réessayer'), q.seq), q.protegee ? null : bouton('abandonner', t('Abandonner cet envoi'), q.seq, 'btn danger')),
+        rangee(bouton('reessayer', t('Réessayer'), q.seq), q.protegee&&!q.abandonPossible ? null : bouton('abandonner', t('Abandonner cet envoi'), q.seq, 'btn danger')),
         ...(q.protegee ? [el('p',null,q.inventaire?t('Cet envoi de stock reste conservé. Revois les copies dans l’inventaire.'):q.cuisine?t('Cet envoi de cuisine reste conservé. Revois les copies depuis la séance.'):t('Cet envoi reste conservé. Consulte la recette pour reprendre les changements.')),q.inventaire?el('a',{class:'btn',href:'#/kitchen?tab=inventory'},t('Comparer le stock')):q.cuisine&&q.sessionId?el('a',{class:'btn',href:`#/cook/${encodeURIComponent(q.sessionId)}`},t('Comparer les copies de cuisine')):q.recipeId ? el('a',{class:'btn',href:`#/recipes/${encodeURIComponent(q.recipeId)}`},t('Consulter la recette')) : null] : [])));
     }
   }
@@ -912,6 +916,12 @@ export function syncSectionL3(model, gestes = {}) {
     if (conflits.some(c => c.kind === 'import_cloture')) noeuds.push(el('h3', null, t('Réponses conservées après clôture')));
     if (conflits.some(c => ['translation','source','cooking','inventory'].includes(c.kind))) noeuds.push(el('h3',null,t('Copies à consulter')));
     for (const c of conflits) {
+      if(c.documentaire&&c.resolue){
+        noeuds.push(el('div',{class:'status warn stack',dataset:{conflit:String(c.id)}},
+          el('p',null,c.abandonnee?t('Cet envoi a été abandonné. La copie de la modification reste consultable ici.'):t('Cet envoi a été confirmé. La copie du précédent refus reste consultable ici.')),
+          el('p',null,c.libelle),el('details',null,el('summary',null,t('Consulter la copie conservée')),
+            el('pre',{style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'22rem',overflow:'auto'}},c.copieLocale))));continue;
+      }
       if(c.kind==='inventory'){
         noeuds.push(el('div',{class:'status warn stack',dataset:{conflit:String(c.id)}},el('p',null,c.resolue?t('La copie locale du lot reste récupérable sur cet appareil.'):t('Une modification de stock attend ta comparaison.')),
           el('a',{class:'btn',href:'#/kitchen?tab=inventory'},c.resolue?t('Voir l’inventaire'):t('Comparer le stock'))));continue;
@@ -1151,7 +1161,7 @@ export function syncSectionModel({ available = false, reason = null, user = null
       // Les deux comptes viennent des LISTES affichées, pas de l'instantané du moteur : c'est la liste que la
       // personne peut compter, et un instantané pris à un autre instant contredirait ce qu'elle a sous les yeux.
       lines.push(t('En quarantaine : {n}', { n: enQuarantaine.length }));
-      lines.push(t('Conflits : {n}', { n: aTrancher.length }));
+      lines.push(t('Conflits : {n}', { n: aTrancher.filter(c=>!c.resolution).length }));
       if (moteur.attenteConnexion) lines.push(t('En attente de connexion — l’envoi reprendra après la prochaine connexion.'));
       if (moteur.horloge) lines.push(t('L’heure de cet appareil semble fausse (± {m} min).', { m: moteur.horloge.minutes }));
       buttons.push({ action: 'envoyerMaintenant', label: t('Envoyer maintenant'), tone: '' });
@@ -1189,6 +1199,7 @@ export function syncSectionModel({ available = false, reason = null, user = null
       // Vague finale (I-G8) : une ligne files est nommée par nomFichier dès qu'un snapshot est là (sans snapshot : la forme de L3, bornée).
       libelle: e.store === 'files' && snapshot ? tronquer(nomFichier(e.id, snapshot), NOM_MAX) : `${e.store} · ${tronquer(e.id, CLE_MAX)}`,
       motif: motifEnvoi(e.last_error),
+      abandonPossible:peutAbandonnerEnvoi(e),
       ...(estCommandeTraduction(e)||estPhaseJournalTraduction(e) ? {protegee:true,recipeId:e.payload?.recipe_id||e.snapshot?.recipe_id||null} : {}),
       ...(estCommandeCuisine(e)?{protegee:true,cuisine:true,sessionId:e.store==='cook_sessions'?e.id:e.payload?.change?.timer?.cook_session_id||e.payload?.change?.target?.cook_session_id||snapshot?.timer_launches?.find(r=>r.id===e.id)?.cook_session_id||null}:{}),
       ...(estCommandeInventaire(e)?{protegee:true,inventaire:true}:{}),
@@ -1201,9 +1212,11 @@ export function syncSectionModel({ available = false, reason = null, user = null
         dateIci: formatDate(c.local?.updated_at || c.at, { withTime: true }),
         dateAilleurs: formatDate(c.server?.updated_at || c.at, { withTime: true }),
         kind: c.kind,
+        ...(['refus_http','abandon_envoi'].includes(c.origine)?{documentaire:true,resolue:!!c.resolution,abandonnee:c.resolution?.choix==='abandon'}:{}),
         ...(c.kind==='inventory'?{resolue:!!c.resolution}:{}),
         ...(c.kind==='cooking'?{copieLocale:JSON.stringify(c.recovery??c.local??{},null,2),resolue:!!c.resolution,sessionId:c.recovery?.session_id||(c.store==='cook_sessions'?c.record_id:c.local?.change?.timer?.cook_session_id||c.local?.change?.target?.cook_session_id||snapshot?.timer_launches?.find(r=>r.id===c.record_id)?.cook_session_id||c.server?.data?.cook_session_id||null)}:{}),
         ...(['translation','source'].includes(c.kind) ? {copieLocale:JSON.stringify(c.local??{},null,2),recipeId:c.local?.recipe_id||c.local?.target?.recipe_id||null,editionId:c.local?.edition_id||c.local?.target?.edition_id||null,sessionId:c.kind==='source'?(c.store==='scan_sessions'?c.local?.id||c.record_id:c.local?.scan_session_id||c.local?.target?.scan_session_id||null):null} : {}),
+        ...(['refus_http','abandon_envoi'].includes(c.origine)?{copieLocale:JSON.stringify({fiche:c.copie_locale,modification:c.local,envoi:c.entree},null,2)}:{}),
         ...(c.kind === 'cycle' ? {copieLocale:JSON.stringify(c.local ?? {},null,2),peutAbandonnerCycle:['recipes','book_editions'].includes(c.store),recipeId:c.store === 'recipes' ? c.record_id : c.local?.recipe_id || null,editionId:c.store === 'book_editions'?c.record_id:c.edition_id||c.local?.edition_id||null} : {}),
         ...(c.kind === 'import_cloture' ? { copieLocale: JSON.stringify(c.server?.data ?? {}, null, 2), recipeId: c.local?.recipe_id || null } : {}),
         // R-L3-29 : la version d'ici est DÉJÀ repartie — ce n'est pas une question posée à la personne. Jamais

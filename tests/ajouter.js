@@ -3852,9 +3852,9 @@ export async function runAjouterTests({ eq, ok }) {
     const sw = await lireLivraison();
     ok(sw.octets > 300 && sw.chemins.length > 30, `manifeste : inventaire bien lu (${sw.octets} octets, inventaire présent) — sans quoi les inclusions ci-dessous ne prouveraient rien (S4)`);
     for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js', './src/domain/lecture-web.js']) ok(sw.chemins.includes(m), `SHELL : ${m}`);
-    ok(/^0\.32\.3-[1-9]\d*$/.test(sw.release), 'manifeste : livraison 0.32.3');
+    ok(/^0\.32\.4-[1-9]\d*$/.test(sw.release), 'manifeste : livraison 0.32.4');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.32.3', 'APP_VERSION 0.32.3 (lot UI-1, carnet)');
+    eq(APP_VERSION, '0.32.4', 'APP_VERSION 0.32.4 (lot UI-1, carnet)');
     const { GOOGLE_BOOKS } = await import('../src/sync/config.js');
     ok(typeof GOOGLE_BOOKS?.key === 'string' && (GOOGLE_BOOKS.key === '' || /^AIza[0-9A-Za-z_-]{35}$/.test(GOOGLE_BOOKS.key)), 'config : la clé Google Books est vide ou au format d’une clé d’API publique — un test de forme, jamais de valeur (S2/F2)');
   }

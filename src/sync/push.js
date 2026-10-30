@@ -10,7 +10,7 @@ import {canoniqueSources} from '../domain/sources-format.js';
 // « envoyée » que par l'absence d'entrée la concernant.
 import { estLotSources } from './lot-sources.js';
 import { composerLots, cleDe } from './lots.js';
-import { fileDe } from './outbox.js';
+import {fileDe,estEnvoiDocumente,preparerContexteEnvoi,conditionsContexteEnvoi,documenterRefusEnvoi,preparerResolutionEnvois} from './outbox.js';
 import { appliquerReponse, protegerConflitsCycle } from './reponses.js';
 import { conditionFichier } from './fichiers.js';
 import { appliquerHeureServeur, reculMs } from './clock.js';
@@ -81,9 +81,9 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     if (seqs.length) await db.mutate({ deletes: { outbox: seqs }, origin: 'remote' });
   }
 
-  async function appliquer(lot, reponse, entreesParSeq, tentative=0, owner=getUserId()) {
-    if(estCommandeProtegee(lot.elements[0]))return appliquerSourcesL5(lot,reponse,entreesParSeq);
-    if(lot.seqs.some(seq=>estPhaseJournalTraduction(entreesParSeq.get(seq))))return appliquerJournalTraduction(lot,reponse,entreesParSeq);
+  async function appliquer(lot, reponse, entreesParSeq, tentative=0, owner=getUserId(),contexteEnvoi=null) {
+    if(estCommandeProtegee(lot.elements[0]))return appliquerSourcesL5(lot,reponse,entreesParSeq,contexteEnvoi);
+    if(lot.seqs.some(seq=>estPhaseJournalTraduction(entreesParSeq.get(seq))))return appliquerJournalTraduction(lot,reponse,entreesParSeq,contexteEnvoi);
     if (estLotSources(lot.elements[0])) return appliquerSources(lot, reponse, entreesParSeq);
     if(lot.elements[0]?.op==='lifecycle') return appliquerCommande(lot,reponse,entreesParSeq);
     // Lectures AVANT la transaction : la version locale d'un conflit est celle du moment où la réponse arrive, et
@@ -153,26 +153,32 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     return effets;
   }
 
-  async function appliquerJournalTraduction(lot,reponse,entreesParSeq){
-    const effets={retirer:[],reecrire:{},conflits:[],quarantaine:[],retirerConflits:[]},owner=getUserId(),entry=entreesParSeq.get(lot.seqs[0]);
+  async function appliquerJournalTraduction(lot,reponse,entreesParSeq,contexteEnvoi){
+    const effets={retirer:[],reecrire:{},conflits:[],quarantaine:[],retirerConflits:[]},owner=contexteEnvoi?contexteEnvoi.owner:getUserId(),entry=entreesParSeq.get(lot.seqs[0]);
     if(lot.elements.length!==1||lot.seqs.length!==1||!estPhaseJournalTraduction(entry))return effets;
     const meme=r=>r.store===entry.store&&r.id===entry.id,rejete=(reponse.rejected||[]).find(meme),accuse=[...(reponse.accepted||[]),...(reponse.adjusted||[])].some(meme);
     if(!rejete&&!accuse)return effets;
     const conditions={sync_state:[gardeCompteCycle(owner,getUserId)],outbox:[{key:entry.seq,fusion:r=>{if(JSON.stringify(r)!==JSON.stringify(entry))throw Error('Phase de traduction changée pendant envoi');return null;}}]};
+    if(contexteEnvoi)conditions.sync_state=conditionsContexteEnvoi(contexteEnvoi,{fiche:false,entree:false}).sync_state;
     if(rejete){
       const conflit={id:'translation-journal:'+entry.id+':'+entry.seq,kind:'translation',store:entry.store,record_id:entry.id,user_id:owner,local:structuredClone(entry.snapshot),server:rejete.server??null,reason:rejete.reason,at:new Date(maintenant()).toISOString()};
       effets.conflits.push(conflit);await db.mutate({origin:'remote',puts:{outbox:[{...entry,lifecycle_blocked:true,last_error:rejete.reason||'conflit'}],sync_conflicts:[conflit]},conditions});
-    }else{effets.retirer.push(entry.seq);await db.mutate({origin:'remote',deletes:{outbox:[entry.seq]},conditions});}
+    }else{
+      const resolution=await preparerResolutionEnvois(db,entry,owner,'envoye',new Date(maintenant()).toISOString());
+      conditions.sync_conflicts=[resolution.condition];effets.retirer.push(entry.seq);
+      await db.mutate({origin:'remote',puts:{sync_conflicts:resolution.copies},deletes:{outbox:[entry.seq]},conditions});
+    }
     return effets;
   }
 
-  async function appliquerSourcesL5(lot,reponse,entreesParSeq){
-    const c=lot.elements[0],owner=getUserId(),entree=lot.seqs.map(s=>entreesParSeq.get(s)).find(e=>estCommandeProtegee(e)&&e.payload.operation_id===c.operation_id);
+  async function appliquerSourcesL5(lot,reponse,entreesParSeq,contexteEnvoi){
+    const c=lot.elements[0],owner=contexteEnvoi?contexteEnvoi.owner:getUserId(),entree=lot.seqs.map(s=>entreesParSeq.get(s)).find(e=>estCommandeProtegee(e)&&e.payload.operation_id===c.operation_id);
     const effets={retirer:[],reecrire:{},conflits:[],quarantaine:[],retirerConflits:[]};if(!entree)return effets;
     const match=r=>r.store===c.store&&r.id===c.id&&r.operation_id===c.operation_id&&r.payload_sha256===c.payload_sha256;
     const ack=(reponse.accepted||[]).find(match),refus=(reponse.rejected||[]).find(match);if(!ack&&!refus)return effets;
     if(estCommandeInventaire(c)&&refus?.server&&(!Number.isSafeInteger(refus.server.server_seq)||refus.server.server_seq<0))return effets;
     const puts={},deletes={},conditions={sync_state:[gardeCompteCycle(owner,getUserId)],outbox:[{key:entree.seq,fusion:r=>{if(JSON.stringify(r)!==JSON.stringify(entree))throw Error('Intention source modifiée pendant envoi');return null;}}]};
+    if(contexteEnvoi)conditions.sync_state=conditionsContexteEnvoi(contexteEnvoi,{fiche:false,entree:false}).sync_state;
     if(ack){
       const attendus=c.op==='source_transfer'?(c.phase==='part'?c.rows.map(r=>({store:r.store,id:r.id})):c.phase==='finish'?[{store:c.store,id:c.id}]:[]):ciblesCommandeProtegee(c),rows=ack.server_rows;
       if(!Array.isArray(rows)||rows.length!==attendus.length||new Set(rows.map(cleDe)).size!==rows.length||rows.some(r=>!attendus.some(a=>cleDe(a)===cleDe(r))||r.deleted_at||r.data?.id!==r.id||!Number.isFinite(Date.parse(r.updated_at))||!Number.isFinite(r.server_seq)))return effets;
@@ -183,6 +189,10 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
         const file=await fileDe(db,owner),signature=JSON.stringify(file);
         conditions.outbox.push({toutes:true,verifier:rows=>{if(JSON.stringify(rows.filter(e=>e.user_id==null||e.user_id===owner))!==signature)throw Error('File de cuisine changée pendant accusé');}});
         for(const r of rows){const pending=file.some(e=>e.seq!==entree.seq&&(estCommandeCuisine(e)||estCommandeInventaire(e))&&e.store===r.store&&e.id===r.id);if(pending)continue;const locale=await db.get(r.store,r.id),cle=CLE_SOURCE_CONFIRMEE(r.store,r.id);(conditions[r.store]||=[]).push({key:r.id,fusion:(current,lecture)=>{if(lecture('sync_state',cle)?.value?.server_seq>r.server_seq)return null;if(canoniqueSources(current??null)!==canoniqueSources(locale??null))throw Error('Cuisine changée pendant accusé');return r.data;}});}
+      }
+      if(contexteEnvoi){
+        const resolution=await preparerResolutionEnvois(db,entree,owner,'envoye',new Date(maintenant()).toISOString());
+        puts.sync_conflicts=resolution.copies;conditions.sync_conflicts=[resolution.condition];
       }
       deletes.outbox=[entree.seq];effets.retirer=[entree.seq];
     }else{
@@ -311,7 +321,7 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
   // Un échec passager (réseau, 5xx, 429) : chaque entrée du lot compte l'essai et porte son heure de reprise.
   // `tries` AVANT incrément gouverne l'attente, donc le premier échec rend la main dans 2 s. Origine 'remote' :
   // ce marquage n'est pas un geste de la personne et ne repart jamais vers le serveur.
-  async function reporter(seqs, entreesParSeq, erreur) {
+  async function reporter(seqs, entreesParSeq, erreur,contexteEnvoi=null) {
     const puts = [];
     for (const s of seqs) {
       const e = entreesParSeq.get(s);
@@ -319,7 +329,7 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
       const avant = e.tries || 0;
       puts.push({ ...e, tries: avant + 1, next_try_at: new Date(maintenant() + reculMs(avant)).toISOString(), last_error: erreur.type });
     }
-    if (puts.length) await db.mutate({ puts: { outbox: puts }, origin: 'remote' });
+    if (puts.length) await db.mutate({puts:{outbox:puts},origin:'remote',...(contexteEnvoi?{conditions:conditionsContexteEnvoi(contexteEnvoi,{fiche:false})}:{})});
   }
 
   // Les seq de la file qui correspondent aux éléments d'une moitié de lot (une clé peut en porter plusieurs).
@@ -332,6 +342,9 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
   // connexion à refaire, pause de quota). SEUL un `refus` dichotomise, et il n'arrête pas la passe.
   async function envoyerLot(lot, entreesParSeq, bilan) {
     const owner=getUserId();
+    const entreeDocumentee=lot.seqs.length===1?entreesParSeq.get(lot.seqs[0]):null;
+    const contexteEnvoi=estEnvoiDocumente(entreeDocumentee)?await preparerContexteEnvoi(db,entreeDocumentee,{owner,getUserId}):null;
+    if(estEnvoiDocumente(entreeDocumentee)&&!contexteEnvoi){bilan.erreur={type:'auth',status:null};bilan.attenteConnexion=true;return false;}
     const appel = await transport.pousser(lot.elements);
     if(getUserId()!==owner) {bilan.erreur={type:'auth',status:null};bilan.attenteConnexion=true;return false;}
     const reponse = appel.reponse;
@@ -341,7 +354,7 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     const erreur = appel.erreur || (vide ? { type: 'inconnu', status: null, message: '' } : null);
     if (!erreur) {
       if (reponse.server_time) surHeure(appliquerHeureServeur(reponse.server_time, maintenant()));
-      const effets = await appliquer(lot, reponse, entreesParSeq);
+      const effets = await appliquer(lot,reponse,entreesParSeq,0,owner,contexteEnvoi);
       const { envoyes, ajustes } = compter(effets, entreesParSeq);
       bilan.envoyes += envoyes;
       bilan.ajustes += ajustes;
@@ -355,14 +368,14 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     if (erreur.type === 'auth') { bilan.erreur = erreur; bilan.attenteConnexion = true; return false; }
     // 413, 507, « exceeded » : la place manque. On s'arrête et on le dit ; la file reste entière (I5).
     if (erreur.type === 'quota') {
-      await db.mutate({ puts: { sync_state: [{ key: 'pause', value: { raison: 'quota', at: new Date(maintenant()).toISOString() } }] }, origin: 'remote' });
+      await db.mutate({ puts: { sync_state: [{ key: 'pause', value: { raison: 'quota', at: new Date(maintenant()).toISOString() } }] }, origin: 'remote',...(contexteEnvoi?{conditions:conditionsContexteEnvoi(contexteEnvoi,{fiche:false})}:{}) });
       bilan.erreur = erreur; bilan.pause = true; return false;
     }
     // R-L3-9 : tout ce qui n'est pas un `refus` nommé RECULE — réseau, 5xx, 429, et « inconnu » (un 404, un cache
     // de schéma PostgREST périmé, une réponse vide). Parquer la file pour un déploiement en retard l'enterrerait ;
     // seule une règle du serveur qui refuse une fiche justifie une quarantaine.
     if (erreur.type !== 'refus') {
-      await reporter(lot.seqs, entreesParSeq, erreur);
+      await reporter(lot.seqs,entreesParSeq,erreur,contexteEnvoi);
       bilan.erreur = erreur;
       // Annoncé à l'interface : l'attente que les entrées viennent de se donner (tries d'avant l'incrément).
       bilan.recul = reculMs(Math.max(0, ...lot.seqs.map((s) => entreesParSeq.get(s)?.tries || 0)));
@@ -375,6 +388,10 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
       const entree = seq === null ? null : entreesParSeq.get(seq);
       // Un lot sans seq lisible ne peut désigner personne : rien n'est parqué, et c'est journalisé.
       if (!entree) { logError('sync.push', { reason: 'refus sans entree' }); return true; }
+      if(contexteEnvoi){
+        await documenterRefusEnvoi(contexteEnvoi,new Date(maintenant()).toISOString());
+        bilan.quarantaine+=1;bilan.conflits+=1;return true;
+      }
       await db.mutate({
         puts: { outbox: [{ ...entree, quarantined_at: new Date(maintenant()).toISOString(), last_error: 'refus' }] },
         deletes: { outbox: lot.seqs.filter((s) => s !== seq) },
