@@ -11,6 +11,7 @@ import { capturerContextesInitiaux } from '../sync/contexte-initial.js';
 import { isAllowed } from '../sync/mime.js';
 import { lireCycleRecette, memeCycleRecette } from './cycle-recette.js';
 import { lireCycleEdition, memeCycleEdition, exceptionEditionValide, memeExceptionEdition } from './cycle-edition.js';
+import { ligneEpoqueEditeur } from './brouillons-format.js';
 
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf', 'application/epub+zip': 'epub', 'text/plain': 'txt' };
 export const extFor = (mime) => MIME_EXT[mime] || 'bin';
@@ -487,7 +488,8 @@ export async function applyArchive(db, inspection, { mode = 'merge', horodater =
     if (ecarts.length) throw new ErreurCycleArchive(ecarts);
   } };
   const { recettes: contextes, editions } = capturerContextesInitiaux(batch, { owner_id: owner });
-  await db.mutate({ puts: batch, origin: 'local', archive_import: true, recettes: contextes, editions, conditions: { ...(conditions.length ? { files: conditions } : {}), ...liensGardes, recipes: [cycleGarde],
+  const epoqueEditeur=mode==='replace'?ligneEpoqueEditeur():null;
+  await db.mutate({ puts: {...batch,...(epoqueEditeur?{sync_state:[epoqueEditeur]}:{})}, origin: 'local', archive_import: true, recettes: contextes, editions, conditions: { ...(conditions.length ? { files: conditions } : {}), ...liensGardes, recipes: [cycleGarde],
     sync_state: [{ key: 'user_id', fusion: courant => { if ((courant?.value ?? null) !== owner) throw new Error('Le compte a changé pendant la restauration.'); return null; } }] },
     clearStores: mode === 'replace' ? Object.keys(STORES).filter((s) => !SYNC_INTERNAL_STORES.includes(s) && s !== 'assistant_config') : [] });
   return { ...Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length])), files: conditions.length, originauxConserves };

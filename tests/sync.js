@@ -84,7 +84,8 @@ export async function runSyncTests({ eq, ok }) {
     await db.mutate({ puts: { outbox: [{ store: 'books', id: 'b9', op: 'put' }], sync_state: [{ key: 'user_id', value: 'u' }] } });
     await applyArchive(db, insp, { mode: 'replace' });
     eq((await db.getAll('outbox')).length, 1, 'remplacement : outbox intacte');
-    eq((await db.getAll('sync_state')).length, 1, 'remplacement : sync_state intact');
+    const internes=await db.getAll('sync_state'),epoque=internes.find(r=>r.key==='editor_library_epoch:v1');
+    eq([internes.filter(r=>r.key!=='editor_library_epoch:v1'),!!epoque?.value,internes.length], [[{key:'user_id',value:'u'}],true,2], 'remplacement L4 : propriétaire intact et seule époque locale ajoutée');
     ok((await verifyRestored(db, insp, { mode: 'replace' })).ok, 'vérification verte');
   });
   // Une ligne files reçue sans octets n'empêche ni l'archive ni la vérification (spec § 5.4).

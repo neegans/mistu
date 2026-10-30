@@ -24,6 +24,10 @@ import { texteEchecClassement, lotEnCours, lireLeLot } from './regroupement.js';
 import { lancerLecture, annulerLecture, texteEchecLecture } from './import-web.js';
 import { texteEchecIndex } from './table-matieres.js';
 import { texteEchecCouverture } from './livre-ajout.js';
+import { renderBrouillonsListe } from './brouillons-liste.js';
+import { texteErreurBrouillon } from './brouillon-editeur.js';
+import { getSyncGeneration } from './state.js';
+import { lienAvecOrigine } from './navigation-contexte.js';
 
 export const GRILLE_ACTIONS = ['ajouterLivre', 'pages', 'saisir', 'signet', 'creerIA', 'congelateur'];
 export const ACCEPT_PHOTOS = 'image/*';
@@ -265,6 +269,24 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
 
 export async function renderAdd(params, query, ctx, { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch = undefined, maintenant = () => new Date().toISOString(), battementMs = undefined, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000, confirmer = confirmDialog } = {}) {
   const root = el('div', null, pageHeader(t('Ajouter')));
+  let brouillons = null, quitte = false;
+  const baseBrouillons = repo.db, generationBrouillons = getSyncGeneration();
+  const estCourante = () => !quitte && repo.db === baseBrouillons && getSyncGeneration() === generationBrouillons;
+  // Les dépôts injectés des anciens parcours n'exposent pas nécessairement la porte des brouillons.
+  if (typeof repo.muterEditeur === 'function') {
+    try {
+      const { creerServiceBrouillons } = await import('../domain/brouillons-editeur.js');
+      const service = creerServiceBrouillons({ repo, getGeneration: getSyncGeneration });
+      const owner_id = Object.hasOwn(ctx, 'proprietaireDonnees') ? ctx.proprietaireDonnees : (await repo.get('sync_state', 'user_id'))?.value ?? null;
+      const capture = await service.capturerPortee({ owner_id, estCourante });
+      if (capture.issue === 'ok' && estCourante()) {
+        brouillons = await renderBrouillonsListe({ service, portee: capture.portee, estCourante, confirmer, messageErreur: texteErreurBrouillon, lien: href => lienAvecOrigine(href) });
+        root.append(brouillons);
+      }
+    } catch {
+      if (estCourante()) root.append(el('p', { role: 'status', class: 'status warn' }, t('La liste des brouillons n’a pas pu être lue. Recharge cette page pour réessayer.')));
+    }
+  }
   const zone = el('div', null);
   const imports = sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, battementMs, confirmer });
   root.attendreEcritures = imports.attendre;
@@ -276,7 +298,9 @@ export async function renderAdd(params, query, ctx, { repo = repoModule, navigat
     if (!root.isConnected) { if (montee) desabonner(); return; }
     montee = true;
     if (store === 'imports' || store === 'scan_sessions' || store === 'recipes' || store === '*') imports.redessiner();
+    if (['sync_state', 'recipes', 'recipe_versions', 'books', 'book_editions', '*'].includes(store)) brouillons?.recharger();
   });
+  root.dispose = () => { quitte = true; desabonner(); };
   // Ronde 1 : la passe `interrompu` du démarrage est rejouée à l'affichage quand le journal porte un vol (repo.marquerInterrompus, mêmes règles) : un
   // rechargement dans les 90 s, ou une ligne d'un appareil perdu, ne reste plus bloqué « En cours… » sans geste jusqu'au prochain démarrage.
   // Le redessin suit la passe elle-même (et pas seulement le bus) : finie avant que la page soit montée, elle serait sinon perdue.
@@ -289,6 +313,7 @@ export async function renderAdd(params, query, ctx, { repo = repoModule, navigat
     if (!root.isConnected) { desabonner(); return; }
     montee = true;
     if (query?.section === 'imports') root.querySelector('[data-role="imports"]')?.focus();
+    if (query?.section === 'brouillons' && brouillons && !brouillons.hidden) { brouillons.tabIndex = -1; brouillons.focus(); }
   }, 0);
   // C8 : la RÉCENCE, pas le nombre — l'instant de la dernière activité de chaque livre. Une date illisible (fiche
   // venue d'ailleurs, I-G) ne compte pas plutôt que de valoir « 1970 ».

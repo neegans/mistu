@@ -1,3 +1,4 @@
+import { lireRendementTexte } from '../domain/rendement.js';
 import { capturerRecette } from './recette-garde.js';
 import { actionsRecette, menuActions, boutonsActions, texteErreurAction, capturerSelectionRecettes, executerSelectionRecettes } from './actions-contenu.js';
 import { lienAvecOrigine, retourConnu, porteeNavigation } from './navigation-contexte.js';
@@ -61,6 +62,8 @@ export function texteReperes(version) {
 
   const parties = []; // ronde 1 : les parties sont toujours jointes par « · » (plus de clé combinée « {n} portions · {d} », doublon de « {n} portions »)
   if (n === 1) parties.push(t('1 portion')); else if (n !== null) parties.push(t('{n} portions', { n }));
+  const rendement = lireRendementTexte(version);
+  if (rendement) parties.push(rendement);
   return parties.length ? parties.join(' · ') : null;
 }
 
@@ -176,7 +179,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // R-UI-P2 : le sous-titre reste la provenance (« {titre} — {auteur} · page N », hôte recalculé, étiquette IA) ; « Du web · » / « De mon livre · » sont les préfixes de la
   // CARTE-PLAT (ligneSource), pas de la fiche — § 4.2 amendé par T6 ; tests/creer-ia.js:1338, 1375, 1397, 1400 lisent ce header p tel quel.
   // Fidélité aux maquettes (28 octobre 2026) : le titre vit dans la colonne de gauche de l'en-tête, en face de la photo (posé plus bas, dans .fiche-etat).
-  const entete = pageHeader(recipe.original_title || recipe.display_title, {
+  const entete = pageHeader(recipe.display_title || recipe.original_title, {
     subtitle: provenanceText(recipe, book, edition), back: (()=>{const repli=edition?`/books/${encodeURIComponent(edition.id)}`:'/library';const back=retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli});return {...back,label:back.cleEntree?t('Retour'):edition?book?.title||t('Livre'):t('Bibliothèque')};})(),
     actions: lectureSeule ? [] : [favBtn], classeTitre: 'titre-fiche',
   });
@@ -203,7 +206,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // provenance, avant les repères : la maquette mobile). Les gestes ne sont posés qu'avec une version (plus bas).
   const etat = el('div', { class: 'stack fiche-etat', dataset: { role: 'fiche-etat' } }, entete,
     rangeeEtat(availabilityBadge(recipe), versionBadge(version, recipe), lecture ? etatVerification(version) : null, recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
-  if (recipe.display_title && recipe.display_title !== recipe.original_title) etat.append(el('p', { class: 'muted alias-recette' }, recipe.display_title));
+  if (recipe.original_title && recipe.display_title && recipe.display_title !== recipe.original_title) etat.append(el('p', { class: 'muted alias-recette' }, t('Titre original : {titre}', { titre: recipe.original_title })));
   etat.append(resumeReperes(recipe, version, { detail: true, modifier: !lectureSeule }));
   const web = bandeauWeb(version);
   if (web) etat.append(web); // lot B (§ 4.5) : la source d'une version lue sur le web, d'abord — puis la bannière du lot A

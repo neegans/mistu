@@ -7,7 +7,8 @@ export async function runVisuelIntegrationTests({ eq, ok }) {
   await run('ligne du livre', async () => {
     const { ligneCompacte } = await import('../src/ui/book.js');
     const root = ligneCompacte(recipe, { version });
-    eq(root.querySelector('a.titre')?.textContent, 'Trinity bread', 'Visuel : titre original préservé dans la liste du livre');
+    eq(root.querySelector('a.titre')?.textContent, 'Mon pain', 'Visuel : titre affiché dans la liste du livre');
+    ok(root.textContent.includes('Titre original : Trinity bread'), 'Visuel : titre original préservé sous le titre affiché du livre');
     ok(!!root.querySelector('.recette-ligne-entete') && !!root.querySelector('.recette-ligne-actions'), 'Visuel : informations et actions occupent des blocs distincts');
     ok([...root.querySelectorAll('a')].some(a => a.textContent === 'Compléter'), 'Visuel : recette partielle propose Compléter');
     eq(root.querySelector('[data-role=gerer-photo]')?.getAttribute('href'), '#/recipes/visuel-r/photo', 'Visuel : gestion photo depuis une ligne du livre');
@@ -52,7 +53,8 @@ export async function runVisuelIntegrationTests({ eq, ok }) {
     const { renderRecipe } = await import('../src/ui/recipe.js');
     const root = await renderRecipe({ id: r.id }, {}, await getData(true), { repo });
     try {
-      eq(root.querySelector('h1')?.textContent, 'Trinity bread', 'Visuel : fiche porte le titre original');
+      eq(root.querySelector('h1')?.textContent, 'Mon pain', 'Visuel : fiche porte le titre affiché');
+      ok(root.textContent.includes('Titre original : Trinity bread'), 'Visuel : fiche conserve explicitement le titre original');
       ok(!!root.querySelector('[data-role=gerer-photo]'), 'Visuel : référence sans version donne accès au gestionnaire photo');
       ok(!!root.querySelector('[data-role=modifier-reperes]'), 'Visuel : référence permet description et saisie manuelle');
       eq((await repo.all('recipe_versions')).length, 0, 'Visuel : présentation ne fabrique pas de version culinaire');

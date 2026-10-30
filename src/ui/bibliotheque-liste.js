@@ -19,7 +19,7 @@ export function texteCompteurs(c) {
   return [t('{n} disponible(s)',{n:c.available}),t('{n} partielle(s)',{n:c.partial}),t('{n} référence(s)',{n:c.reference_only}),t('{n} état(s) inconnu(s)',{n:c.unknown})].join(' · ');
 }
 export function ligneBibliotheque(d,{fichier=null,photo=null,ctxF={},ctx,origine,onResultat}={}){
-  const r=d.recipe,href=lienAvecOrigine(`/recipes/${encodeURIComponent(r.id)}`,origine||{}),titre=r.original_title||r.display_title||t('Sans titre');
+  const r=d.recipe,href=lienAvecOrigine(`/recipes/${encodeURIComponent(r.id)}`,origine||{}),titre=r.display_title||r.original_title||t('Sans titre');
   const actions=el('div',{class:'row recette-ligne-actions',dataset:{role:'etat-recette'}},availabilityBadge({...r,printed_page:null}));
   const importable=['reference_only','partial'].includes(r.availability)&&!aUneAdresse(r);
   if(importable)actions.append(el('a',{class:'btn small',href:lienAvecOrigine(`/recipes/${encodeURIComponent(r.id)}/importer`,origine||{})},r.availability==='partial'?t('Compléter'):t('Importer')));
@@ -28,7 +28,7 @@ export function ligneBibliotheque(d,{fichier=null,photo=null,ctxF={},ctx,origine
   return el('div',{class:'recette-ligne',dataset:{recette:r.id}},
     el('div',{class:'recette-ligne-entete'},photoVisible(photo?.sha256??r.photo_sha256,{fichier,ctxF,classe:'recette-miniature',personnelle:!!photo?.personnelle}),
       el('div',{class:'recette-ligne-texte'},el('a',{class:'titre',href,dataset:{navFocus:'element'}},titre),
-        r.display_title&&r.display_title!==r.original_title?el('small',{class:'muted'},r.display_title):null,
+        r.original_title&&r.display_title&&r.display_title!==r.original_title?el('small',{class:'muted'},t('Titre original : {titre}',{titre:r.original_title})):null,
         el('div',{class:'row muted'},d.book?.title?el('span',null,d.book.title):null,plagesLisibles(r).length?el('span',{class:'muted'},`${t('p.')} ${textePlages(plagesLisibles(r))}`):null,
           r.availability==='reference_only'&&!aUneAdresse(r)&&sectionLisible(r.section)?el('span',{class:'chip neutral',dataset:{role:'section'}},sectionLisible(r.section)):null))),
     resumeReperes(r,d.version,{compact:true}),actions);

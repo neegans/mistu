@@ -155,6 +155,8 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     } }, t('Restaurer une sauvegarde…')));
   root.append(section(t('Sauvegarde'),
     el('p', { class: 'muted' }, t('Archive ZIP privée : manifeste, données par entité, photos et PDF avec empreinte SHA-256. Les secrets d’accès ne sont pas exportés. Une synchronisation ne remplace pas une sauvegarde restaurable.')),
+    el('p', { class: 'muted' }, t('Les brouillons de saisie restent sur cet appareil et ne sont pas dans cette archive.'), ' ',
+      el('a', { href: '#/add?section=brouillons' }, t('Retrouver mes brouillons et télécharger leur texte'))),
     backupStatus, archiveControls, restoreBox));
 
   // Exports
@@ -214,11 +216,12 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     el('p', { class: 'muted' }, `${t('Base locale')} « cuisine-os » v${repo.db.version} · ${t('format d’archive')} v${ARCHIVE_FORMAT_VERSION}`),
     el('div', { class: 'chips' }, ...counts.filter(([, c]) => c).map(([n, c]) => el('span', { class: 'chip neutral' }, `${n} : ${c}`))),
     // Promesse de serveur seulement s'il y a un serveur : sans session acceptée, ces données ne sont nulle part ailleurs.
-    el('p', { class: 'muted' }, sync.user
+    el('p', { class: 'muted', dataset: { role: 'consequences-effacement' } }, sync.user
       // Vague finale du lot G, ronde 2 (R-G-28 bis) : la perte est dite — fichiers pas encore envoyés (photos, PDF, EPUB : D-G8, seuls ceux à remote de
       // ce compte sont partis) et, en qualité réduite, l'original d'une photo envoyée (le serveur n'en a que la copie réduite).
       ? t('Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur, sauf les photos et documents pas encore envoyés (une photo envoyée en qualité réduite n’y garde que sa copie réduite).')
       : t('Ces données ne sont que sur cet appareil : fais une sauvegarde avant de les effacer.')),
+    el('p', { class: 'muted' }, t('Effacer cet appareil supprime aussi ses brouillons. Télécharge leur texte avant de continuer : l’archive ne les contient pas.')),
     el('div', { class: 'row', style: { marginTop: '.8rem' } },
       el('button', { class: 'btn danger', onClick: async () => {
         if (archiveOperation) { toast(t('Une opération d’archive est déjà en cours.')); return; }
@@ -282,7 +285,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
       let committed = false;
       try {
         const message = mode === 'replace'
-          ? t('Remplacer toute la bibliothèque actuelle par l’archive ?')
+          ? t('Remplacer toute la bibliothèque actuelle par l’archive ?') + ' ' + t('Les brouillons actuels resteront récupérables en texte, sans pouvoir modifier directement la bibliothèque restaurée.')
           : t('Fusionner l’archive par identifiants (aucun doublon, les fiches existantes sont écrasées par celles de l’archive) ?');
         if (!(await confirmDialog(message, { danger: mode === 'replace', okLabel: t('Restaurer') }))) return;
         result.replaceChildren(el('p', { class: 'muted' }, t('Restauration…')));
@@ -454,7 +457,8 @@ export async function effacerDonnees({ user = null, pending, enQuarantaine = asy
   // Vague finale du lot G : avec un compte, la file ne compte que les fiches (D-G8) — les photos et documents pas encore envoyés, ou refusés à l'envoi,
   // seraient perdus sans un mot : la confirmation le dit, et (ronde 2, R-G-28 bis) qu'une photo envoyée en qualité réduite ne garde au serveur que sa
   // copie réduite. Sans compte, la phrase d'avant (tout est perdu, la sauvegarde d'abord).
-  const question = user ? t('Effacer les données de cet appareil ? Les photos et documents pas encore envoyés seront perdus ; une photo envoyée en qualité réduite ne garde que sa copie réduite. Fais d’abord une sauvegarde.') : t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.');
+  const question = (user ? t('Effacer les données de cet appareil ? Les photos et documents pas encore envoyés seront perdus ; une photo envoyée en qualité réduite ne garde que sa copie réduite. Fais d’abord une sauvegarde.') : t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.'))
+    + ' ' + t('Les brouillons seront perdus : ils ne sont pas dans l’archive. Télécharge leur texte avant de continuer.');
   if (!(await confirm(question, { danger: true, okLabel: t('Continuer') }))) return false;
   const mot = await demanderMot(t('Tape EFFACER pour confirmer'));
   if (mot !== 'EFFACER') { dire(t('Annulé')); return false; }
@@ -495,7 +499,7 @@ export async function changerDeCompte({ confirm, toast: dire, pending, archiveCr
   try { archive = archiveCreated(); }
   catch { dire(t('Le stockage de session est inaccessible : ce geste n’est pas possible ici.')); return false; }
   if (!archive) { dire(t('Fais d’abord une archive sur cette page.')); return false; }
-  if (!(await confirm(t('Changer de compte sur cet appareil ? Toutes les données de cet appareil seront effacées.'), { danger: true, okLabel: t('Continuer') }))) return false;
+  if (!(await confirm(t('Changer de compte sur cet appareil ? Toutes les données de cet appareil seront effacées.') + ' ' + t('Les brouillons seront perdus : ils ne sont pas dans l’archive. Télécharge leur texte avant de continuer.'), { danger: true, okLabel: t('Continuer') }))) return false;
   const enAttente = await pending(); // compté au moment du geste : la file a pu bouger depuis le rendu
   if (!(await confirm(messagePerte(enAttente), { danger: true, okLabel: t('Changer de compte') }))) return false;
   // S-11 / F-24 : upload() et download() ne prennent pas de signal ; arreter() attend le fichier en cours — on le dit avant d'attendre.

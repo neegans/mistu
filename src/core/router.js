@@ -2,6 +2,24 @@
 
 const routes = [];
 let notFound = null;
+const gardesSortie = new Set();
+export function enregistrerGardeSortie(garde) { gardesSortie.add(garde); return () => gardesSortie.delete(garde); }
+function avantNavigation(demande) {
+  const gardes = [...gardesSortie];
+  const poursuivre = index => {
+    for (; index < gardes.length; index++) {
+      const accord = gardes[index](demande);
+      if (accord?.then) {
+        const suivante = index + 1;
+        return Promise.resolve(accord).then(valeur => valeur === false ? false : poursuivre(suivante));
+      }
+      if (accord === false) return false;
+    }
+    return true;
+  };
+  // Une ancienne vue démontée autorise immédiatement ; seules les gardes actives imposent une attente.
+  return poursuivre(0);
+}
 
 export function route(pattern, handler) {
   const keys = [];
@@ -58,8 +76,8 @@ export function resolve(hash = location.hash) {
   return { handler: notFound, params: {}, query, path, pattern: null };
 }
 
-export function start(onRoute, { fenetre = window } = {}) {
-  let derniere = null;
+export function start(onRoute, { fenetre = window, avantRoute = avantNavigation } = {}) {
+  let derniere = null, dernierEtat = null, observee = null, compensation = null, demandeId = 0, arretee = false;
   const run = (event) => {
     const href = fenetre.location.hash || '#/';
     const state = fenetre.history.state && typeof fenetre.history.state === 'object' ? fenetre.history.state : {};
@@ -67,16 +85,37 @@ export function start(onRoute, { fenetre = window } = {}) {
     const reconnue = entree && typeof entree.cle === 'string' && entree.href === href && Number.isSafeInteger(entree.position) && typeof entree.chaine === 'string';
     let type = event?.type === 'cuisineos:refresh' ? 'refresh' : event?.type === 'cuisineos:replace' ? 'replace' : derniere ? 'navigation' : 'initial';
     if (!reconnue) {
-      entree = { cle: nouvelleCle(), href, position: (derniere?.position ?? -1) + 1, chaine: derniere?.chaine || nouvelleCle() };
+      entree = { cle: nouvelleCle(), href, position: (observee?.position ?? derniere?.position ?? -1) + 1, chaine: observee?.chaine || derniere?.chaine || nouvelleCle() };
       fenetre.history.replaceState({ ...state, [CLE_ENTREE_NAV]: entree }, '', href);
     } else if (derniere && entree.cle !== derniere.cle) type = 'retour';
-    if (derniere?.cle === entree.cle && derniere.href === href && !['refresh', 'replace'].includes(type)) return;
-    const precedente = derniere; derniere = { ...entree };
-    onRoute({ ...resolve(href), navigation: { type, cleEntree: entree.cle, position: entree.position, chaine: entree.chaine, precedente } });
+    const indexNavigateur = fenetre.navigation?.currentEntry?.index;
+    entree = { ...entree, indexNavigateur: Number.isSafeInteger(indexNavigateur) ? indexNavigateur : null };
+    if (compensation?.cle === entree.cle && compensation.href === href) { compensation = null; observee = { ...entree }; return; }
+    if (observee?.cle === entree.cle && observee.href === href && !['refresh', 'replace'].includes(type)) return;
+    observee = { ...entree };
+    if (derniere?.cle === entree.cle && derniere.href === href && !['refresh', 'replace'].includes(type)) { demandeId++; return; }
+    const precedente = derniere, etatPrecedent = dernierEtat, id = ++demandeId;
+    const cible = { ...resolve(href), navigation: { type, cleEntree: entree.cle, position: entree.position, chaine: entree.chaine, precedente } };
+    const finir = autorisee => {
+      if (arretee || id !== demandeId) return;
+      if (autorisee !== false) { derniere = { ...entree }; dernierEtat = { ...fenetre.history.state }; onRoute(cible); return; }
+      if (!precedente || precedente.cle === entree.cle && precedente.href === href) return;
+      // Le navigateur a déjà changé d’entrée. Revenir à la clé exacte sans fabriquer une nouvelle entrée.
+      compensation = { ...precedente };
+      const delta = precedente.indexNavigateur !== null && entree.indexNavigateur !== null ? precedente.indexNavigateur - entree.indexNavigateur
+        : precedente.chaine === entree.chaine ? precedente.position - entree.position : null;
+      if (delta !== null && delta !== 0) fenetre.history.go(delta);
+      else { compensation = null; fenetre.history.replaceState(etatPrecedent, '', precedente.href); observee = { ...precedente }; }
+    };
+    if (!precedente) { finir(true); return; }
+    let accord;
+    try { accord = avantRoute({ ...cible, depuis: { ...precedente }, event: event?.type || 'initial' }); }
+    catch { finir(false); return; }
+    if (accord?.then) Promise.resolve(accord).then(finir, () => finir(false)); else finir(accord);
   };
   for (const nom of ['popstate', 'hashchange', 'cuisineos:refresh', 'cuisineos:replace']) fenetre.addEventListener(nom, run);
   run();
-  return () => { for (const nom of ['popstate', 'hashchange', 'cuisineos:refresh', 'cuisineos:replace']) fenetre.removeEventListener(nom, run); };
+  return () => { arretee = true; demandeId++; for (const nom of ['popstate', 'hashchange', 'cuisineos:refresh', 'cuisineos:replace']) fenetre.removeEventListener(nom, run); };
 }
 
 // Re-rend la route courante (après une écriture ou un changement de réglage).

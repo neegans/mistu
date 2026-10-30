@@ -38,8 +38,8 @@ export async function runThemeTests({ eq, ok }) {
   eq(valeurs.flatMap((x) => x.match(/[a-z]+/g) || []).filter((w) => COULEURS_NOMMEES.has(w)), [], 'T-2 : aucune couleur nommée hors :root (white, red… ; transparent, currentColor, inherit permis)');
   // Le bloc de déclarations exclut « { » : sinon la règle qui ouvre un @media est nommée « @media (…) » au lieu de son sélecteur (nav.tabs).
   const caches = [...hors.matchAll(/([^{}]+)\{[^{}]*display:\s*none[^{}]*\}/g)].map((m) => m[1].trim().replace(/\s+/g, ' ')).filter((s) => s !== '[hidden]');
-  const attendus = ['aside.sidenav', 'nav.tabs', '.accueil-livre .sources:empty', '.menu-source summary::-webkit-details-marker', '.cover.with-img .title, .cover.with-img .author'];
-  eq(caches.sort(), attendus.sort(), 'T-1 : inventaire EXACT des display:none (les cinq d’origine ; [hidden] à part)');
+  const attendus = ['aside.sidenav', 'nav.tabs', '.accueil-livre .sources:empty', '.menu-source summary::-webkit-details-marker', '.cover.with-img .title, .cover.with-img .author', '.editeur-vue-mobile', '.editeur-recette[data-vue="modification"] .editeur-source', '.editeur-recette[data-vue="source"] .editeur-formulaire'];
+  eq(caches.sort(), attendus.sort(), 'T-1 : inventaire EXACT des display:none (cinq d’origine et bascule Source/Modification L4 ; [hidden] à part)');
   // « 0(?![.\d]) » : 0, 0px et 0% sont attrapés, 0.5 et 0.9rem non (« \b » passait entre 0 et le point).
   eq((hors.match(/visibility:\s*hidden|opacity:\s*0(?![.\d])|font-size:\s*0(?![.\d])/g) || []).length, 0, 'T-1 : ni visibility:hidden, ni opacity:0, ni font-size:0');
   // Le CONTENU des blocs, pas leur seule présence : l'anneau global (2 px olive décalé 2 px) et le bloc du mouvement réduit.

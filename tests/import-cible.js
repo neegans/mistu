@@ -294,7 +294,7 @@ export async function runImportCibleTests({ eq, ok }) {
     // Lot C, tâche 1 : fabriquerReferences (src/domain/table-matieres.js) est le sixième fabricant (spec C § 3.5 : « appelant ajouté au test de source » ; M32).
     // Lot I1 (28 octobre) : « Créer les références » et la zone de texte du panneau d'index (import.js) sont retirés ; le fabricant des références d'un
     // index lu page par page est fabriquerReferenceIndex (src/domain/index-livre.js), qui prend leur place.
-    const fabricants = ['../src/domain/creation-ia.js', '../src/ui/signet.js', '../src/ui/recipe-edit.js', '../src/domain/index-livre.js', '../src/domain/import-cible.js', '../src/domain/table-matieres.js'];
+    const fabricants = ['../src/domain/creation-ia.js', '../src/ui/signet.js', '../src/domain/brouillons-editeur.js', '../src/domain/index-livre.js', '../src/domain/import-cible.js', '../src/domain/table-matieres.js'];
     const appels = await Promise.all(fabricants.map(async (f) => (sansCommentaires(await lire(f)).match(/assertVocabulaire\(/g) || []).length >= 1));
     eq(appels, [true, true, true, true, true, true], 'vocabulaire : les six fabricants (dont fabriquerExtraction de import-cible.js, fabriquerReferences de table-matieres.js et fabriquerReferenceIndex de index-livre.js) appellent assertVocabulaire( hors commentaire (test de source, faible, admis ; M32)');
     // Fiche valide par comportement : le fabricant du signet (pur) rend une fiche du vocabulaire \u2014 valeurs codées en dur, ne prouve PAS l'appel.
@@ -1582,6 +1582,11 @@ export async function runImportCibleTests({ eq, ok }) {
     const texte = (n) => (n ? n.textContent : null);
     const bouton = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom) || null;
     const champ = (root, libelle) => [...root.querySelectorAll('.field')].find((f) => f.querySelector('span')?.textContent === libelle) || null;
+    const etapesFormulaire = root => [...root.querySelectorAll('[data-role=editeur-etape-texte]')].map(n => n.value);
+    const ingredientsFormulaire = root => [...root.querySelectorAll('[data-role=editeur-ingredient] details p')].map(n => n.textContent);
+    const confirmerEditeur = async nom => { await attendre(() => document.querySelector('dialog[open]'), 'confirmation éditeur'); [...document.querySelector('dialog[open]').querySelectorAll('button')].find(b => b.textContent === nom).click(); };
+    const adopterLectureEditeur = async root => { root.querySelector('[data-role=adopter-lecture-editeur]').click(); await confirmerEditeur('Utiliser cette lecture'); await attendre(() => !root.querySelector('[data-role=adopter-lecture-editeur]'), 'lecture adoptée'); };
+
     try {
       // --- banniereLecture(version, ligne) et estExtractionNonRelue(version) : pures, par table
       const LU = '2026-09-01T12:00:00.000Z'; // ronde 1 : une date de lecture franchement passée — la date d'une correction écrite le jour du test ne la contrefait jamais
@@ -1737,14 +1742,15 @@ export async function runImportCibleTests({ eq, ok }) {
       // --- « Corriger » (Review Focus 5, spec § 4.3.7) : une étape par paragraphe, héritage de uncertain et de la provenance de lecture
       {
         const editeur = await renderRecipeEdit({ id: 'rc_imp' }, { kind: 'correction', v: extraction.id }, await ctxDe()); scene.append(editeur);
-        const fEtapes = champ(editeur, 'Étapes'); const stepsTa = fEtapes?.querySelector('textarea');
-        eq([stepsTa?.value, stepsTa?.placeholder, texte(fEtapes?.querySelector('small'))], ['Peler les pommes.\nLes couper en quartiers.\n\nCuire 45 min.', 'Une étape par paragraphe (ligne vide entre deux étapes).', 'Une étape par paragraphe (ligne vide entre deux étapes).'], 'Corriger : une étape de la version de départ porte un saut de ligne → zone jointe par une ligne vide, aide « Une étape par paragraphe (ligne vide entre deux étapes). »');
-        eq(editeur.textContent.includes('2 étape(s)'), true, 'Corriger : l’aperçu compte 2 étapes (par paragraphe), pas 3 (par ligne)');
+        const etapesDe = ed => [...ed.querySelectorAll('[data-role=editeur-etape-texte]')].map(n => n.value);
+        const saisirQuantite = (ed, index, valeur) => { const boite = ed.querySelectorAll('[data-role=editeur-ingredient]')[index]; const n = boite.querySelector('[data-role=ingredient-quantite]'); n.value = valeur; n.dispatchEvent(new Event('input', { bubbles: true })); if(index===1)for(const [role,v]of [['ingredient-nom','sucre'],['ingredient-unite','g']]){const c=boite.querySelector('[data-role='+role+']');c.value=v;c.dispatchEvent(new Event('input',{bubbles:true}));} };
+        eq(etapesDe(editeur), ['Peler les pommes.\nLes couper en quartiers.', 'Cuire 45 min.'], 'L4 Corriger : étapes indépendantes, saut de ligne interne intact');
+        eq(editeur.querySelectorAll('[data-role=editeur-etape]').length, 2, 'Corriger : l’aperçu compte 2 étapes (par paragraphe), pas 3 (par ligne)');
         // Enregistrer depuis l'éditeur : la version neuve est celle qui n'existait pas avant le clic ; l'adresse posée par la navigation est rendue.
         const idsDe = async (rid) => new Set((await db.byIndex('recipe_versions', 'recipe_id', rid)).map((v) => v.id));
         const enregistrer = async (ed, rid) => {
           const avant = await idsDe(rid);
-          bouton(ed, 'Enregistrer une nouvelle version').click();
+          bouton(ed, 'Enregistrer les modifications').click();
           await attendre(async () => (await idsDe(rid)).size === avant.size + 1, 'version écrite (' + rid + ')');
           await tick();
           const neuve = (await db.byIndex('recipe_versions', 'recipe_id', rid)).find((v) => !avant.has(v.id));
@@ -1752,14 +1758,12 @@ export async function runImportCibleTests({ eq, ok }) {
           return { neuve, hash };
         };
         // Ronde 1 : la ligne retapée est une ligne INCERTAINE (« ? g de sucre » → « 100 g de sucre ») — elle perd uncertain, « ? ml de lait » le garde.
-        const ingTa = champ(editeur, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea');
-        ingTa.value = ingTa.value.replace('? g de sucre', '100 g de sucre'); ingTa.dispatchEvent(new Event('input', { bubbles: true }));
-        bouton(editeur, 'Analyser les lignes').click();
-        eq(editeur.querySelectorAll('table.compare tbody tr').length, 7, 'Corriger : sept lignes analysées après le changement d’une quantité');
+        saisirQuantite(editeur, 1, '100');
+        eq(editeur.querySelectorAll('[data-role=editeur-ingredient]').length, 7, 'Corriger : sept lignes analysées après le changement d’une quantité');
         const { neuve, hash } = await enregistrer(editeur, 'rc_imp');
         const rc = await db.get('recipes', 'rc_imp');
         eq([neuve.kind, neuve.parent_version_id, neuve.provenance.generated_by, neuve.provenance.import_id, neuve.provenance.incomplete, neuve.provenance.missing_page, neuve.provenance.titre_lu, neuve.provenance.lu_le], ['correction', extraction.id, 'manual', 'imp_fiche', false, true, 'Tarte aux pommes', LU], 'Corriger (Review Focus 5) : la version correction hérite import_id, incomplete, missing_page, titre_lu (et la date de lecture, lu_le) de sa parente');
-        eq(neuve.ingredients.map((l) => [l.source_text, l.uncertain === true]), [['4 pommes', false], ['100 g de sucre', false], ['1 oeuf', false], ['100 g de beurre', false], ['? ml de lait', true], ['1 pincée de sel', false], ['200 g de farine', false]], 'Corriger (Review Focus 5) : la ligne INCERTAINE retapée (« ? g de sucre » → « 100 g de sucre ») perd uncertain ; l’autre incertaine (« ? ml de lait ») le garde ; les autres restent sans');
+        eq(neuve.ingredients.map((l) => [l.source_text, l.uncertain === true]), [['4 pommes', false], ['100 g sucre', false], ['1 oeuf', false], ['100 g de beurre', false], ['? ml de lait', true], ['1 pincée de sel', false], ['200 g de farine', false]], 'L4 Corriger : quantité retapée perd incertitude, texte source conservé, autres lignes inchangées');
         eq([neuve.steps.map((s) => s.text), neuve.verification_state], [['Peler les pommes.\nLes couper en quartiers.', 'Cuire 45 min.'], 'to_verify'], 'Corriger (Review Focus 5) : les étapes multi-lignes restent entières (parParagraphe: true au save()) ; la version reste à vérifier');
         eq([rc.current_version_id, rc.availability, rc.verification_state, hash], [neuve.id, 'partial', 'to_verify', `#/recipes/rc_imp?v=${neuve.id}`], 'Corriger : la correction devient courante ; la fiche reste partial (page possiblement manquante : jamais comblée, I-1) ; navigation vers la version');
         const pageN = await renderRecipe({ id: 'rc_imp' }, { v: neuve.id }, await ctxDe()); scene.append(pageN);
@@ -1769,8 +1773,7 @@ export async function runImportCibleTests({ eq, ok }) {
         // la LECTURE — jamais celle de la première correction.
         ok(neuve.created_at !== LU && typeof neuve.created_at === 'string', 'fixture (m18) : la première correction est datée du jour, pas de la lecture');
         const editeur2 = await renderRecipeEdit({ id: 'rc_imp' }, { kind: 'correction', v: neuve.id }, await ctxDe()); scene.append(editeur2);
-        const ing2 = champ(editeur2, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea');
-        ing2.value = ing2.value.replace('100 g de sucre', '120 g de sucre'); ing2.dispatchEvent(new Event('input', { bubbles: true }));
+        saisirQuantite(editeur2, 1, '120');
         const { neuve: neuve2 } = await enregistrer(editeur2, 'rc_imp');
         const page2 = await renderRecipe({ id: 'rc_imp' }, { v: neuve2.id }, await ctxDe()); scene.append(page2);
         eq([neuve2.parent_version_id, neuve2.provenance.lu_le, texte(page2.querySelector('[data-role="ligne-lecture"]'))?.startsWith(`Lue par l’assistant le ${formatDate(LU)}`)], [neuve.id, LU, true], 'Corriger une correction (vague finale, m18) : lu_le reste la date de la LECTURE (héritée de la parente), et le bandeau la dit');
@@ -1778,8 +1781,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const fabInc = D.fabriquerExtraction(L.validateParsedRecipe({ ...RES, uncertain_fields: ['sel'], incomplete: true, missing_page: false }), { reference: { ...reference, id: 'rc_inc', original_title: 'Tarte incomplète' }, versions: [], pages: [], pageIds: [], edition, importId: 'imp_inc', modele: 'claude-x', photo: null, maintenant: LU });
         await db.mutate({ puts: { recipes: [{ ...fabInc.recipe, updated_at: LU }], recipe_versions: [{ ...fabInc.version, updated_at: LU }] }, origin: 'device' });
         const editeurI = await renderRecipeEdit({ id: 'rc_inc' }, { kind: 'correction', v: fabInc.version.id }, await ctxDe()); scene.append(editeurI);
-        const ingI = champ(editeurI, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea');
-        ingI.value = ingI.value.replace('? g de sucre', '100 g de sucre'); ingI.dispatchEvent(new Event('input', { bubbles: true }));
+        saisirQuantite(editeurI, 1, '100');
         const { neuve: neuveI } = await enregistrer(editeurI, 'rc_inc');
         const pageI = await renderRecipe({ id: 'rc_inc' }, { v: neuveI.id }, await ctxDe()); scene.append(pageI);
         eq([fabInc.recipe.availability, neuveI.provenance.incomplete, neuveI.provenance.missing_page, neuveI.provenance.uncertain_fields, (await db.get('recipes', 'rc_inc')).availability, texte(pageI.querySelector('[data-role="ligne-lecture"]'))?.includes('lecture incomplète'), texte(pageI.querySelector('[data-role="incertain-lecture"]'))],
@@ -1793,16 +1795,16 @@ export async function runImportCibleTests({ eq, ok }) {
         const fileAvantRefus = await db.getAll('outbox');
         window.addEventListener('unhandledrejection', surRejet);
         try {
-          bouton(editeurH, 'Enregistrer une nouvelle version').click();
+          bouton(editeurH, 'Enregistrer les modifications').click();
           await attendre(() => editeurH.querySelector('[data-role="erreur-enregistrement"]')?.textContent, 'save refusé et expliqué');
         } finally { window.removeEventListener('unhandledrejection', surRejet); history.replaceState(null, '', adresseAvant); }
-        eq([rejets, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_hostile')).length, (await db.get('recipes', 'rc_hostile')).availability, texte(editeurH.querySelector('[data-role="erreur-enregistrement"]')), changementsH.value], [[], 1, 'dispo', 'L’enregistrement a échoué. Tes modifications restent dans ce formulaire.', 'Moins de sucre'], 'éditeur (m14, L0) : une adaptation d’une fiche au vocabulaire hostile est refusée sans rejet non traité, sans version ni fiche écrite, avec motif et saisie conservée');
+        eq([rejets, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_hostile')).length, (await db.get('recipes', 'rc_hostile')).availability, texte(editeurH.querySelector('[data-role="erreur-enregistrement"]')), changementsH.value], [[], 1, 'dispo', 'La saisie n’a pas pu être conservée sur cet appareil. Elle reste dans le formulaire. Réessaie.', 'Moins de sucre'], 'éditeur (m14, L0) : une adaptation d’une fiche au vocabulaire hostile est refusée sans rejet non traité, sans version ni fiche écrite, avec motif et saisie conservée');
         eq(await db.getAll('outbox'), fileAvantRefus, 'éditeur (m14, L0) : le refus de vocabulaire n’ajoute aucune écriture à envoyer');
 
         // Ronde 1 : cocher « Vérifié » sur chaque ligne SANS rien retaper, puis enregistrer — le cas joué PAR l'éditeur (plus par une fixture posée à
         // la main) : une ligne vérifiée n'est plus incertaine (une seule règle, au save()) ; la fiche dit « Vérifiée », sans « ligne(s) incertaine(s) ».
         const editeurV = await renderRecipeEdit({ id: 'rc_imp' }, { kind: 'correction', v: extraction.id }, await ctxDe()); scene.append(editeurV);
-        const cases = () => [...editeurV.querySelectorAll('table.compare tbody input[type="checkbox"]')];
+        const cases = () => [...editeurV.querySelectorAll('[data-role=editeur-ingredient] input[type="checkbox"]')];
         for (let i = 0; i < 7; i += 1) cases()[i].click();
         eq(cases().map((c) => c.checked), [true, true, true, true, true, true, true], 'Corriger : les sept cases « Vérifié » sont cochées (sans texte retapé)');
         const { neuve: neuveV } = await enregistrer(editeurV, 'rc_imp');
@@ -1812,12 +1814,11 @@ export async function runImportCibleTests({ eq, ok }) {
 
         // Ronde 1 : une étape lue avec une ligne vide INTERNE (gardée par validateParsedRecipe) reste UNE étape à la correction d'une seule quantité.
         const editeurP = await renderRecipeEdit({ id: 'rc_para' }, { kind: 'correction', v: fabPara.version.id }, await ctxDe()); scene.append(editeurP);
-        const taP = champ(editeurP, 'Étapes')?.querySelector('textarea');
-        eq([fabPara.version.steps.map((s) => s.text), taP?.value, editeurP.textContent.includes('2 étape(s)')], [['Faire la pâte :\n\nMélanger la farine et le beurre.', 'Cuire 45 min.'], 'Faire la pâte :\nMélanger la farine et le beurre.\n\nCuire 45 min.', true], 'Corriger : une étape à ligne vide interne est jointe repliée (un seul saut de ligne) — l’aperçu compte 2 étapes, pas 3');
-        const ingP = champ(editeurP, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea');
-        ingP.value = ingP.value.replace('4 pommes', '5 pommes'); ingP.dispatchEvent(new Event('input', { bubbles: true }));
+        const taP = etapesDe(editeurP);
+        eq([fabPara.version.steps.map((s) => s.text), taP, editeurP.querySelectorAll('[data-role=editeur-etape]').length === 2], [['Faire la pâte :\n\nMélanger la farine et le beurre.', 'Cuire 45 min.'], ['Faire la pâte :\n\nMélanger la farine et le beurre.', 'Cuire 45 min.'], true], 'Corriger : une étape à ligne vide interne est jointe repliée (un seul saut de ligne) — l’aperçu compte 2 étapes, pas 3');
+        saisirQuantite(editeurP, 0, '5');
         const { neuve: neuveP } = await enregistrer(editeurP, 'rc_para');
-        eq(neuveP.steps.map((s) => s.text), ['Faire la pâte :\nMélanger la farine et le beurre.', 'Cuire 45 min.'], 'Corriger (Review Focus 5) : l’étape à ligne vide interne survit entière au changement d’une seule quantité (2 étapes, pas 3)');
+        eq(neuveP.steps.map((s) => s.text), ['Faire la pâte :\n\nMélanger la farine et le beurre.', 'Cuire 45 min.'], 'Corriger (Review Focus 5) : l’étape à ligne vide interne survit entière au changement d’une seule quantité (2 étapes, pas 3)');
 
         // Ronde 1 : relecture par l'assistant DEPUIS « Corriger » (session et fetch factices : aucun réseau réel). La version écrite est de l'assistant :
         // elle n'hérite RIEN de l'ancienne lecture, ses étapes restent séparées en mode « par paragraphe », et le mode cuisine comme les courses disent
@@ -1827,14 +1828,18 @@ export async function runImportCibleTests({ eq, ok }) {
         let appelsIA = 0;
         globalThis.fetch = async () => { appelsIA += 1; return { ok: true, status: 200, headers: new Headers(), text: async () => JSON.stringify({ model: 'claude-x', content: [{ type: 'text', text: JSON.stringify(LECTURE_IA) }] }) }; };
         try {
-          const ctxIA = { ...(await ctxDe()), pagesById: new Map([['pg_ia', { id: 'pg_ia', sha256: shaPhoto, printed_page: 132 }]]), sync: { user: SESSION_IA.user, auth: { jeton: async () => SESSION_IA } } };
+          await db.put('source_pages', { id: 'pg_ia', edition_id: 'ed5', sha256: shaPhoto, printed_page: 132, kind: 'recipe', role: 'recette' });
+          await db.put('recipes', {...await db.get('recipes','rc_imp'),source_page_ids:['pg_ia']});
+          const ctxIA = { ...(await ctxDe()), pagesById: new Map([['pg_ia', await db.get('source_pages','pg_ia')]]), sync: { user: SESSION_IA.user, auth: { jeton: async () => SESSION_IA } } };
           const editeurIA = await renderRecipeEdit({ id: 'rc_imp' }, { kind: 'correction', v: extraction.id, pages: 'pg_ia' }, ctxIA); scene.append(editeurIA);
           const btnIA = bouton(editeurIA, 'Extraire avec l’assistant IA');
           eq(btnIA?.disabled, false, 'Corriger (relecture par l’assistant) : bouton allumé (session, une page)');
           btnIA.click();
-          await attendre(() => editeurIA.textContent.includes('Extraction proposée par l’assistant'), 'relecture par l’assistant reçue');
+          await attendre(() => editeurIA.querySelector('[data-role=adopter-lecture-editeur]'), 'relecture par l’assistant reçue');
+          await adopterLectureEditeur(editeurIA);
           const { neuve: neuveIA } = await enregistrer(editeurIA, 'rc_imp');
-          eq([appelsIA, neuveIA.kind, neuveIA.provenance.generated_by, ['import_id', 'incomplete', 'missing_page', 'titre_lu', 'lu_le'].filter((k) => k in neuveIA.provenance), K.banniereLecture(neuveIA), K.estExtractionNonRelue(neuveIA), neuveIA.steps.map((s) => s.text)], [1, 'correction', 'ai', [], null, true, ['Peler les pommes.', 'Cuire 45 min.']], 'Corriger → relecture par l’assistant : un appel ; la version est de l’assistant et n’hérite RIEN de l’ancienne lecture (ni import_id, ni page manquante, ni titre lu, ni date) ; ses deux étapes restent deux en mode « par paragraphe »');
+          const journalIA=await db.get('imports',neuveIA.provenance.import_id);
+          eq([appelsIA,neuveIA.kind,neuveIA.provenance.generated_by,!!journalIA&&journalIA.id!==extraction.provenance.import_id,journalIA?.recipe_id,journalIA?.editor_base_version_id,journalIA?.status,neuveIA.provenance.incomplete,neuveIA.provenance.missing_page,neuveIA.provenance.titre_lu,neuveIA.provenance.lu_le===journalIA?.started_at,K.banniereLecture(neuveIA)?.date===journalIA?.started_at,K.estExtractionNonRelue(neuveIA),neuveIA.steps.map(s=>s.text)], [1,'correction','ai',true,'rc_imp',extraction.id,'enregistre',false,false,'Tarte aux pommes',true,true,true,['Peler les pommes.','Cuire 45 min.']], 'Corriger → relecture par l’assistant : un appel, un journal neuf exact pour cette recette/version, clos avec la publication ; titre/date/incertitudes de la nouvelle lecture sans héritage ancien ; deux étapes intactes');
           const cuisineIA = await renderCook({ id: 'cs_ia' }, {}, { ...(await ctxDe()), cook_sessions: [{ id: 'cs_ia', recipe_id: 'rc_imp', selected_version_ids: [neuveIA.id], servings: 6, progress: { done_step_ids: [] }, status: 'active', units: 'original' }] });
           const coursesIA = await renderShoppingList({ id: 'sl_ia' }, {}, { ...(await ctxDe()), shopping_lists: [{ id: 'sl_ia', title: 'Courses', items: [{ recipe_id: 'rc_imp', recipe_version_id: neuveIA.id, servings: 6, title: 'T' }], checked: {} }] });
           eq([texte(cuisineIA.querySelector('[data-role="bandeau-non-relue"]')), texte(coursesIA.querySelector('[data-role="bandeau-non-relue"]'))], ['Lue par l’assistant, non relue', 'Lue par l’assistant, non relue'], 'Corriger → relecture par l’assistant : mode cuisine et courses disent « Lue par l’assistant, non relue » (D-3), même écrite en correction');
@@ -1842,12 +1847,12 @@ export async function runImportCibleTests({ eq, ok }) {
 
         // Ronde 1 : `?v=` d'une version d'une AUTRE recette n'est jamais la base de l'éditeur (ni son héritage de lecture).
         const editeurX = await renderRecipeEdit({ id: 'rc_simple' }, { kind: 'correction', v: extraction.id }, await ctxDe());
-        eq(champ(editeurX, 'Étapes')?.querySelector('textarea')?.value, 'Peler.\nCuire.', 'Corriger : ?v= d’une version d’une AUTRE recette est ignoré — la base est la version courante de cette fiche');
+        eq(etapesDe(editeurX), ['Peler.', 'Cuire.'], 'Corriger : ?v= d’une version d’une AUTRE recette est ignoré — la base est la version courante de cette fiche');
         const editeurS = await renderRecipeEdit({ id: 'rc_simple' }, { kind: 'correction', v: 'rv_simple' }, await ctxDe()); scene.append(editeurS);
-        const fS = champ(editeurS, 'Étapes'); const taS = fS?.querySelector('textarea');
-        eq([taS?.value, taS?.placeholder, fS?.querySelector('small')], ['Peler.\nCuire.', 'Une étape par ligne ou par paragraphe.', null], 'éditeur d’aujourd’hui : sans étape multi-ligne, une étape par ligne, aide actuelle, pas d’aide « par paragraphe »');
-        taS.value = 'Peler.\nCuire.\nServir.'; taS.dispatchEvent(new Event('input', { bubbles: true }));
-        bouton(editeurS, 'Enregistrer une nouvelle version').click();
+        eq(etapesDe(editeurS), ['Peler.', 'Cuire.'], 'L4 : source simple garde deux blocs');
+        bouton(editeurS, 'Ajouter une étape').click();
+        const taS = editeurS.querySelectorAll('[data-role=editeur-etape-texte]')[2]; taS.value = 'Servir.'; taS.dispatchEvent(new Event('input', { bubbles: true }));
+        bouton(editeurS, 'Enregistrer les modifications').click();
         await attendre(async () => (await db.byIndex('recipe_versions', 'recipe_id', 'rc_simple')).length === 2, 'correction simple écrite');
         await tick();
         const neuveS = (await db.byIndex('recipe_versions', 'recipe_id', 'rc_simple')).find((v) => v.id !== 'rv_simple');
@@ -1880,9 +1885,14 @@ export async function runImportCibleTests({ eq, ok }) {
     const interdit = async () => { reseau += 1; throw new Error('aucun appel attendu'); };
     const attendre = async (cond, quoi) => { for (let i = 0; i < 300; i += 1) { if (await cond()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error('attente dépassée (3 s) : ' + quoi); };
     const tick = () => new Promise((r) => setTimeout(r, 0));
-    const bouton = (root, nom) => (root ? [...root.querySelectorAll('button')].find((b) => b.textContent === nom) || null : null);
+    const bouton = (root, nom) => (root ? nom === 'Extraire avec l’assistant IA' ? root.querySelector('[data-role=extraire-editeur]') || [...root.querySelectorAll('button')].find(b=>b.textContent===nom) : [...root.querySelectorAll('button')].find((b) => b.textContent === nom) || null : null);
     const boutons = (root) => (root ? [...root.querySelectorAll('button')].map((b) => b.textContent) : null);
     const champ = (root, libelle) => [...root.querySelectorAll('.field')].find((f) => f.querySelector('span')?.textContent === libelle) || null;
+    const etapesFormulaire = root => [...root.querySelectorAll('[data-role=editeur-etape-texte]')].map(n => n.value);
+    const ingredientsFormulaire = root => [...root.querySelectorAll('[data-role=editeur-ingredient] details p')].map(n => n.textContent);
+    const confirmerEditeur = async nom => { await attendre(() => document.querySelector('dialog[open]'), 'confirmation éditeur'); [...document.querySelector('dialog[open]').querySelectorAll('button')].find(b => b.textContent === nom).click(); };
+    const adopterLectureEditeur = async root => { root.querySelector('[data-role=adopter-lecture-editeur]').click(); await confirmerEditeur('Utiliser cette lecture'); await attendre(() => !root.querySelector('[data-role=adopter-lecture-editeur]'), 'lecture adoptée'); };
+
     const NOW = '2026-10-19T12:00:00.000Z';
     const JETON = 'jeton-t6-sentinelle';
     const SESSION = { access_token: JETON, user: { id: 'u1', email: 'a@exemple.invalid' } };
@@ -2283,7 +2293,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const neuve = async () => (await db.getAll('imports')).find((i) => !avantImports.has(i.id)) || null;
         const edit = await R.renderRecipeEdit({ id: null }, { pages: `${pe1.id},${pe2.id}`, edition: 'ed6', session: ssE.id }, await ctxDe());
         scene.append(edit);
-        const b = bouton(edit, 'Extraire avec l’assistant IA');
+        let b = bouton(edit, 'Extraire avec l’assistant IA');
         eq([b?.disabled, await neuve()], [false, null], 'éditeur : avec des pages et une session, le bouton est allumé ; rien n’est écrit avant le clic');
         b.click(); b.click();
         eq(b.disabled, true, 'éditeur : le bouton s’éteint dès le clic (verrou)');
@@ -2294,11 +2304,13 @@ export async function runImportCibleTests({ eq, ok }) {
         eq([ff.appels[0].options.signal instanceof AbortSignal, JSON.parse(ff.appels[0].options.body).corps.max_tokens], [true, 6000], 'éditeur : l’appel porte un signal (Annuler depuis la section) et max_tokens 6000');
         ff.rendre[0](200, corpsOk(LU));
         await attendre(async () => (await db.get('imports', enVol.id)).status === 'a_verifier' && !b.disabled, 'lecture reçue');
-        const titre = champ(edit, 'Titre original *')?.querySelector('input'); const ings = champ(edit, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea'); const etapes = champ(edit, 'Étapes')?.querySelector('textarea');
-        eq([(await db.get('imports', enVol.id)).resultat?.title, titre?.value, ings?.value, etapes?.value, champ(edit, 'Portions')?.querySelector('input')?.value, ff.appels.length], ['Gratin dauphinois', 'Gratin dauphinois', '1 kg de pommes de terre\n500 ml de crème', 'Trancher.\nCuire 1 h.', '4', 1], 'éditeur : la lecture est écrite dans le journal (a_verifier, resultat) AVANT de remplir le formulaire (titre, ingrédients, étapes, portions) ; UN POST');
+        await adopterLectureEditeur(edit); b = bouton(edit, 'Extraire avec l’assistant IA');
+        const titre = champ(edit, 'Titre original *')?.querySelector('input'); const ings = ingredientsFormulaire(edit); const etapes = etapesFormulaire(edit);
+        eq([(await db.get('imports', enVol.id)).resultat?.title, titre?.value, ings.join('\n'), etapes.join('\n'), champ(edit, 'Portions')?.querySelector('input')?.value, ff.appels.length], ['Gratin dauphinois', 'Gratin dauphinois', '1 kg de pommes de terre\n500 ml de crème', 'Trancher.\nCuire 1 h.', '4', 1], 'éditeur : la lecture est écrite dans le journal (a_verifier, resultat) AVANT de remplir le formulaire (titre, ingrédients, étapes, portions) ; UN POST');
         ok(edit.textContent.includes('Extraction proposée par l’assistant — toutes les lignes sont à vérifier.'), 'éditeur : « Extraction proposée par l’assistant — toutes les lignes sont à vérifier. »');
         // Ronde 1 : un second « Extraire » REPREND la même ligne (aucune ligne neuve), sur les pages de l'éditeur, et la remet en vol ; un second POST.
         b.click();
+        await confirmerEditeur('Relire les pages');
         await attendre(() => ff.appels.length === 2, 'second POST');
         const reprise = await db.get('imports', enVol.id);
         eq([(await db.getAll('imports')).filter((i) => !avantImports.has(i.id)).length, reprise.status, reprise.page_ids, reprise.resultat, JSON.parse(ff.appels[1].options.body).corps.messages[0].content.filter((c) => c.type === 'image').length], [1, 'en_cours', [pe1.id, pe2.id], null, 2], 'éditeur (ronde 1) : un second « Extraire » reprend la MÊME ligne (en_cours, résultat effacé au départ du vol), sur les pages de l’éditeur ; un second POST de deux pages');
@@ -2307,16 +2319,16 @@ export async function runImportCibleTests({ eq, ok }) {
         // ?import= : un nouvel éditeur relit la ligne et préremplit, SANS POST (pages, livre et séance viennent de la ligne).
         const edit2 = await R.renderRecipeEdit({ id: null }, { import: enVol.id }, await ctxDe());
         scene.append(edit2);
-        eq([champ(edit2, 'Titre original *')?.querySelector('input')?.value, champ(edit2, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea')?.value, champ(edit2, 'Étapes')?.querySelector('textarea')?.value, edit2.querySelectorAll('img.page-view').length, ff.appels.length, reseau], ['Gratin dauphinois', '1 kg de pommes de terre\n500 ml de crème', 'Trancher.\nCuire 1 h.', 2, 2, 0], '#/recipes/new?import=<imp> : titre, ingrédients et étapes préremplis depuis le résultat, les deux pages de la ligne, sans POST');
+        eq([champ(edit2, 'Titre original *')?.querySelector('input')?.value, ingredientsFormulaire(edit2).join('\n'), etapesFormulaire(edit2).join('\n'), edit2.querySelectorAll('img.page-view').length, ff.appels.length, reseau], ['Gratin dauphinois', '1 kg de pommes de terre\n500 ml de crème', 'Trancher.\nCuire 1 h.', 2, 2, 0], '#/recipes/new?import=<imp> : titre, ingrédients et étapes préremplis depuis le résultat, les deux pages de la ligne, sans POST');
         // L'enregistrement ferme la lecture : enregistre, dans la MÊME transaction que la recette.
         const vus = []; const capture = db.onMutate; db.onMutate = (m) => { vus.push(Object.keys(m.puts).sort()); return capture ? capture(m) : {}; };
         try {
-          bouton(edit2, 'Enregistrer la recette').click();
+          bouton(edit2, 'Enregistrer les modifications').click();
           await attendre(async () => (await db.get('imports', enVol.id)).status === 'enregistre', 'enregistrée');
         } finally { db.onMutate = capture; history.replaceState(null, '', adresseAvant); }
         const rec = (await db.getAll('recipes')).find((r) => r.original_title === 'Gratin dauphinois');
         const ver = rec ? await db.get('recipe_versions', rec.current_version_id) : null;
-        eq([!!rec, ver?.provenance?.generated_by, ver?.provenance?.model, ver?.provenance?.import_id, (await db.get('imports', enVol.id)).reponse_brute, typeof (await db.get('imports', enVol.id)).finished_at, vus[0], (await db.get('scan_sessions', ssE.id)).recipe_ids.includes(rec?.id)], [true, 'ai', 'claude-x', enVol.id, null, 'string', ['imports', 'recipe_versions', 'recipes', 'scan_sessions', 'source_pages'], true], 'éditeur : « Enregistrer la recette » écrit la recette, la séance (recipe_ids) ET passe la lecture à enregistre (reponse_brute null) dans UNE transaction (I-10, ronde 1) ; la version dit l’assistant, le modèle du serveur et la lecture (import_id)');
+        eq([!!rec, ver?.provenance?.generated_by, ver?.provenance?.model, ver?.provenance?.import_id, (await db.get('imports', enVol.id)).reponse_brute, typeof (await db.get('imports', enVol.id)).finished_at, vus.find(k=>k.includes('recipes')), (await db.get('scan_sessions', ssE.id)).recipe_ids.includes(rec?.id)], [true, 'ai', 'claude-x', enVol.id, null, 'string', ['imports', 'recipe_versions', 'recipes', 'scan_sessions', 'source_pages', 'sync_state'], true], 'éditeur : « Enregistrer la recette » écrit la recette, la séance (recipe_ids) ET passe la lecture à enregistre (reponse_brute null) dans UNE transaction (I-10, ronde 1) ; la version dit l’assistant, le modèle du serveur et la lecture (import_id)');
         // Un résultat hostile relu du journal est REVALIDÉ (I-1) : echec(illisible), rien de prérempli.
         const hostile = await repo.ouvrirImport({ kind: 'recette', edition_id: 'ed6', scan_session_id: ssE.id, page_ids: [pe1.id] });
         await db.put('imports', { ...(await db.get('imports', hostile.id)), status: 'a_verifier', resultat: { ...LU, title: 'HOSTILE-' + 'x'.repeat(201) } });
@@ -2336,7 +2348,7 @@ export async function runImportCibleTests({ eq, ok }) {
         eq(champ(edit4, 'Titre original *')?.querySelector('input')?.value, 'Gratin payé', 'éditeur ?import= : la lecture reçue est posée dans le formulaire');
         window.dispatchEvent(new Event('offline'));
         try {
-          bouton(edit4, 'Extraire avec l’assistant IA').click();
+          bouton(edit4, 'Extraire avec l’assistant IA').click(); await confirmerEditeur('Relire les pages');
           await attendre(() => edit4.textContent.includes('Tu es hors ligne.') && !bouton(edit4, 'Extraire avec l’assistant IA').disabled, 'refus hors ligne (reprise)');
           bouton(editNeuf, 'Extraire avec l’assistant IA').click();
           await attendre(() => editNeuf.textContent.includes('Tu es hors ligne.') && !bouton(editNeuf, 'Extraire avec l’assistant IA').disabled, 'refus hors ligne (neuve)');
@@ -2347,7 +2359,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const venue = await ouvrirLue({ page_ids: ['pg_sans_octets'], device_id: 'dev-iphone', resultat: { ...LU, title: 'Venue d’ailleurs', printed_page: 95 } });
         const edit5 = await R.renderRecipeEdit({ id: null }, { import: venue.id }, await ctxDe());
         scene.append(edit5);
-        bouton(edit5, 'Extraire avec l’assistant IA').click();
+        bouton(edit5, 'Extraire avec l’assistant IA').click(); await confirmerEditeur('Relire les pages');
         await attendre(() => edit5.textContent.includes('Les photos de cette recette ne sont pas sur cet appareil.'), 'refus octets absents');
         eq([await db.get('imports', venue.id), await db.count('imports'), ff.appels.length - postsAvant], [venue, nImports + 1, 0], 'éditeur (ronde 1, Critical) : octets absents → la lecture reçue d’un autre appareil reste intacte, aucune ligne neuve, aucun POST');
         // I-2 (ronde 1) : ?import= d'un import CIBLÉ (recipe_id posé) n'est jamais repris par l'éditeur d'une recette NEUVE — rien de prérempli, aucune page,
@@ -2367,7 +2379,7 @@ export async function runImportCibleTests({ eq, ok }) {
         scene.append(edit8);
         ok(edit8.textContent.includes('page possiblement manquante'), '?import= (ronde 1) : « page possiblement manquante » est montrée avec la lecture');
         try {
-          bouton(edit8, 'Enregistrer la recette').click();
+          bouton(edit8, 'Enregistrer les modifications').click();
           await attendre(async () => (await db.get('imports', longue.id)).status === 'enregistre', 'lecture longue enregistrée');
         } finally { history.replaceState(null, '', adresseAvant); }
         const recL = (await db.getAll('recipes')).find((r) => r.original_title === 'Gratin long');
@@ -2380,8 +2392,8 @@ export async function runImportCibleTests({ eq, ok }) {
         scene.append(edit9);
         await db.put('imports', { ...(await db.get('imports', r1.id)), started_at: new Date().toISOString(), resultat: { ...LU, title: 'Lecture R2', printed_page: 93 } });
         try {
-          bouton(edit9, 'Enregistrer la recette').click();
-          await attendre(async () => (await db.getAll('recipes')).some((r) => r.original_title === 'Lecture R1'), 'R1 enregistrée');
+          bouton(edit9, 'Enregistrer les modifications').click();
+          await attendre(() => edit9.querySelector('[data-role=erreur-enregistrement]')?.textContent, 'R1 refusée et conservée');
           await tick(); await tick();
         } finally { history.replaceState(null, '', adresseAvant); }
         eq([(await db.get('imports', r1.id)).status, (await db.get('imports', r1.id)).resultat?.title], ['a_verifier', 'Lecture R2'], 'Enregistrer (ronde 1, T4-R2) : la ligne a reçu une autre lecture (R2) depuis le formulaire → R2 n’est pas close, elle reste à reprendre');
@@ -2397,15 +2409,15 @@ export async function runImportCibleTests({ eq, ok }) {
         if (toastEl()) toastEl().textContent = '';
         const seanceAvant = await db.get('scan_sessions', ssE.id);
         try {
-          bouton(edit10, 'Enregistrer la recette').click();
-          await attendre(() => toastEl()?.textContent === 'La recette n’a pas pu être enregistrée. Réessaie.', 'clôture refusée dite');
+          bouton(edit10, 'Enregistrer les modifications').click();
+          await attendre(() => edit10.querySelector('[data-role=erreur-enregistrement]')?.textContent, 'clôture refusée dite');
         } finally { db.get = lireFiche; }
         eq([(await db.getAll('recipes')).some((r) => r.original_title === 'Course'), (await db.get('imports', course.id)).status, (await db.get('scan_sessions', ssE.id)).recipe_ids], [false, 'ignore', seanceAvant.recipe_ids], 'Enregistrer (ronde 1) : clôture refusée → aucune recette, aucune séance écrite, la ligne reste ignorée, la phrase est dite');
         try {
-          bouton(edit10, 'Enregistrer la recette').click();
-          await attendre(async () => (await db.getAll('recipes')).some((r) => r.original_title === 'Course'), 'second Enregistrer');
+          bouton(edit10, 'Enregistrer les modifications').click();
+          await edit10.flushEditeur(); await tick();
         } finally { history.replaceState(null, '', adresseAvant); }
-        eq((await db.get('imports', course.id)).status, 'ignore', 'Enregistrer (ronde 1) : le second clic écrit la recette SANS la ligne, qui reste ignorée');
+        eq([(await db.get('imports', course.id)).status, (await db.getAll('recipes')).some(r=>r.original_title==='Course')], ['ignore',false], 'L4 : deuxième clic conserve refus du journal ignoré, sans détachement ni recette recréée');
         // La revalidation (I-1) ne marque illisible QUE la lecture relue (T4-R2, ronde 1) : une lecture valide R2 arrivée entre la lecture hostile et la
         // transaction n'est jamais effacée.
         const valide = await ouvrirLue({ resultat: { ...LU, title: 'Valide R2', printed_page: 96 } });
@@ -2418,10 +2430,10 @@ export async function runImportCibleTests({ eq, ok }) {
         const multi = await ouvrirLue({ resultat: { ...LU, title: 'Gratin en deux temps', printed_page: 98, steps: [{ text: 'Pâte :\nMélanger farine et beurre.' }, { text: 'Cuire 20 min.' }] } });
         const edit12 = await R.renderRecipeEdit({ id: null }, { import: multi.id }, await ctxDe());
         scene.append(edit12);
-        const ch12 = champ(edit12, 'Étapes'); const ta12 = ch12?.querySelector('textarea');
-        eq([ta12?.value, ta12?.placeholder, ch12?.querySelector('small')?.textContent, edit12.textContent.includes('2 étape(s)')], ['Pâte :\nMélanger farine et beurre.\n\nCuire 20 min.', 'Une étape par paragraphe (ligne vide entre deux étapes).', 'Une étape par paragraphe (ligne vide entre deux étapes).', true], '?import= (vague finale, Important) : une étape lue sur deux lignes → zone jointe par une ligne vide, aide et placeholder « par paragraphe », l’aperçu compte 2 étapes');
+        const ta12 = etapesFormulaire(edit12);
+        eq([ta12, edit12.querySelectorAll('[data-role=editeur-etape]').length], [['Pâte :\nMélanger farine et beurre.', 'Cuire 20 min.'], 2], '?import= (vague finale, Important) : une étape lue sur deux lignes → zone jointe par une ligne vide, aide et placeholder « par paragraphe », l’aperçu compte 2 étapes');
         try {
-          bouton(edit12, 'Enregistrer la recette').click();
+          bouton(edit12, 'Enregistrer les modifications').click();
           await attendre(async () => (await db.get('imports', multi.id)).status === 'enregistre', 'lecture multi-lignes enregistrée');
         } finally { history.replaceState(null, '', adresseAvant); }
         const rec12 = (await db.getAll('recipes')).find((r) => r.original_title === 'Gratin en deux temps');
@@ -2434,7 +2446,7 @@ export async function runImportCibleTests({ eq, ok }) {
         scene.append(edit13);
         ok(edit13.textContent.includes('lecture incomplète'), '?import= (vague finale) : « lecture incomplète » est montrée avec la lecture');
         try {
-          bouton(edit13, 'Enregistrer la recette').click();
+          bouton(edit13, 'Enregistrer les modifications').click();
           await attendre(async () => (await db.get('imports', incomplete.id)).status === 'enregistre', 'lecture incomplète enregistrée');
         } finally { history.replaceState(null, '', adresseAvant); }
         const rec13 = (await db.getAll('recipes')).find((r) => r.original_title === 'Gratin incomplet');
@@ -2480,7 +2492,7 @@ export async function runImportCibleTests({ eq, ok }) {
     const localeAvant = getUiLocale(); setUiLocale('fr'); // des textes français sont affirmés
     const scene = document.createElement('div'); scene.style.cssText = 'position:absolute;left:-10000px;top:0;width:900px'; document.body.append(scene);
     const attendre = async (cond, quoi) => { for (let i = 0; i < 300; i += 1) { if (await cond()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error('attente dépassée (3 s) : ' + quoi); };
-    const bouton = (root, nom) => (root ? [...root.querySelectorAll('button')].find((b) => b.textContent === nom) || null : null);
+    const bouton = (root, nom) => (root ? nom === 'Extraire avec l’assistant IA' ? root.querySelector('[data-role=extraire-editeur]') || [...root.querySelectorAll('button')].find(b=>b.textContent===nom) : [...root.querySelectorAll('button')].find((b) => b.textContent === nom) || null : null);
     const boutons = (root) => (root ? [...root.querySelectorAll('button')].map((b) => b.textContent) : null);
     const NOW = '2026-10-19T12:00:00.000Z';
     const JETON = 'jeton-b6-sentinelle';

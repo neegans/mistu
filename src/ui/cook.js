@@ -55,7 +55,7 @@ export async function renderCook(params, query, ctx, deps = {}) {
   const nettoyages = [];
   const nettoyer = () => { for (const photo of area.querySelectorAll('[data-role="photo-visible"]')) photo.dispose?.(); for (const fn of nettoyages.splice(0)) fn(); };
   root.dispose = () => { dispose = true; nettoyer(); };
-  const title = items.length === 1 ? (items[0].recipe.original_title || items[0].recipe.display_title) : t('Repas — {n} recettes', { n: items.length });
+  const title = items.length === 1 ? (items[0].recipe.display_title || items[0].recipe.original_title) : t('Repas — {n} recettes', { n: items.length });
   const titre = el('h1', null, title);
   const fiche = el('a', { class: 'btn' }, t('Fiche'));
   const etatSelection = el('div', { role: 'status', class: 'status warn', hidden: true });

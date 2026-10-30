@@ -473,7 +473,7 @@ export async function runCarnetTests({ eq, ok }) {
         const triInitial = titres(tri);
         const champTri = tri.querySelector('.filtre-recettes input[type="search"]'); champTri.value = 'Renommé'; champTri.dispatchEvent(new Event('input', { bubbles: true }));
         try { await attendre(() => titres(tri).length === 1, 'filtre « Renommé »'); } catch { /* lu tel quel */ }
-        eq([triInitial, titres(tri)], [['Plat rR1', 'Plat rR4', 'Plat rR3', 'Plat rR2'], ['Plat rR3']],
+        eq([triInitial, titres(tri)], [['Plat rR1', 'Plat rR4', 'Gâteau renommé', 'Plat rR2'], ['Gâteau renommé']],
           'tri de la grille : updated_at, sinon created_at (R1, créée le 25, d’abord), sans horodatage en dernier (R2) ; le filtre trouve un titre renommé (display_title), casse ignorée');
         // Vague finale (constat 4) : un filtre (ou une puce) qui ne retient rien le DIT — comme « Aucun livre ne correspond. » sous Livres —, jamais une grille blanche
         // qu'on ne distingue pas d'un chargement ; le message part au filtre suivant qui retient des cartes.
@@ -1158,8 +1158,8 @@ export async function runCarnetTests({ eq, ok }) {
       const renommee = B.ligneCompacte(recette4('r é/1', { original_title: 'Ancien titre', display_title: 'Nouveau titre' }));
       const sansTitre = B.ligneCompacte(recette4('rT', { original_title: '' }));
       eq([renommee.querySelector('a.titre')?.textContent, renommee.querySelector('a.titre')?.getAttribute('href'), renommee.dataset.recette, sansTitre.querySelector('a.titre')?.textContent],
-        ['Ancien titre', '#/recipes/r%20%C3%A9%2F1', 'r é/1', 'Sans titre'],
-        'ligneCompacte (ronde 1) : le titre original précède le titre personnalisé ; un titre vide devient « Sans titre » ; l’href du titre encode l’identifiant ; li[data-recette] = l’identifiant');
+        ['Nouveau titre', '#/recipes/r%20%C3%A9%2F1', 'r é/1', 'Sans titre'],
+        'ligneCompacte L4 : le titre personnalisé est principal ; un titre vide devient « Sans titre » ; l’href du titre encode l’identifiant ; li[data-recette] = l’identifiant');
       // Vague finale (constats 5 et 10) : la page imprimée de la ligne suit la règle du badge (pageAffichable : un entier de 1 à 9999 — une fiche reçue ou restaurée
       // peut porter n'importe quoi) ; elle est dite UNE fois, par « p. N » (le badge court ne la répète pas).
       const pageDe = (p) => { const li = B.ligneCompacte(recette4('rP', { availability: 'reference_only', printed_page: p })); return [li.querySelector('span.muted')?.textContent ?? null, li.querySelector('[data-role="etat-recette"] > .badge')?.textContent]; };
@@ -1232,6 +1232,7 @@ export async function runCarnetTests({ eq, ok }) {
       // fenêtre de 1280 px du lanceur, quelle que soit la largeur de l'hôte : serif faux, filet 0px, deux pistes à 375 et 800.
       const mesurer = async (largeur) => {
         const f = document.createElement('iframe'); f.setAttribute('aria-hidden', 'true'); f.setAttribute('title', 'scène de mesure');
+        let fiche = null;
         f.style.cssText = `position:absolute;left:-12000px;top:0;width:${largeur}px;height:900px;border:0`;
         document.body.append(f);
         try {
@@ -1240,7 +1241,7 @@ export async function runCarnetTests({ eq, ok }) {
           const lien = d.createElement('link'); lien.rel = 'stylesheet'; lien.href = new URL('../styles.css?v=' + Date.now(), location.href).href;
           await new Promise((r) => { lien.onload = r; lien.onerror = r; d.head.append(lien); });
           if (w.innerWidth !== largeur) throw new Error(`cadre ${largeur} : innerWidth ${w.innerWidth}`);
-          const fiche = await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db), { matchMedia: mediaFactice(largeur >= 900) });
+          fiche = await renderBook({ id: 'ed4' }, {presentation:'liste'}, await ctx4(db), { matchMedia: mediaFactice(largeur >= 900) });
           d.querySelector('main').append(fiche); // adopté par le document du cadre : SA feuille s'applique
           const S = (n) => w.getComputedStyle(n);
           const colonnes = fiche.querySelector('.two-col.livre');
@@ -1253,7 +1254,7 @@ export async function runCarnetTests({ eq, ok }) {
             couverture: Math.round(fiche.querySelector('.two-col.livre > [data-role="colonne-livre"] > .cover-wrap').getBoundingClientRect().width), // EI-T4-2
             // Ronde 1 (constats 4 et 10, I-UI-4) : la cible de chaque titre (le seul geste qui ouvre la recette depuis la liste), la plus petite hauteur et largeur.
             cible: (() => { const r = [...fiche.querySelectorAll('ul.liste-compacte a.titre')].map((a) => a.getBoundingClientRect()); return [Math.round(Math.min(...r.map((x) => x.height))), Math.round(Math.min(...r.map((x) => x.width))), r.length]; })() };
-        } finally { f.remove(); }
+        } finally { fiche?.dispose?.(); fiche?.remove(); f.remove(); }
       };
       const [l1100, l800, l375] = [await mesurer(1100), await mesurer(800), await mesurer(375)];
       eq([l1100.gauche, l1100.coteACote, l1100.grille, l1100.serif, l1100.souligne, l1100.vignette, l1100.filet, l1100.puce], [200, true, 2, true, 'none', [78, 78], '1px', 'none'],
@@ -1631,7 +1632,7 @@ export async function runCarnetTests({ eq, ok }) {
   // ===== Tâche 6 — filets du lot (spec § 5, § 7 « Tests neufs » : filets i18n ; D-UI-4, D-UI-10 : chaînes retirées ; I-UI-4 : règles neuves)
   try {
     // S4 (lot UX) : une lecture de source qui échoue est un ROUGE nommé, jamais un source vide lu comme vert (V-F13 du lot web).
-    const lireT6 = async (chemin) => { const r = await fetch(new URL(chemin, import.meta.url), { cache: 'no-store' }); if (!r.ok) throw new Error(`${chemin} : HTTP ${r.status}`); const s = await r.text(); if (s.length < 300) throw new Error(`${chemin} : source trop court (${s.length})`); return s; };
+    const lireT6 = async (chemin) => { const r = await fetch(new URL(chemin, import.meta.url), { cache: 'no-store' }); if (!r.ok) throw new Error(`${chemin} : HTTP ${r.status}`); const s = await r.text(); if (!s.trim() || /^\s*</.test(s)) throw new Error(`${chemin} : source vide ou page HTML inattendue`); return s; };
     // Ronde 1 (constat 20) : t('…') ET t("…") — un t() entre guillemets doubles n'échappe plus ni à l'inventaire ni aux chaînes retirées. Vague finale (constat
     // 13) : la lecture des clés est UNE définition, clesT de tests/ajouter.js (F13 la lit aussi), qui voit en plus t(`…`) sans ${…} ; son témoin est au bloc F13.
     // Ronde 1 (constats 10 et 20) : le lecteur de T1-R1 (chaînes '…', "…", `…` sautées ; commentaires // et /* */ retirés), recopié ici (bloc autonome) —

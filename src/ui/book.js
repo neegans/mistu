@@ -1,5 +1,6 @@
 // Fiche d'un livre (édition possédée) : en-tête (titre, sous-titre, deux menus d'ajout), couverture et sommaire à gauche, les recettes à droite, pages sources en bas.
 import { renderListeBibliotheque, texteCompteurs } from './bibliotheque-liste.js';
+import { renderLivreEditeur } from './livre-editeur.js';
 import { projeterBibliotheque } from '../domain/bibliotheque.js';
 import { actionsLivre, boutonsActions, menuActions } from './actions-contenu.js';
 import { lireContexteListe, porteeNavigation, retourConnu, memoriserListe, capturerVue, restaurerVue } from './navigation-contexte.js';
@@ -82,8 +83,8 @@ export function ligneCompacte(r, { fichier = null, version = null, photo = null,
   return el('li', { class: 'recette-ligne', dataset: { recette: r.id } },
     el('div', { class: 'recette-ligne-entete' }, vignette,
       el('div', { class: 'recette-ligne-texte' },
-        el('a', { class: 'titre', href: `#/recipes/${id}` }, r.original_title || r.display_title || t('Sans titre')),
-        r.display_title && r.display_title !== r.original_title ? el('small', { class: 'muted' }, r.display_title) : null,
+        el('a', { class: 'titre', href: `#/recipes/${id}` }, r.display_title || r.original_title || t('Sans titre')),
+        r.original_title && r.display_title && r.display_title !== r.original_title ? el('small', { class: 'muted' }, t('Titre original : {titre}', { titre: r.original_title })) : null,
         el('div', { class: 'row' },
           plagesLisibles(r).length ? el('span', { class: 'muted', dataset: { role: 'pages' } }, `${t('p.')} ${textePlages(plagesLisibles(r))}`) : null,
           sectionLue ? el('span', { class: 'chip neutral', dataset: { role: 'section' } }, sectionLue) : null))),
@@ -135,9 +136,13 @@ const parSeancePuisPosition = (ctx) => {
 
 export async function renderBook(params, query, ctx, deps = {}) {
   const edition = ctx.editionsById.get(params.id);
-  if (!edition) return el('div', { class: 'card' }, t('Livre introuvable.'));
+  if (!edition) return query.draft ? renderLivreEditeur({edition:null,book:null,ctx,query,deps}) : el('div', { class: 'card' }, t('Livre introuvable.'));
   const book = ctx.booksById.get(edition.book_id) || { title: t('Sans titre') };
-  if(lireCycleEdition(edition).etat!=='active')return livreConserve(edition,book,ctx,deps);
+  if(lireCycleEdition(edition).etat!=='active'){
+    const conserve=await livreConserve(edition,book,ctx,deps);
+    if(query.draft){const editeur=await renderLivreEditeur({book,edition,ctx,query,deps});conserve.append(editeur);conserve.dispose=()=>editeur.dispose?.();}
+    return conserve;
+  }
   // R-UX-10 : un seul fait (« on arrive après création »), donc une seule condition — le MODÈLE décide, et la même
   // décision sert à poser le panneau plus bas. S16 : une arrivée après création n'est pas une ouverture volontaire.
   const accueil = accueilLivreModel({ nouveau: query.nouveau });
@@ -316,69 +321,13 @@ export async function renderBook(params, query, ctx, deps = {}) {
   gauche.append(section(t('Couverture'), zoneCouv)); // reste .card : un panneau d'action (D-UI-8)
 
   // Métadonnées (le details d'avant, inchangé ; il passe dans la colonne de gauche, avant le Sommaire : D-UI-7)
-  const meta = { title: book.title, author: book.author || '', isbn: edition.isbn || '', publisher: edition.publisher || '', year: edition.year || '', language: edition.language || 'fr', convention: edition.unit_convention_id || '', cuisines: [...(book.cuisines || [])], tags: tagsDe(book.tags) }; // S2 : tagsDe rend toujours un tableau neuf
-  const valeursMeta = () => ({ title: meta.title.trim() || book.title, author: meta.author.trim(), isbn: meta.isbn.trim() || null,
-    publisher: meta.publisher.trim() || null, year: meta.year ? parseInt(meta.year, 10) || null : null, language: meta.language,
-    convention: meta.convention || null, cuisines: [...meta.cuisines], tags: [...meta.tags] });
-  const metaInitiale = valeursMeta();
-  const captureMeta = capturerEdition(repo,edition,{ctx}).then(contexte=>({contexte}),erreur=>({erreur}));
-  const inp = (k, type = 'text') => el('input', { type, value: meta[k], ...(k==='title'&&query.panel==='modifier'?{dataset:{navOuverture:'focus'}}:{}), onInput: (e) => { meta[k] = e.target.value; } });
-  const metadonnees=el('details', { class: 'card',open:query.panel==='modifier',dataset:{role:'modifier-livre'} }, el('summary', null, el('strong', null, t('Métadonnées et convention'))),
-    el('div', { class: 'two-col', style: { marginTop: '.8rem' } },
-      field(t('Titre'), inp('title')), field(t('Auteur / chef'), inp('author')), field(t('ISBN'), inp('isbn')), field(t('Éditeur'), inp('publisher')), field(t('Année'), inp('year', 'number')),
-      field(t('Langue'), select([{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }, { value: 'other', label: t('Autre') }], meta.language, (v) => { meta.language = v; })),
-      // R-UX-8 : les puces ne vont JAMAIS dans un label — field() rend un <label>, et un clic sur « Cuisines »
-      // activerait alors la première puce. Même habillage (.field), sans l'enveloppe qui vole le clic.
-      el('div', { class: 'field' }, el('span', null, t('Cuisines')), (() => {
-        const box = el('div', null);
-        const dessiner = () => box.replaceChildren(renderPuces(pucesModel({ choisies: meta.cuisines, existantes: cuisinesExistantes(ctx) }), {
-          basculer: (v) => { meta.cuisines = basculerPuce(meta.cuisines, v); dessiner(); },
-          ajouter: (v) => { const a = ajouterPuce(meta.cuisines, v); if (a !== meta.cuisines) { meta.cuisines = a; dessiner(); } },
-        }));
-        dessiner();
-        return box;
-      })()),
-      el('div', { class: 'field' }, el('span', null, t('Mots-clés')), (() => {
-        const box = el('div', null);
-        const dessiner = () => box.replaceChildren(renderPuces(pucesModel({ choisies: meta.tags, existantes: motsClesExistants(ctx), graine: [] }), {
-          basculer: (v) => { meta.tags = basculerPuce(meta.tags, v); dessiner(); },
-          ajouter: (v) => { const a = ajouterPuce(meta.tags, v); if (a !== meta.tags) { meta.tags = a; dessiner(); } },
-        }, { libelleAutre: t('Autre mot-clé') }));
-        dessiner();
-        return box;
-      })()),
-      field(t('Convention de mesure'), select([{ value: '', label: t('Non confirmée') }, ...listConventions().map((c) => ({ value: c.id, label: c.labels.fr }))], meta.convention, (v) => { meta.convention = v; }), t('Ordre de décision : équivalences imprimées → convention décrite dans le livre → convention confirmée ici.'))),
-    el('div', { class: 'row', style: { marginTop: '.8rem' } },
-      el('button', { class: 'btn primary', onClick: async () => {
-        // I2 : champs effectivement modifiés depuis le rendu seulement. Les autres valeurs et leurs sources
-        // sont relues dans la même transaction, y compris une source photo ou une note ajoutée entre-temps.
-        const valeurs = valeursMeta();
-        const modifies = Object.keys(valeurs).filter((k) => JSON.stringify(valeurs[k]) !== JSON.stringify(metaInitiale[k]));
-        const fusion = (champs) => (courant) => {
-          if (!courant) throw new Error('fiche_absente');
-          const patch = {}, provenance = {};
-          for (const k of champs.filter((champ) => modifies.includes(champ))) {
-            const champ = k === 'convention' ? 'unit_convention_id' : k;
-            if (JSON.stringify(courant[champ] ?? null) === JSON.stringify(valeurs[k])) continue;
-            patch[champ] = valeurs[k];
-            if (k === 'convention') patch.convention_evidence = valeurs[k] ? 'confirmed_by_user' : null;
-            provenance[k] = { origin: 'manual', retrieved_at: null, sources: [], uncertain: false, justification: '' };
-          }
-          return { ...courant, ...patch, ...(Object.keys(provenance).length ? { metadata_provenance: { ...courant.metadata_provenance, ...provenance } } : {}) };
-        };
-        const champsLivre = ['title', 'author', 'cuisines', 'tags'], champsEdition = ['isbn', 'publisher', 'year', 'language', 'convention'];
-        const conditions = {};
-        if (champsLivre.some((k) => modifies.includes(k))) conditions.books = [{ key: book.id, fusion: fusion(champsLivre) }];
-        if (champsEdition.some((k) => modifies.includes(k))) conditions.book_editions = [{ key: edition.id, fusion: fusion(champsEdition) }];
-        try {
-          const capture=await captureMeta;if(capture.erreur)throw capture.erreur;
-          if (Object.keys(conditions).length) { await repo.saveBatch({}, { conditions,editions:[capture.contexte] }); toast(t('Enregistré')); }
-          refresh();
-        }
-        catch { toast(t('Le livre n’a pas pu être enregistré. Réessaie.')); }
-      } }, t('Enregistrer')),
-      pref?.hidden ? el('button', { class: 'btn', onClick: async () => { const contexte=await capturerEdition(repo,edition,{ctx}); await repo.save('rediscovery_prefs', { ...pref, hidden: false }, {editions:[contexte]}); toast(t('Livre de nouveau proposé dans Redécouvrir')); refresh(); } }, t('Réafficher dans Redécouvrir')) : null));
+  const metadonnees = await renderLivreEditeur({book,edition,ctx,query,deps});
   gauche.append(metadonnees);
+  root.dispose = () => metadonnees.dispose?.();
+  root.flushEditeur = () => metadonnees.flushEditeur?.();
+  root.etatEditeur = () => metadonnees.etatEditeur?.();
+  if (pref?.hidden) gauche.append(el('button', { class: 'btn', onClick: async () => { const contexte=await capturerEdition(repo,edition,{ctx}); await repo.save('rediscovery_prefs', { ...pref, hidden: false }, {editions:[contexte]}); toast(t('Livre de nouveau proposé dans Redécouvrir')); refresh(); } }, t('Réafficher dans Redécouvrir')));
+
 
 
   // D-UI-7 : UNE lecture des octets des pages (vignettesDePages, le motif du lot G) ; les pages d'index font le « Sommaire » (gauche, numérotées séance par

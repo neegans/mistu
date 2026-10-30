@@ -3678,3 +3678,16 @@ Publication en préparation ; L4–L10 etE1 restent à construire.
 Publication L3 vérifiée : codeea25232, Pages29oct23:05:19UTC ;44fichiers publics identiques, navigateur8547/8547,
 parcours publics25+16mesures et rechargement hors ligne avec photo/note, quatre modules en cache unique0.25.0-1.
 L4 reprend après cette réception ; L4–L10 etE1 ne sont pas annoncés terminés.
+
+
+### L4 du plan directeur — éditeurs et brouillons durables (29 octobre 2026)
+
+Réception locale de0.26.0 sur `l4-editeurs-brouillons`, base9ecf826, contratde858f9.
+[Spec](docs/superpowers/specs/2026-10-29-l4-editeurs-brouillons-design.md), [rapport](docs/superpowers/plans/2026-10-29-l4-editeurs-brouillons.md).
+Formulaire recette en cinq sections, source côte à côte/bascule mobile, étapes multiligne et lignes structurées ; livre séparant champs partagés/édition.
+Brouillons locaux sous sync_state, bornes2Mio/8Mio/32 saisies/128 reçus ; conservation confirmée, reprise/comparaison volontaires, copies de conflit et sorties protégées.
+Publication contenu/outbox/journal exact/reçu en une transaction, réessai idempotent ; métadonnées seules sans nouvelle version, originaux et lignes intactes préservés.
+Relecture payée conservée avant affichage, sélection de source/compte/cycles gardée ; aucun journal adopté automatiquement. Titres personnalisés principaux et source_text recalculé seulement pour les lignes culinaires corrigées.
+Archive3 et DB6 inchangées, aucun SQL ; remplacement change l’époque locale atomiquement, brouillons hors archive/synchronisation.
+**8880/8880** navigateur, épingle8879 (+333), Node232/232, générateur0, syntaxe60/diff propres. Réception Chrome28+12 mesures, deux onglets, quota/reprise/hors ligne, dix modules en cache0.26.0-1.
+Pas d’appareil physique iPhone/Safari ni compte privé/appel assistant réel. Limites de fermeture avant confirmation et d’historique étranger précisées au rapport. Publication autorisée par la poursuite globale ; son reçu public sera ajouté après vérification. L5–L10/E1 restent à réaliser.

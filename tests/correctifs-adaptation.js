@@ -81,13 +81,13 @@ export async function runCorrectifsAdaptationTests({eq,ok}) {
       const bouton=ed.querySelector('[data-role=reprendre-source-sans-thermomix]');ok(!!bouton,'Correctif adaptation : geste explicite pour reprendre les étapes source');if(!bouton)return;
       if(!mutation){const resume=[...ed.querySelectorAll('label')].find(n=>n.textContent.startsWith('Résumé des changements'))?.querySelector('textarea');resume.value='Adaptation au TM7 avec une correction personnelle.';resume.dispatchEvent(new Event('input',{bubbles:true}));}
       bouton.click();
-      const champ=[...ed.querySelectorAll('label')].find(n=>n.textContent.startsWith('Étapes'))?.querySelector('textarea');
+      const champ=ed.querySelector('[data-role=editeur-etape-texte]');
       eq(champ?.value,f.original.steps[0].text,'Correctif adaptation : anciens réglages remplacés dans le formulaire à relire');
       if(mutation==='source')await db.put('recipe_versions',{...avant,steps:[{id:'s',text:'Source changée ailleurs'}]},{origin:'remote'});
       if(mutation==='compte')await db.put('sync_state',{key:'user_id',value:'autre'},{origin:'remote'});
       if(mutation==='cycle')await db.put('recipes',{...await repo.get('recipes',f.recipe.id),lifecycle_id:'retiree',trashed_at:at},{origin:'remote'});
       const count=(await repo.all('recipe_versions')).length;
-      [...ed.querySelectorAll('button')].find(b=>b.textContent==='Enregistrer une nouvelle version').click();
+      [...ed.querySelectorAll('button')].find(b=>b.textContent==='Enregistrer les modifications').click();
       await attendre(async()=> (await repo.all('recipe_versions')).length>count||!ed.querySelector('[data-role=erreur-enregistrement]').hidden);
       if(mutation) {
         eq((await repo.all('recipe_versions')).length,count,'Correctif adaptation : modification '+mutation+' refuse toute création');
@@ -109,7 +109,7 @@ export async function runCorrectifsAdaptationTests({eq,ok}) {
         eq(await repo.get('recipe_versions',f.original.id),avant,'Correctif adaptation : original intact');
         eq(await repo.get('recipe_versions',f.version.id),parente,'Correctif adaptation : document invalidé parent intact');
       }
-    }finally{ed.remove();location.hash=ancienHash;}
+    }finally{ed.dispose?.();ed.remove();location.hash=ancienHash;}
   }));
 
   await run('Correction TM garde la version originale concurrente',()=>withRepo(async(repo)=>{
@@ -121,13 +121,13 @@ export async function runCorrectifsAdaptationTests({eq,ok}) {
       const suivante={...f.original,id:'correction-concurrente',kind:'correction',parent_version_id:f.original.id,steps:[{id:'nouvelle',text:'Nouvelle correction originale.'}]};
       const relue={...await repo.get('recipes',f.recipe.id),current_version_id:suivante.id,availability:'partial',verification_state:'to_verify',ingredient_ids:['nouvel-ingredient']};
       await repo.saveBatch({recipes:[relue],recipe_versions:[suivante]});
-      [...ed.querySelectorAll('button')].find(b=>b.textContent==='Enregistrer une nouvelle version').click();
+      [...ed.querySelectorAll('button')].find(b=>b.textContent==='Enregistrer les modifications').click();
       await attendre(async()=>(await repo.all('recipe_versions')).length>3||!ed.querySelector('[data-role=erreur-enregistrement]').hidden);
       const apres=await repo.get('recipes',f.recipe.id);
       eq(apres.current_version_id,suivante.id,'Correctif adaptation : originale courante concurrente conservée');
       eq([apres.availability,apres.verification_state,apres.ingredient_ids],[relue.availability,relue.verification_state,relue.ingredient_ids],'Correctif adaptation : métadonnées de l’originale concurrente conservées');
       eq((await repo.all('recipe_versions')).length,4,'Correctif adaptation : version personnelle créée sans remplacer l’originale');
-    }finally{ed.remove();location.hash=ancienHash;}
+    }finally{ed.dispose?.();ed.remove();location.hash=ancienHash;}
   }));
 
 }

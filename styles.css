@@ -636,3 +636,47 @@ dialog::backdrop { background: var(--backdrop); }
 .right { text-align: right; }
 .nowrap { white-space: nowrap; }
 .clickable { cursor: pointer; }
+/* L4 : la source reste lisible pendant la correction ; chaque bloc conserve ses commandes. */
+.editeur-recette, .livre-editeur, .editeur-colonnes > *, .editeur-ligne-champs > * { min-width: 0; }
+.editeur-colonnes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+.editeur-formulaire { display: flex; flex-direction: column; gap: 1rem; }
+.editeur-source { min-width: 0; overflow-wrap: anywhere; }
+.editeur-source img { max-width: 100%; height: auto; }
+.editeur-source figure { margin: 0 0 1rem; overflow: auto; }
+.editeur-image-source { overflow: auto; max-height: 70dvh; padding: .25rem; }
+.editeur-source pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.editeur-source p, .editeur-source li { white-space: pre-wrap; }
+.editeur-sections { display: flex; flex-wrap: wrap; gap: .45rem; padding-block: .4rem; }
+.editeur-sections .btn[aria-pressed="true"], .editeur-sections [aria-selected="true"] { background: var(--sage-2); color: var(--ink); }
+.editeur-ingredient, .editeur-etape { border: 1px solid var(--line); border-radius: var(--radius-btn); background: var(--card); padding: .9rem; min-width: 0; }
+.editeur-ingredient + .editeur-ingredient, .editeur-etape + .editeur-etape { margin-top: .8rem; }
+.editeur-ligne-champs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: .65rem; }
+.editeur-recette :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select), .livre-editeur :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) { max-width: 100%; width: 100%; min-width: 0; }
+.editeur-recette textarea, .livre-editeur textarea { resize: vertical; min-height: 5rem; }
+.editeur-recette .btn, .editeur-recette button, .livre-editeur .btn, .livre-editeur button, .editeur-reprise .btn, .editeur-comparaison .btn, .brouillons-liste .btn { min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
+.editeur-statut { overflow-wrap: anywhere; margin-block: .5rem; }
+.editeur-reprise, .editeur-comparaison { overflow-wrap: anywhere; }
+.editeur-comparaison pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 18rem; overflow: auto; }
+.editeur-comparaison-champ { border-top: 1px solid var(--line); padding-block: .8rem; min-width: 0; }
+.editeur-comparaison-champ .texte-saisie { display: block; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 18rem; overflow: auto; padding: .5rem; background: var(--cream-2); }
+.editeur-comparaison-champ label { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
+.editeur-champs { min-width: 0; margin: 0; padding: .7rem; border: 1px solid var(--line); border-radius: var(--radius-btn); }
+.dialogue-sortie-editeur { max-height: calc(100dvh - 2rem); overflow: auto; }
+.dialogue-sortie-editeur .btn { min-height: 44px; white-space: normal; }
+.brouillons-liste { margin-bottom: 1.2rem; }
+.brouillon-resume { padding-block: 1rem; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.brouillon-resume h3, .brouillon-resume p { margin: 0; }
+@media (min-width: 1100px) {
+  .editeur-colonnes { grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); }
+  .editeur-vue-mobile { display: none; }
+}
+@media (max-width: 1099px) {
+  .editeur-recette[data-vue="modification"] .editeur-source { display: none; }
+  .editeur-recette[data-vue="source"] .editeur-formulaire { display: none; }
+}
+@media (max-width: 599px) {
+  .editeur-ingredient, .editeur-etape { padding: .7rem; }
+  .editeur-ligne-champs { grid-template-columns: minmax(0, 1fr); }
+  .editeur-sections .btn { flex: 1 1 8rem; }
+  .brouillon-resume .row .btn { flex: 1 1 10rem; }
+}

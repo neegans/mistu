@@ -1,7 +1,8 @@
 // L2 : formulaires réellement montés, bases jetables, aucun appel assistant.
 import { withRepo } from './sync-fixture.js';
 import { renderRecipeEdit } from '../src/ui/recipe-edit.js';
-import { getData } from '../src/ui/state.js';
+import { getData, getSyncGeneration } from '../src/ui/state.js';
+import { creerServiceBrouillons } from '../src/domain/brouillons-editeur.js';
 import { enregistrerPhotoPage } from '../src/domain/photo-page.js';
 import { renderPhotoGestion } from '../src/ui/photo-gestion.js';
 
@@ -17,13 +18,13 @@ const lire = async(repo,db)=>({recettes:await repo.all('recipes'),versions:await
 
 export async function runL2CorbeilleMutationsTests({eq,ok}) {
   const scene=document.createElement('div');document.body.append(scene);const hash=location.hash;
-  const bloc=async(nom,fn)=>{try{await withRepo(fn);}catch(e){ok(false,`L2 mutation ${nom} : ${e.stack||e}`);}finally{scene.replaceChildren();}};
+  const bloc=async(nom,fn)=>{try{await withRepo(fn);}catch(e){ok(false,`L2 mutation ${nom} : ${e.stack||e}`);}finally{for(const vue of scene.children)vue.dispose?.();scene.replaceChildren();}};
   try {
     await bloc('correction active',async(repo,db)=>{
       const batch=donnees();await db.mutate({puts:batch,origin:'remote'});
       const vue=await renderRecipeEdit({id:batch.recipes[0].id},{kind:'correction'},await getData(true));scene.append(vue);
-      const titre=vue.querySelector('input');titre.value='Mon pain';titre.dispatchEvent(new Event('input',{bubbles:true}));
-      [...vue.querySelectorAll('button')].find(b=>b.textContent==='Enregistrer une nouvelle version').click();
+      const etape=vue.querySelector('[data-role=editeur-etape-texte]');etape.value='Mélanger lentement.';etape.dispatchEvent(new Event('input',{bubbles:true}));
+      vue.querySelector('[data-role=enregistrer-editeur]').click();
       await attendre(async()=> (await repo.all('recipe_versions')).length===2 || vue.querySelector('[data-role=erreur-enregistrement]')?.textContent);
       eq((await repo.all('recipe_versions')).length,2,'L2 : une correction depuis un livre actif reste enregistrable');
       eq(await repo.get('recipe_versions','l2-form-version'),batch.recipe_versions[0],'L2 : la correction ne réécrit pas la version originale');
@@ -31,17 +32,21 @@ export async function runL2CorbeilleMutationsTests({eq,ok}) {
     for(const kind of ['correction','translation'])for(const retour of [false,true])await bloc(`${kind} après changement du livre`,async(repo,db)=>{
       const batch=donnees();await db.mutate({puts:batch,origin:'remote'});
       const vue=await renderRecipeEdit({id:batch.recipes[0].id},{kind,locale:'fr'},await getData(true));scene.append(vue);
-      const champ=kind==='translation'?vue.querySelector('[data-role=traduction-ingredient]'):vue.querySelector('input');
+      const champ=kind==='translation'?vue.querySelector('[data-role=traduction-ingredient]'):vue.querySelector('[data-role=editeur-etape-texte]');
       champ.value='Saisie à conserver';champ.dispatchEvent(new Event('input',{bubbles:true}));
       await db.mutate({puts:{book_editions:[{...batch.book_editions[0],lifecycle_id:retour?'edition-retour':'edition-retrait',trashed_at:retour?null:'2026-10-29T12:00:00.000Z',trash_mode:retour?null:'with_recipes'}]},origin:'remote'});
       const avant=await lire(repo,db),adresse=location.hash;
       const toast=document.querySelector('.toast');if(toast)toast.textContent='';
-      [...vue.querySelectorAll('button')].find(b=>b.textContent===(kind==='translation'?'Enregistrer la traduction':'Enregistrer une nouvelle version')).click();
+      (kind==='translation'?[...vue.querySelectorAll('button')].find(b=>b.textContent==='Enregistrer la traduction'):vue.querySelector('[data-role=enregistrer-editeur]')).click();
       await attendre(()=>vue.querySelector('[data-role=erreur-enregistrement], [data-role=etat-traduction]')?.textContent || document.querySelector('.toast')?.textContent);
       eq(await lire(repo,db),avant,`L2 ${kind} : aucun objet/envoi après ${retour?'restauration':'retrait'} du livre`);
       eq(champ.value,'Saisie à conserver',`L2 ${kind} : saisie conservée`);
       eq(location.hash,adresse,`L2 ${kind} : aucune navigation après refus`);
       ok(!!vue.querySelector('[data-role=erreur-enregistrement], [data-role=etat-traduction]')?.textContent,`L2 ${kind} : motif du refus visible`);
+      if(kind==='correction'){
+        const service=creerServiceBrouillons({repo,getGeneration:getSyncGeneration}),{portee}=await service.capturerPortee({owner_id:null}),e=vue.etatEditeur();
+        eq((await service.preparerPublication({id:e.id,portee,expectedRevision:e.revision})).raison,'cycle_change',`L2 correction : refus dû exactement au cycle du livre ${retour?'restauré':'retiré'}`);
+      }
     });
     await bloc('photo de page après retrait du livre',async(repo,db)=>{
       const batch=donnees();await db.mutate({puts:batch,origin:'remote'});

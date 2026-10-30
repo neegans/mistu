@@ -44,13 +44,21 @@ import { activerEntree, porteeNavigation, capturerVue, restaurerVue, invaliderNa
 function shell() { return coquille(parseHash().path); }
 
 let current = null;
+let coquilleARefaire = false;
 let renderSeq = 0;
 let porteeAffichee = null;
 let gardeRefusee = null;
+function libererVue(){
+  for(const node of current?.main.querySelectorAll('[data-role="photo-visible"]')||[])node.dispose?.();
+  current?.main.firstElementChild?.dispose?.();
+  revoquerUrlsDeBlob();
+}
 
 async function onRoute({ handler, params, query, path, navigation = {} }) {
   const seq = ++renderSeq, base = repo.db, generation = getSyncGeneration();
   if (current) capturerVue(current.main);
+  // onRoute n'est appelé qu'après la garde de sortie. La langue peut changer pendant une saisie retenue.
+  if(coquilleARefaire){libererVue();current=null;coquilleARefaire=false;}
   const estCourante = () => seq === renderSeq && base === repo.db && generation === getSyncGeneration();
   // La coquille est reconstruite au premier rendu et après un changement de langue : la pastille neuve est remise
   // à l'état RÉEL du moteur tout de suite, sinon elle resterait vide jusqu'à la prochaine passe.
@@ -65,9 +73,7 @@ async function onRoute({ handler, params, query, path, navigation = {} }) {
   // Les URL blob: de la vue qu'on quitte n'ont plus de lecteur (spec § 6, F4/S15) : elles sont révoquées ICI, au
   // seul endroit qui voit tous les changements de vue. Sans cela, chaque couverture affichée retiendrait ses octets
   // en mémoire jusqu'au rechargement de la page.
-  for (const node of current.main.querySelectorAll('[data-role="photo-visible"]')) node.dispose?.();
-  current.main.firstElementChild?.dispose?.();
-  revoquerUrlsDeBlob();
+  libererVue();
   replace(current.main, el('p', { class: 'muted' }, t('Chargement…')));
   try {
     const ctx = await getData();
@@ -291,7 +297,7 @@ async function boot() {
     // peut les réécrire (réglage touché, restauration d'archive, vidage d'appareil).
     const settings = await relireReglages();
     setUiLocale(settings.ui_locale);
-    on('settings', ({ key, value }) => { if (key === 'ui_locale') { capturerVue(current?.main); setUiLocale(value); current = null; refresh(); } });
+    on('settings', ({ key, value }) => { if (key === 'ui_locale') { capturerVue(current?.main); setUiLocale(value); coquilleARefaire = true; refresh(); } });
     // Avant la porte (R34) : l'app doit être installable dès la première visite, même si la personne reste devant
     // l'écran d'accueil sans rien toucher.
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {

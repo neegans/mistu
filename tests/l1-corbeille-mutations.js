@@ -1,7 +1,8 @@
 // L1 : vrais formulaires et écritures associées, bases jetables ; aucun appel assistant.
 import { withRepo } from './sync-fixture.js';
 import { renderRecipeEdit } from '../src/ui/recipe-edit.js';
-import { getData } from '../src/ui/state.js';
+import { getData, getSyncGeneration } from '../src/ui/state.js';
+import { creerServiceBrouillons } from '../src/domain/brouillons-editeur.js';
 import { enregistrerPhotoPage } from '../src/domain/photo-page.js';
 import { recetteReperesTest, versionReperesTest } from './visuel-parcours.js';
 import * as reperes from '../src/domain/reperes-parcours.js';
@@ -22,7 +23,7 @@ const lire = async (repo, db) => ({ recettes: await repo.all('recipes'), version
 
 export async function runL1CorbeilleMutationsTests({ eq, ok }) {
   const scene = document.createElement('div'); document.body.append(scene); const hash = location.hash;
-  const bloc = async (nom, fn) => { try { await withRepo(fn); } catch (e) { ok(false, 'L1 mutation ' + nom + ': ' + (e.stack || e)); } finally { scene.replaceChildren(); } };
+  const bloc = async (nom, fn) => { try { await withRepo(fn); } catch (e) { ok(false, 'L1 mutation ' + nom + ': ' + (e.stack || e)); } finally { for(const vue of scene.children)vue.dispose?.();scene.replaceChildren(); } };
   try {
     await bloc('ancienne adaptation avant appel', async (repo, db) => {
       reinitialiserCreation();
@@ -80,17 +81,21 @@ export async function runL1CorbeilleMutationsTests({ eq, ok }) {
         const batch = donnees(); await db.mutate({ puts: batch, origin: 'remote' });
         const recipe = batch.recipes[0];
         const ed = await renderRecipeEdit({ id: recipe.id }, { kind, locale: 'fr' }, { ...await getData(true), sync: {} }); scene.append(ed);
-        const champ = kind === 'translation' ? ed.querySelector('[data-role=traduction-ingredient]') : ed.querySelector('input');
+        const champ = kind === 'translation' ? ed.querySelector('[data-role=traduction-ingredient]') : ed.querySelector('[data-role=editeur-etape-texte]');
         champ.value = 'Mon texte à conserver'; champ.dispatchEvent(new Event('input', { bubbles: true }));
         await db.mutate({ puts: { recipes: [{ ...recipe, lifecycle_id: retour ? 'cycle-restauration' : 'cycle-retrait', trashed_at: retour ? null : '2026-10-29T12:00:00.000Z' }] }, origin: 'remote' });
         const avant = await lire(repo, db), adresse = location.hash;
-        const bouton = [...ed.querySelectorAll('button')].find(b => b.textContent === (kind === 'translation' ? 'Enregistrer la traduction' : 'Enregistrer une nouvelle version'));
+        const bouton = kind === 'translation' ? [...ed.querySelectorAll('button')].find(b => b.textContent === 'Enregistrer la traduction') : ed.querySelector('[data-role=enregistrer-editeur]');
         const toast = document.querySelector('.toast'); if (toast) toast.textContent = '';
         bouton.click(); await attendre(() => ed.querySelector('[data-role=erreur-enregistrement], [data-role=etat-traduction]')?.textContent || document.querySelector('.toast')?.textContent);
         eq(await lire(repo, db), avant, `L1 ${kind} : aucun objet ni envoi après ${retour ? 'changement de cycle' : 'corbeille'}`);
         eq(champ.value, 'Mon texte à conserver', `L1 ${kind} : texte gardé après refus`);
         eq(location.hash, adresse, `L1 ${kind} : aucune navigation après refus`);
         ok(!!ed.querySelector('[data-role=erreur-enregistrement], [data-role=etat-traduction]')?.textContent, `L1 ${kind} : motif visible`);
+        if(kind==='correction'){
+          const service=creerServiceBrouillons({repo,getGeneration:getSyncGeneration}),{portee}=await service.capturerPortee({owner_id:null}),e=ed.etatEditeur();
+          eq((await service.preparerPublication({id:e.id,portee,expectedRevision:e.revision})).raison,'cycle_change',`L1 correction : refus dû exactement au cycle ${retour?'restauré':'retiré'}`);
+        }
       });
     }
     await bloc('photo de page atomique', async (repo, db) => {

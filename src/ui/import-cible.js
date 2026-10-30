@@ -5,6 +5,7 @@ import { cibleReprise } from '../domain/import-cible.js';
 import { capturerRecette, capturerEdition, capturerProprietaire, conditionProprietaire } from './recette-garde.js';
 import { memoireCycleImport, revoirLectureImport, memeCaptureImport, memoireEditionImport, verifierCaptureEditionImport } from '../domain/contexte-import.js';
 import { memoireSourcesImport, conditionsSourcesImport } from '../domain/sources-import.js';
+import { projectionVersionEditeur, empreinteEditeur, canoniqueEditeur } from '../domain/brouillons-format.js';
 import { recetteActiveDansContexte } from './state.js';
 import { mentionCycleRecette } from './corbeille.js';
 // L'écran d'import ciblé #/recipes/<id>/importer (lot A « Importer une recette repérée », spec docs/superpowers/specs/2026-10-18-import-cible-design.md :
@@ -164,7 +165,7 @@ async function partirLecture(repo, lecture, pageIds, enVol, suivi, protections) 
     let autreLecture = false;
     const reprise = (c) => {
       if(protections.editions[0])verifierCaptureEditionImport(c,protections.editions[0]);
-      if (!sansReference(c, kind)) throw new TransitionRefusee('imports', importId, c.status);
+      if (!lectureAdmise(c, kind, {recipeId:lecture.recipeId,baseVersionId:lecture.versionAffichee?.id}) || lecture.recipeId && c.editor_source_signature!==enVol.editor_source_signature) throw new TransitionRefusee('imports', importId, c.status);
       if (garde && c.status === 'a_verifier' && cleLecture(c) !== lecture.cle) { autreLecture = true; throw new TransitionRefusee('imports', importId, c.status); }
       return { ...enVol, page_ids: [...pageIds], resultat: null };
     };
@@ -177,7 +178,7 @@ async function partirLecture(repo, lecture, pageIds, enVol, suivi, protections) 
       if (garde && importOuvert(await repo.get('imports', importId))) throw e;
     } // terminée, d'une autre sorte ou ciblée (l'éditeur, sans `cle`) : une ligne neuve
   }
-  const ligne = await repo.ouvrirImport({ kind, edition_id: lecture.editionId ?? null, scan_session_id: lecture.sessionId ?? null, page_ids: [...pageIds],...protections });
+  const ligne = await repo.ouvrirImport({ kind, recipe_id:lecture.recipeId??null, edition_id: lecture.editionId ?? null, scan_session_id: lecture.sessionId ?? null, page_ids: [...pageIds],...(lecture.recipeId?{editeur:{base_version_id:enVol.editor_base_version_id,source_signature:enVol.editor_source_signature}}:{}),...protections });
   suivi.importId = ligne.id;
   await repo.transitionner('imports', ligne.id, { ...protections,attendus: ['a_lancer'], patch: enVol });
   return ligne.id;
@@ -218,13 +219,23 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     if (!session) { liberer(); return refus('non_connecte'); }
     if (!preparer && !pageIds.length) { liberer(); return refus('sans_page'); } // lot E : une sorte sans PAGES passe par sa préparation
     let contexteRecette = null;
-    if (ligne?.recipe_id) {
-      const cible = ctx?.recipesById?.get(ligne.recipe_id) || await repo.get('recipes', ligne.recipe_id);
+    const recipeId=lecture?.recipeId??ligne?.recipe_id??null;
+    if (recipeId) {
+      const cible = ctx?.recipesById?.get(recipeId) || await repo.get('recipes', recipeId);
       if (!cible || !recetteActiveDansContexte(cible, ctx)) return refus('transition');
       contexteRecette = await capturerRecette(repo, cible, { ctx });
     }
+    let editeur=null,conditionVersion={};
+    if(lecture?.recipeId||ligne?.editor_base_version_id){
+      const base=lecture?.versionAffichee||ctx?.versionsById?.get(ligne.editor_base_version_id)||await repo.get('recipe_versions',ligne.editor_base_version_id);
+      if(kind!=='recette'||!base?.id||base.recipe_id!==recipeId)return refus('transition');
+      const projection=projectionVersionEditeur(base),exacte=canoniqueEditeur(projection),signature=await empreinteEditeur(projection);
+      if(ligne&&ligne.editor_source_signature!==signature)return refus('transition');
+      editeur={editor_base_version_id:base.id,editor_source_signature:signature};
+      conditionVersion={recipe_versions:[{key:base.id,fusion:c=>{if(!c||canoniqueEditeur(projectionVersionEditeur(c))!==exacte)throw new TransitionRefusee('recipe_versions',base.id,null);return null;}}]};
+    }
     const recettesHistoriques = contexteRecette ? [{...contexteRecette,historique:true}] : [];
-    const protections={recettes:contexteRecette?[contexteRecette]:[],editions:contexteEdition?[contexteEdition]:[],conditions:{...conditionsCompte,...conditionsSourcesImport(sourcesAttendue)}};
+    const protections={recettes:contexteRecette?[contexteRecette]:[],editions:contexteEdition?[contexteEdition]:[],conditions:{...conditionsCompte,...conditionsSourcesImport(sourcesAttendue),...conditionVersion}};
     const protectionsHistoriques={recettes:recettesHistoriques,editions:contexteEdition?[{...contexteEdition,historique:true}]:[],conditions:conditionsCompte};
     tenue.recettes = recettesHistoriques;
     tenue.editions=protectionsHistoriques.editions;tenue.conditions=conditionsCompte;
@@ -239,7 +250,7 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     // de CET appareil, dont le battement est ici ; sinon son appareil d'origine la jugeait à 90 s sur battement_at et l'interrompait pendant le vol.
     // Lot E, ronde 1 de T5 (même règle) : une COUVERTURE d'un autre appareil relancée ici par sa route de reprise (#/add/livre?import=) aussi.
     const ici = (kind === 'classement' || kind === 'couverture') && typeof repo.deviceId === 'function' ? repo.deviceId() : null;
-    const enVol = { ...(contexteRecette ? memoireCycleImport(contexteRecette) : contexteEdition?memoireEditionImport(contexteEdition):{owner_id:(await compte).owner_id}),sources_attendues:sourcesAttendue, status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, ...(ici ? { device_id: ici } : {}), ...(kind === 'index' ? { resultat: null, reponse_brute: null, model: null, duree_ms: null, finished_at: null, ordre_applique_at: null } : {}) };
+    const enVol = { ...(contexteRecette ? memoireCycleImport(contexteRecette) : contexteEdition?memoireEditionImport(contexteEdition):{owner_id:(await compte).owner_id}),...(editeur||{}),sources_attendues:sourcesAttendue, status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, ...(ici ? { device_id: ici } : {}), ...(kind === 'index' ? { resultat: null, reponse_brute: null, model: null, duree_ms: null, finished_at: null, ordre_applique_at: null } : {}) };
     // Vague finale (m2) : le départ vaut pour les pages LUES — une page retirée, ajoutée ou déplacée pendant la réduction (autre geste, autre onglet)
     // refuse le départ (rien ne part, le redessin montre la ligne) : jamais une page envoyée qui ne serait pas liée, ni une page liée jamais lue.
     const memesPages = (c) => { if (JSON.stringify(Array.isArray(c.page_ids) ? c.page_ids : []) !== JSON.stringify(pageIds)) throw new TransitionRefusee('imports', importId, c.status);if(contexteEdition)verifierCaptureEditionImport(c,contexteEdition); return enVol; };
@@ -383,6 +394,7 @@ export function texteRefus(r) {
 const VALIDEURS = { recette: (r) => validateParsedRecipe(r), index: (r, L) => relireResultatIndex(r, L?.page_ids, { modeleLigne: L?.model ?? null }) }; // lot I1 : format 2 (pages), le format 1 du lot C converti ; relu sur les pages de SA ligne
 const validerSelon = (kind, resultat, ligne = null) => { try { return Object.hasOwn(VALIDEURS, kind) ? VALIDEURS[kind](resultat, ligne) : null; } catch { return null; } };
 const sansReference = (ligne, kind) => !!ligne && ligne.kind === kind && ligne.recipe_id == null; // une ligne CIBLÉE se reprend par son écran
+const lectureAdmise=(ligne,kind,{recipeId=null,baseVersionId=null}={})=>recipeId?kind==='recette'&&ligne?.kind===kind&&ligne.recipe_id===recipeId&&typeof baseVersionId==='string'&&ligne.editor_base_version_id===baseVersionId:sansReference(ligne,kind);
 
 // a_verifier → echec(illisible), résultat effacé (T4-R1) — pour LA lecture relue et jugée illisible, jamais pour une autre arrivée entre-temps (ronde 1 :
 // conditionnée à sa clé, T4-R2). Rend la ligne écrite, ou null quand la ligne a changé (rien n'est écrit) ; une autre erreur remonte.
@@ -396,16 +408,16 @@ async function marquerIllisible(repo, L) {
 // Une ligne relue pour un écran qui la REPREND (?import=) : seulement une ligne de cette sorte, sans référence. a_verifier → son résultat revalidé ;
 // hostile → echec(illisible) (marquerIllisible), rien n'atteint l'écran ; une lecture arrivée entre la lecture et la transaction est relue une fois.
 // Rend { ligne, resultat, modele } (resultat nul hors d'un a_verifier valide), ou null (absente, d'une autre sorte, ciblée).
-export async function relireDuJournal(importId, kind, { repo = repoModule } = {}, essai = 0) {
+export async function relireDuJournal(importId, kind, { repo = repoModule, recipeId=null,baseVersionId=null } = {}, essai = 0) {
   if (typeof importId !== 'string' || !importId) return null;
   const ligne = await repo.get('imports', importId);
-  if (!sansReference(ligne, kind)) return null;
+  if (!lectureAdmise(ligne, kind,{recipeId,baseVersionId})) return null;
   if (ligne.status !== 'a_verifier') return { ligne, resultat: null, modele: null };
   const resultat = validerSelon(kind, ligne.resultat, ligne);
   if (resultat) return { ligne, resultat, modele: modeleBorne(ligne.model) };
   const ecrite = await marquerIllisible(repo, ligne);
   if (ecrite) return { ligne: ecrite, resultat: null, modele: null };
-  return essai < 1 ? relireDuJournal(importId, kind, { repo }, essai + 1) : { ligne: (await repo.get('imports', importId)) ?? ligne, resultat: null, modele: null };
+  return essai < 1 ? relireDuJournal(importId, kind, { repo,recipeId,baseVersionId }, essai + 1) : { ligne: (await repo.get('imports', importId)) ?? ligne, resultat: null, modele: null };
 }
 
 // Une lecture par l'assistant écrite dans le journal : LE vol de l'écran ciblé (un seul par document, battement, appels comptés, signal, « Annuler »
@@ -413,11 +425,11 @@ export async function relireDuJournal(importId, kind, { repo = repoModule } = {}
 // (I-3), qui la relit et la REVALIDE (I-1). Rend { importId, resultat, modele, cle, texte, connecte } : `resultat` non nul = la lecture à poser et `cle`
 // sa clé (la clôture ne vaudra que pour elle, T4-R2) ; sinon `texte` dit pourquoi ; `connecte` faux = la session manquait au clic. Un refus rend
 // l'`importId` demandé : la ligne n'a pas bougé.
-export async function lireDansLeJournal({ kind, importId = null, pageIds = [], editionId = null, sessionId = null, ctx, repo = repoModule }) {
-  const r = await lancerExtraction(importId, { ctx, repo, lecture: { kind, importId, pageIds, editionId, sessionId } });
+export async function lireDansLeJournal({ kind, importId = null, pageIds = [], editionId = null, sessionId = null, recipeId=null,versionAffichee=null,cle=undefined,ctx, repo = repoModule }) {
+  const r = await lancerExtraction(importId, { ctx, repo, lecture: { kind, importId, pageIds, editionId, sessionId,recipeId,versionAffichee,...(cle!==undefined?{cle}:{}) } });
   const rien = (id, texte, extra = {}) => ({ importId: id, resultat: null, modele: null, cle: null, texte, connecte: true, ...extra });
   if (r.issue === 'a_verifier') {
-    const relue = await relireDuJournal(r.importId, kind, { repo });
+    const relue = await relireDuJournal(r.importId, kind, { repo,recipeId,baseVersionId:versionAffichee?.id });
     return relue?.resultat ? { importId: r.importId, resultat: relue.resultat, modele: relue.modele, cle: cleLecture(relue.ligne), texte: null, connecte: true } : rien(r.importId, phraseEchec(relue?.ligne?.erreur ?? { raison: 'illisible' }));
   }
   if (r.issue === 'echec') return rien(r.importId, phraseEchec((await repo.get('imports', r.importId))?.erreur ?? { raison: r.raison }));

@@ -227,6 +227,7 @@ export function cibleReprise(ligne) {
   // Vague finale (m4) : l'écran ciblé reçoit aussi LA ligne (?import=) — après synchro, une recette peut avoir un import ouvert par appareil.
   if (ligne.kind === 'reperes') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/reperes?import=${encodeURIComponent(id)}` : null;
   if (ligne.kind === 'thermomix') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/thermomix?import=${encodeURIComponent(id)}` : null;
+  if (ligne.kind === 'recette' && chaine(ligne.recipe_id) && chaine(ligne.editor_base_version_id)) return `/recipes/${encodeURIComponent(ligne.recipe_id)}/edit?kind=correction&v=${encodeURIComponent(ligne.editor_base_version_id)}&import=${encodeURIComponent(id)}`;
   if (ligne.kind === 'recette') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/importer?import=${encodeURIComponent(id)}` : `/recipes/new?import=${encodeURIComponent(id)}`;
   if (ligne.kind === 'index') return chaine(ligne.scan_session_id) ? `/import?session=${encodeURIComponent(ligne.scan_session_id)}&import=${encodeURIComponent(id)}` : null;
   if (ligne.kind === 'web') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/importer?import=${encodeURIComponent(id)}` : null;
@@ -285,6 +286,7 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     // non plus — « Reprendre » ouvre sa route, qui offre « Lire / Relire la couverture » (sa référence n'est jamais absente : elle n'a pas de recipe_id).
     else if (i.kind === 'classement' || couverture) gestes = autreAppareil && !(i.status === 'a_verifier' && i.resultat != null) ? ['ignorer'] : ['reprendre', 'ignorer'];
     else if (web) gestes = i.status === 'echec' ? ['relancer', 'ignorer'] : i.status === 'a_verifier' && i.resultat == null ? ['ignorer'] : ['reprendre', 'ignorer'];
+    else if (i.kind==='recette' && chaine(i.editor_base_version_id)) gestes = ['reprendre','ignorer']; // l’éditeur montre le résultat avant tout nouvel appel
     else if (recette?.availability === 'available') gestes = ['ignorer']; // un POST ne servirait à rien : l'écran ciblé refuse une recette qui a son texte
     else if (autreAppareil) gestes = i.status === 'a_verifier' && i.resultat != null ? ['reprendre', 'ignorer'] : ['ignorer'];
     // Lot C, vague finale (constat 3 ; D-C16, § 10 pas 6) : un INDEX en échec se REPREND (le panneau de sa séance, ses pages cochées) — son « Relancer »

@@ -18,6 +18,17 @@ import { runL3NavigationTests } from './l3-navigation.js';
 import { runL3BibliothequeTests } from './l3-bibliotheque.js';
 import { runL3ListesTests } from './l3-listes.js';
 import { runL3ActionsTests } from './l3-actions.js';
+import { runL4BrouillonsListeTests } from './l4-brouillons-liste.js';
+import { runL4RendementTests } from './l4-rendement.js';
+import { runL4RaccordsTests } from './l4-raccords.js';
+import { runL4BrouillonsTests } from './l4-brouillons.js';
+import { runL4PublicationTests } from './l4-publication.js';
+import { runL4EditeurRecetteTests, runL4EditeurRecetteUITests, runL4LectureEditeurTests } from './l4-editeur-recette.js';
+import { runL4LivreEditeurTests } from './l4-livre-editeur.js';
+import { runL4SortiesTests } from './l4-sorties.js';
+import { runL4JournalTests } from './l4-journal.js';
+import { runL4LimitesArchivesTests } from './l4-limites-archives.js';
+import { runL4BrouillonsSyncTests } from './l4-sync.js';
 import { runL0TraductionsTests } from './l0-traductions.js';
 import { runL0CuisineTests } from './l0-cuisine.js';
 import { runL0RepasCoursesTests } from './l0-repas-courses.js';
@@ -349,11 +360,17 @@ for (const suite of [runL3NavigationTests, runL3BibliothequeTests, runL3ListesTe
   catch (error) { ok(false, `Suite L3 interrompue : ${error?.message || String(error)}`); }
 }
 
+// L4 : brouillons récupérables et rendement textuel distinct du calcul de portions.
+for (const suite of [runL4BrouillonsListeTests, runL4RendementTests, runL4RaccordsTests, runL4BrouillonsTests, runL4PublicationTests, runL4EditeurRecetteTests, runL4EditeurRecetteUITests, runL4LectureEditeurTests, runL4LivreEditeurTests, runL4SortiesTests, runL4JournalTests, runL4LimitesArchivesTests, runL4BrouillonsSyncTests]) {
+  try { await suite({ eq, ok, close }); }
+  catch (error) { ok(false, `Suite L4 interrompue : ${error?.message || String(error)}`); }
+}
+
 // --- Compte total épinglé (F2). Une assertion qui DISPARAÎT — un bloc supprimé, une boucle qui ne tourne plus, une
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 8546,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 8879,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

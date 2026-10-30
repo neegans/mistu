@@ -536,7 +536,9 @@ export async function runPasserelleTests({ eq, ok }) {
         // F-3 : les pages sont réduites avant l'envoi — il faut une VRAIE image à décoder (des octets quelconques ne se décodent pas).
         const imageDe = async (l, h, type = 'image/jpeg') => { const c = new OffscreenCanvas(l, h); const cx = c.getContext('2d'); cx.fillStyle = '#c33'; cx.fillRect(0, 0, l, h); cx.fillStyle = '#fff'; cx.fillRect(Math.round(l / 4), Math.round(h / 4), Math.round(l / 2), Math.round(h / 2)); return c.convertToBlob({ type }); };
         await repoTemp.putFile('sha-x', await imageDe(40, 30), {});
-        const R = await import('../src/ui/recipe-edit.js');
+        const moduleRecette = await import('../src/ui/recipe-edit.js');
+        const sceneEditeur=document.createElement('div');document.body.append(sceneEditeur);
+        const R={renderRecipeEdit:async(...args)=>{for(const enfant of sceneEditeur.children)enfant.dispose?.();sceneEditeur.replaceChildren();const r=await moduleRecette.renderRecipeEdit(...args);sceneEditeur.append(r);return r;}};
         const appels = [];
         const repondre = (statut, corps) => { globalThis.fetch = async (url, options) => { appels.push({ url, options }); return reponse(statut, corps); }; };
         const page = { id: 'p1', sha256: 'sha-x', printed_page: 12 };
@@ -652,6 +654,7 @@ export async function runPasserelleTests({ eq, ok }) {
           eq(lire(edit.querySelector('[data-role="connexion-ia"]')), [false, true, 0, 'connexion-ia'], 'F-7 recette (garde refusée) : le message de la garde, sans bouton « Se connecter »');
           eq(connexions, 0, 'F-7 : aucune connexion lancée');
         }
+        for(const enfant of sceneEditeur.children)enfant.dispose?.();sceneEditeur.remove();
       });
       eq(reseauInterdit, [], 'écrans d\'extraction : aucun appel réseau sans clic sur l\'assistant, ni pour la recette sans session');
     } finally { globalThis.fetch = vraiFetch; setUiLocale(avant); }
@@ -687,9 +690,9 @@ export async function runPasserelleTests({ eq, ok }) {
     const passerelle = lus.find(([m]) => m === 'src/domain/passerelle.js')?.[1] ?? '';
     ok(!/from '\.\.\/ui\//.test(passerelle), 'passerelle.js : n’importe rien de src/ui/ (couche domaine)');
     ok(sw.includes("'./src/domain/passerelle.js'"), 'SHELL : ./src/domain/passerelle.js');
-    ok(/VERSION = 'cuisine-os-v0\.25\.0-\d+'/.test(sw), 'sw.js : VERSION 0.25.0');
+    ok(/VERSION = 'cuisine-os-v0\.26\.0-\d+'/.test(sw), 'sw.js : VERSION 0.26.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.25.0', 'APP_VERSION 0.25.0 (lot UI-1, carnet)');
+    eq(APP_VERSION, '0.26.0', 'APP_VERSION 0.26.0 (lot UI-1, carnet)');
   }
 
   // --- Lot F (spec plats-en-images § 4.6) : deux raisons de plus, écrites par la passerelle pour image-web et relayées telles quelles

@@ -1363,11 +1363,12 @@ export async function runPhotoPlatTests({ eq, ok }) {
         const corriger = async (rid, pendantEdition = async () => {}, kind = 'correction') => {
           const ed = await renderRecipeEdit({ id: rid }, { kind }, await ctxPour(repo, db)); scene.append(ed);
           if (kind === 'adaptation') { const z = [...ed.querySelectorAll('label')].find((l) => l.textContent.includes('Résumé des changements'))?.querySelector('textarea'); z.value = 'Moins de sel.'; z.dispatchEvent(new Event('input', { bubbles: true })); }
+          const etape = ed.querySelector('[data-role=editeur-etape-texte]'); etape.value += '\nRelire avant de servir.'; etape.dispatchEvent(new Event('input', { bubbles: true }));
           await pendantEdition();
           const avant = await idsDe(rid);
-          bouton(ed, 'Enregistrer une nouvelle version').click();
+          bouton(ed, 'Enregistrer les modifications').click();
           await attendre(async () => (await idsDe(rid)).size === avant.size + 1, 'version écrite (' + rid + ')');
-          await tick(); history.replaceState(null, '', adresseAvant); ed.remove();
+          await tick(); history.replaceState(null, '', adresseAvant); ed.dispose?.(); ed.remove();
           return db.get('recipes', rid);
         };
         // 1. Une fiche à photo garde ses trois champs (garde de régression : verte avant le changement).

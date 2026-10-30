@@ -5,7 +5,7 @@ import { UNIT_DEFINITIONS, UNIT_CONVENTIONS, INGREDIENTS } from './seed.js';
 import { newId, nowIso } from '../core/ids.js';
 import { emit } from '../core/bus.js';
 import { syncNow, getClockOffset } from '../sync/clock.js';
-import { nettoyerChaines, porteDesCaracteresDeControle } from '../sync/lots.js';
+import { nettoyerChaines, porteDesCaracteresDeControle, LIMITES as LIMITES_SYNC_EDITEUR } from '../sync/lots.js';
 import { resolveMime } from '../sync/mime.js';
 import { fusionnerOctetsRecus } from '../sync/fichiers.js';
 import { normaliserConfigAssistant, LIGNE_ASSISTANT } from '../domain/assistant-config.js';
@@ -16,6 +16,7 @@ import { comparerCuissons } from '../domain/cuisine-personnelle.js';
 import { lireCycleRecette, memeCycleRecette, estRecetteAutonome, identifiantCycleValide, dateCycleValide, ErreurCycleRecette } from '../domain/cycle-recette.js';
 import { lireCycleEdition, lireEtatRecette, memeCycleEdition, memeExceptionEdition, exceptionEditionValide, MAGASINS_BILAN_LIVRE, calculerBilanLivre } from '../domain/cycle-edition.js';
 import { preparerLotSources } from '../sync/lot-sources.js';
+import { estCleEditeur, validerLigneEditeur, verifierQuotaEditeur, estRecuEditeur, LIMITES_BROUILLONS, ErreurBrouillon } from '../domain/brouillons-format.js';
 
 // Base de l'application. Liaison vivante : bindDatabase ne sert qu'aux tests, pour travailler sur une base jetable.
 export let db = new Database(DB_NAME, DB_VERSION, STORES);
@@ -760,6 +761,49 @@ export async function saveBatch(batch, { origin = 'local', conditions = null, re
   return stamped;
 }
 
+// Porte bornée L4 : gardes métier ordinaires et lignes locales brutes, dans le même commit.
+export async function muterEditeur({metier={},internes={}}={}, {origin,baseAttendue,contexteValide}={}) {
+  const base=db, magasins=new Set(['recipes','recipe_versions','books','book_editions','imports','source_pages','source_documents','scan_sessions']);
+  const verifierContexte=()=>{if(base!==db||base!==baseAttendue||typeof contexteValide!=='function'||!contexteValide())throw new ErreurBrouillon('contexte_change');};
+  verifierContexte();
+  if(!['device','local'].includes(origin)||Object.keys(metier).some(k=>!['puts','conditions','recettes','editions'].includes(k))||Object.keys(internes).some(k=>!['puts','conditions','deletes'].includes(k)))throw new TypeError('Mutation éditeur invalide');
+  const batch=metier.puts||{},conditions=Object.fromEntries(Object.entries(metier.conditions||{}).map(([s,cs])=>[s,[...cs]]));
+  if([...Object.keys(batch),...Object.keys(conditions)].some(s=>!magasins.has(s))||origin==='device'&&(Object.keys(batch).length||Object.keys(conditions).length||metier.recettes?.length||metier.editions?.length))throw new TypeError('Magasin métier interdit');
+  const locaux=structuredClone(internes.puts||[]),deletes=[...(internes.deletes||[])],fusions=new Map();
+  for(const row of locaux)validerLigneEditeur(row);
+  if(deletes.some(k=>!estCleEditeur(k))||new Set(locaux.map(r=>r.key)).size!==locaux.length||new Set(deletes).size!==deletes.length)throw new TypeError('Clé interne interdite');
+  const vus=new Set(locaux.map(r=>r.key)),locConditions=[];
+  let verifierToutes=null;
+  for(const c of internes.conditions||[]){
+    if(c.toutes===true){if(verifierToutes||typeof c.verifier!=='function')throw new TypeError('Condition interne invalide');verifierToutes=c.verifier;continue;}
+    if(c.key!=='user_id'&&!estCleEditeur(c.key)||c.index!=null||c.patch!=null||c.attendus!=null)throw new TypeError('Condition interne interdite');
+    if(c.key==='user_id'&&typeof c.fusion!=='function')throw new TypeError('Propriétaire en lecture seule');
+    if(c.fusion){if(vus.has(c.key))throw new TypeError('Double écriture interne');locConditions.push({...c,fusion:(courant,lecture)=>{
+      const row=c.fusion(courant,lecture);if(row?.then)throw new TypeError('Fusion synchrone requise');
+      if(c.key==='user_id'&&row!=null)throw new TypeError('Propriétaire en lecture seule');
+      if(row!=null){validerLigneEditeur(row);if(row.key!==c.key)throw new TypeError('Identité interne modifiée');fusions.set(row.key,row);}return row;
+    }});}else locConditions.push(c);
+  }
+  locConditions.push({toutes:true,verifier:rows=>{verifierContexte();const r=verifierToutes?.(rows);if(r?.then)throw new TypeError('Vérification synchrone requise');
+    const nouveaux=[...locaux,...fusions.values()],recus=nouveaux.filter(estRecuEditeur),proteges=new Set(nouveaux.map(r=>r.key));
+    // La rétention se décide sur l'instantané de cette transaction ; seuls les reçus valides du propriétaire qui publie sont concernés.
+    for(const recu of recus){const comptes=new Map(rows.filter(r=>!deletes.includes(r.key)).map(r=>[r.key,r]));for(const r of nouveaux)comptes.set(r.key,r);const lignes=[...comptes.values()].filter(r=>r.value?.owner_id===recu.value.owner_id&&r.value?.database_name===recu.value.database_name&&estRecuEditeur(r)).sort((a,b)=>a.value.publication.committed_at.localeCompare(b.value.publication.committed_at)||a.key.localeCompare(b.key));let exces=lignes.length-LIMITES_BROUILLONS.recus;for(const r of lignes)if(exces>0&&!proteges.has(r.key)){deletes.push(r.key);exces--;}}
+    verifierQuotaEditeur(rows,nouveaux,deletes);
+  }});
+  conditions.sync_state=locConditions;
+  const now=syncNow(),stamped=Object.fromEntries(Object.entries(batch).map(([s,rows])=>[s,horodater(s,rows,now)]));
+  const tailleAdmise=row=>{if(new TextEncoder().encode(JSON.stringify(row)).length>LIMITES_SYNC_EDITEUR.element)throw new ErreurBrouillon('limite_publication');return row;};
+  for(const rows of Object.values(stamped))for(const row of rows)tailleAdmise(row);
+  const protection=await protegerMutationRecettes(stamped,conditions,metier.recettes||[],{origin,editions:metier.editions||[]});
+  verifierContexte();
+  // Les fusions du namespace local ne reçoivent aucun created_at/updated_at technique.
+  const finales={sync_state:protection.conditions.sync_state,...Object.fromEntries(Object.entries(protection.conditions).filter(([s])=>s!=='sync_state').map(([s,cs])=>[s,cs.map(c=>{const f=envelopperFusion(s,c,now);return typeof f.fusion==='function'?{...f,fusion:(...args)=>{const row=f.fusion(...args);return row==null?null:tailleAdmise(row);}}:f;})]))};
+  const ecrites=await base.mutate({origin,puts:{...stamped,...(locaux.length?{sync_state:locaux}:{})},deletes:{sync_state:deletes},conditions:finales,recettes:protection.recettes,editions:protection.editions});
+  verifierContexte();
+  const sorties={};for(const s of new Set([...Object.keys(stamped),...Object.keys(ecrites||{})]))if(s!=='sync_state'){sorties[s]=[...(stamped[s]||[]),...(ecrites?.[s]||[])];emit('change',{store:s});}
+  return {metier:sorties,internes:[...locaux,...(ecrites?.sync_state||[])]};
+}
+
 // Transition conditionnée (spec import-cible § 3.6, I-10) : la fiche `key` de `store` est lue, son statut vérifié parmi `attendus`,
 // le patch (objet, ou fonction du courant) fusionné, puis TOUT — la fiche, les puts, les deletes et la capture — est écrit dans UNE
 // transaction par db.mutate({ conditions }). Condition fausse : TransitionRefusee { store, key, statut }, rien d'écrit. Enveloppe de
@@ -990,10 +1034,14 @@ function memoriserBaseImport(ligne, recettes, editions) {
     expected_edition_cycle_id: capture.expected_edition_cycle_id ?? null, owner_id: capture.owner_id });
   else if (parent) Object.assign(ligne, { expected_edition_id: parent.edition_id, expected_edition_cycle_id: parent.expected_cycle_id ?? null, owner_id: parent.owner_id });
 }
-export async function ouvrirImport({ id = newId('imp'), kind, recipe_id = null, edition_id = null, scan_session_id = null, page_ids = [], recettes = [], editions = [], conditions = {} } = {}) {
+export async function ouvrirImport({ id = newId('imp'), kind, recipe_id = null, edition_id = null, scan_session_id = null, page_ids = [], recettes = [], editions = [], conditions = {}, editeur = null } = {}) {
   if (!KINDS_PAGES.includes(kind)) throw new TypeError('ouvrirImport : kind d’import inconnu (' + String(kind) + ')');
   if (!Array.isArray(page_ids) || page_ids.some((p) => typeof p !== 'string' || !p)) throw new TypeError('ouvrirImport : page_ids doit être une liste d’identifiants');
   const { ligne, conditions: ouverture } = nouvelleLigneImport({ id, kind, recipe_id, edition_id, scan_session_id, page_ids });
+  if(editeur!==null){
+    if(kind!=='recette'||typeof recipe_id!=='string'||!recipe_id||!editeur||typeof editeur!=='object'||Array.isArray(editeur)||Object.keys(editeur).some(k=>!['base_version_id','source_signature'].includes(k))||typeof editeur.base_version_id!=='string'||!editeur.base_version_id||editeur.base_version_id.length>200||typeof editeur.source_signature!=='string'||!/^[a-f0-9]{64}$/.test(editeur.source_signature))throw new TypeError('Cible éditeur invalide');
+    ligne.editor_base_version_id=editeur.base_version_id;ligne.editor_source_signature=editeur.source_signature;
+  }
   memoriserBaseImport(ligne, recettes, editions);
   const ecrit = await saveBatch({ imports: [ligne] }, { conditions: reunirConditions(conditions, ouverture), recettes, editions });
   return ecrit.imports[0];

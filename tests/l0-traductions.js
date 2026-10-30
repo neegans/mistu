@@ -23,7 +23,7 @@ async function cliquerSauver(node, label) {
 export async function runL0TraductionsTests({ eq, ok }) {
   const hash = location.hash;
   const scene = document.createElement('div'); document.body.append(scene);
-  const bloc = async (nom, fn) => { try { await withRepo(fn); } catch (e) { ok(false, 'L0 ' + nom + ' : ' + (e.stack || e)); } finally { scene.replaceChildren(); } };
+  const bloc = async (nom, fn) => { try { await withRepo(fn); } catch (e) { ok(false, 'L0 ' + nom + ' : ' + (e.stack || e)); } finally { for (const ed of scene.querySelectorAll('.editeur-recette')) ed.dispose?.(); scene.replaceChildren(); } };
   try {
     await bloc('positions', async repo => {
       const { recipe, version } = source();
@@ -52,18 +52,19 @@ export async function runL0TraductionsTests({ eq, ok }) {
       const autre = new Database(db.name, DB_VERSION, STORES);
       try { await autre.open(); await autre.delete('recipes', recipe.id); } finally { autre.idb?.close(); }
       const avant = { versions: await repo.all('recipe_versions'), pages: await repo.all('source_pages'), sessions: await repo.all('scan_sessions'), file: await db.getAll('outbox') };
-      await cliquerSauver(ed, 'Enregistrer une nouvelle version');
+      await cliquerSauver(ed, 'Enregistrer les modifications');
       eq(await repo.get('recipes', recipe.id), undefined, 'L0 C02 : un autre onglet supprime, l’éditeur ne ressuscite rien');
       eq({ versions: await repo.all('recipe_versions'), pages: await repo.all('source_pages'), sessions: await repo.all('scan_sessions'), file: await db.getAll('outbox') }, avant, 'L0 C02 : refus atomique sans version, page, séance ou outbox');
       eq(ed.querySelector('input').value, 'Mon pain', 'L0 C02 : saisie conservée après refus');
-      ok(ed.textContent.includes('Tes modifications restent dans ce formulaire.'), 'L0 C02 : refus visible dans le formulaire');
+      ok(ed.querySelector('[data-role=erreur-enregistrement]')?.textContent.length > 0, 'L0 C02 : refus visible dans le formulaire');
     });
     await bloc('fusions concurrentes', async repo => {
       const { recipe, version } = source(); await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
       const ed = await renderRecipeEdit({ id: recipe.id }, { kind: 'correction' }, await contexte()); scene.append(ed);
+      saisir(ed.querySelector('[data-role=editeur-etape-texte]'), 'Mix.\n\nRest a little longer.');
       const concurrente = { ...await repo.get('recipes', recipe.id), favorite: true, personal_notes: 'note récente', photo_sha256: 'a'.repeat(64), photo_origin: 'photo', reperes: { revision: 1 } };
       await repo.save('recipes', concurrente);
-      await cliquerSauver(ed, 'Enregistrer une nouvelle version');
+      await cliquerSauver(ed, 'Enregistrer les modifications');
       const relue = await repo.get('recipes', recipe.id);
       eq([relue.favorite, relue.personal_notes, relue.photo_sha256, relue.reperes], [true, 'note récente', 'a'.repeat(64), { revision: 1 }], 'L0 C02 : favori/photo/note/repères concurrents conservés');
     });
@@ -118,9 +119,10 @@ export async function runL0TraductionsTests({ eq, ok }) {
     await bloc('source parent disparue', async (repo, db) => {
       const { recipe, version } = source(); await repo.saveBatch({ recipes: [recipe], recipe_versions: [version] }, { conditions: { recipes: [{ key: recipe.id, absente: true }] } });
       const ed = await renderRecipeEdit({ id: recipe.id }, {}, await contexte()); scene.append(ed);
+      saisir(ed.querySelector('[data-role=editeur-etape-texte]'), 'Mix, then rest.');
       await repo.remove('recipe_versions', version.id);
       const avant = [await repo.all('recipe_versions'), await repo.get('recipes', recipe.id), await db.getAll('outbox')];
-      await cliquerSauver(ed, 'Enregistrer une nouvelle version');
+      await cliquerSauver(ed, 'Enregistrer les modifications');
       eq([await repo.all('recipe_versions'), await repo.get('recipes', recipe.id), await db.getAll('outbox')], avant, 'L0 C02 : pas de version avec une parente disparue');
     });
     const D = await import('../src/domain/traductions.js');

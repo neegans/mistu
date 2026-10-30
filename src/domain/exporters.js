@@ -2,6 +2,7 @@
 // Les durées, portions ou compatibilités inconnues sont omises, jamais fabriquées.
 import { estThermomix, etiquetteThermomix, gardeThermomix, AVERTISSEMENT_TM7 } from './thermomix.js';
 import { EN } from '../i18n/en.js';
+import { lireRendementTexte } from './rendement.js';
 import { formatQuantity } from './quantity.js';
 import { unitLabel } from './units.js';
 import { extFor } from './backup.js';
@@ -93,7 +94,7 @@ export function toJsonLd(bundle, { locale = 'fr', documentaire = false } = {}) {
     '@context': 'https://schema.org', '@type': 'Recipe', name: title, inLanguage: recipe.original_language || undefined,
     author: book?.author ? { '@type': 'Person', name: book.author } : undefined,
     isBasedOn: book ? `${book.title}${recipe.printed_page ? `, p. ${recipe.printed_page}` : ''}${edition?.isbn ? ` (ISBN ${edition.isbn})` : ''}` : undefined,
-    recipeYield: version?.servings ? String(version.servings) : undefined,
+    recipeYield: lireRendementTexte(version) ?? (version?.servings ? String(version.servings) : undefined),
     prepTime: isoDuration(durees.prep), cookTime: isoDuration(durees.cuisson), totalTime: isoDuration(durees.total),
     recipeCategory: recipe.type || undefined,
     recipeCuisine: recipe.cuisines?.length ? recipe.cuisines.join(', ') : undefined,
@@ -128,7 +129,8 @@ export function toPaprikaYaml(bundles, { locale = 'fr', documentaire = false } =
     const reperes = lignesReperes(recipe, version, locale), durees = dureesExport(recipe, version);
     const title = recipe.display_title || recipe.original_title;
     const lines = [`- name: ${yamlStr(title)}`];
-    if (version?.servings) lines.push(`  servings: ${yamlStr(`${version.servings} portions`)}`);
+    const rendement = lireRendementTexte(version);
+    if (rendement || version?.servings) lines.push(`  servings: ${yamlStr([version?.servings ? `${version.servings} portions` : null, rendement].filter(Boolean).join(' · '))}`);
     // S8 : hors livre, la source est l'hôte RECALCULÉ depuis l'adresse — jamais `source_label` stocké, qu'une
     // archive ou le serveur peut avoir rempli avec n'importe quoi (S7). Un export est lu par un autre logiciel.
     const source = book ? `${book.title}${book.author ? ` — ${book.author}` : ''}${recipe.printed_page ? `, p. ${recipe.printed_page}` : ''}` : libelleSource(recipe);
@@ -187,6 +189,7 @@ export function toReadableSite(bundles, filesBySha, { locale = 'fr', documentair
 <p class="meta">${book ? esc(`${book.title}${book.author ? ` — ${book.author}` : ''}`) : esc(libelleSource(recipe) || 'Source personnelle')}${recipe.printed_page && recipe.origine !== 'ia' ? `, page ${esc(recipe.printed_page)}` : ''}
 ${etiquette ? ` · <span class="badge">${esc(etiquette)}</span>` : version?.kind === 'adaptation' ? ' · <span class="badge">Adaptation personnelle</span>' : version ? ' · <span class="badge">Original</span>' : ''}</p>
 ${version?.servings ? `<p class="meta">${esc(`${version.servings} portions`)}${durees.prep != null ? ` · préparation ${durees.prep} min` : ''}${durees.cuisson != null ? ` · cuisson ${durees.cuisson} min` : ''}</p>` : ''}${ia ? ia.slice(1).map((l) => `<p>${esc(l)}</p>`).join('') : ''}
+${lireRendementTexte(version) ? `<p class="meta">${esc(lireRendementTexte(version))}</p>` : ''}
 ${reperes.map(l => `<p>${esc(l)}</p>`).join('')}
 ${version ? `<h2>Ingrédients</h2><ul>${(version.ingredients || []).map((ri) => `<li>${esc(ingredientLine(ri, locale))}</li>`).join('')}</ul>
 <h2>${document ? esc(texteTM('Texte conservé pour relecture :', locale)) : 'Préparation'}</h2><ol>${(document ? document.instructions : (version.steps || []).map(s => s.text)).map(text => `<li>${esc(text)}</li>`).join('')}</ol>` : '<p><em>Référence d’index seulement : la recette n’a pas encore été numérisée.</em></p>'}

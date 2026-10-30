@@ -175,10 +175,10 @@ export async function runI3IntegrationTests({ eq, ok }) {
     const root = await renderRecipeEdit({ id: f.recipe.id }, { v: f.version.id, kind: 'correction' }, await getData(true));
     document.body.append(root);
     try {
-      const champ = [...root.querySelectorAll('label')].find(n => n.textContent.includes('Ingrédients (une ligne par ingrédient'))?.querySelector('textarea');
+      const champ = root.querySelector('[data-role=ingredient-quantite]');
       if (!champ) throw Error('champ ingrédients absent');
       champ.value = champ.value.replace('400', '500'); champ.dispatchEvent(new Event('input', { bubbles: true }));
-      [...root.querySelectorAll('button')].find(b => b.textContent === 'Enregistrer une nouvelle version').click();
+      root.querySelector('[data-role=enregistrer-editeur]').click();
       await attendre(async () => (await repo.all('recipe_versions')).length === 3);
       const enfant = (await repo.all('recipe_versions')).find(v => v.id !== f.source.id && v.id !== f.version.id);
       eq(enfant.provenance.thermomix_invalide, true, 'I3 : correction manuelle conserve une invalidation explicite');
@@ -188,7 +188,7 @@ export async function runI3IntegrationTests({ eq, ok }) {
       eq(enfant.constraints, f.version.constraints, 'I3 : correction manuelle ne retire pas les restrictions de la version TM7');
       ok(etiquetteThermomix(enfant).includes('d’après une adaptation TM7'), 'I3 : ascendance IA demeure visible');
       eq(await repo.get('recipe_versions', f.version.id), avant, 'I3 : édition ne réécrit pas adaptation parente');
-    } finally { root.remove(); }
+    } finally { root.dispose?.(); root.remove(); }
   }));
   await run('archive du plan autonome', () => withRepo(async (repo, db) => {
     const f = await seed(repo);

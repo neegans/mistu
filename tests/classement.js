@@ -480,7 +480,7 @@ export async function runClassementTests({ eq, ok }) {
       globalThis.fetch = async (u) => { throw new Error('aucun reseau attendu : ' + u); };
       try { await fn(repo, db); }
       // Ronde 1 : la vraie fetch est rendue D'ABORD — une réinitialisation qui lèverait ne laisse jamais le piège posé pour les suites suivantes.
-      finally { globalThis.fetch = vraiFetch; UI.reinitialiserImportCible(); G.reinitialiserLot(); window.dispatchEvent(new Event('online')); }
+      finally { for(const n of scene.querySelectorAll('.editeur-recette'))n.dispose?.();globalThis.fetch = vraiFetch; UI.reinitialiserImportCible(); G.reinitialiserLot(); window.dispatchEvent(new Event('online')); }
     }));
     // Ronde 1 (faux-vert, constat 3) : éprouver une garde de classer() derrière un bouton éteint ou un rendu périmé — le nœud est RALLUMÉ, cliqué, puis le
     // redessin de la barre attendu (classer() finit toujours par synchroniser({ forcer: true }) : au redessin, il est sorti — R-D-10, un fait, pas des ticks).
@@ -2189,21 +2189,20 @@ export async function runClassementTests({ eq, ok }) {
       const LU = RECETTE_LUE('Tarte fine aux poires', 140, { missing_page: true, notes: 'Se congèle bien.', ingredients: [{ source_text: '2 poires', uncertain: false }, { source_text: '2 c. à soupe\nd’huile', uncertain: true }, { source_text: '1 pincée de sel', uncertain: true }], steps: [{ text: 'Mélanger.\nLaisser reposer.' }, { text: 'Cuire.' }] });
       await db.mutate({ puts: { imports: [lueDuLot('lg', { total: 2, page_ids: ['p1', 'p3'], device_id: moi, resultat: LU })] }, origin: 'device' });
       const ed = await monterEditeur(repo, db, { import: 'lg' });
-      const ingTa = champDe(ed, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea');
-      eq([ingTa?.value, champDe(ed, 'Notes')?.querySelector('textarea')?.value, champDe(ed, 'Étapes')?.querySelector('textarea')?.value], ['2 poires\n2 c. à soupe d’huile\n1 pincée de sel', 'Se congèle bien.', 'Mélanger.\nLaisser reposer.\n\nCuire.'], 'T-D19 (M151, M150, M101) : ?import= d’une ligne de lot → la ligne lue sur deux lignes est PLIÉE en une ; les notes lues posées ; une étape par paragraphe');
+      const lignes=()=>[...ed.querySelectorAll('[data-role=editeur-ingredient] details p')].map(n=>n.textContent);
+      eq([lignes().join('\n'), champDe(ed, 'Notes de cette version')?.querySelector('textarea')?.value, [...ed.querySelectorAll('[data-role=editeur-etape-texte]')].map(n=>n.value).join('\n\n')], ['2 poires\n2 c. à soupe\nd’huile\n1 pincée de sel', 'Se congèle bien.', 'Mélanger.\nLaisser reposer.\n\nCuire.'], 'T-D19 (M151, M150, M101) : ?import= d’une ligne de lot → le texte source sur deux lignes reste intact dans une seule ligne structurée ; les notes lues posées ; une étape par paragraphe');
       // Ronde 2 : AUCUNE ligne n'est cochée « Vérifié » dans ce parcours — save() efface `uncertain` d'une ligne vérifiée, et la coche de la ronde 1 sur la
       // ligne [0] rendait creux le « [0] faux » de M99 (un remplir() qui marquait toutes les lignes incertaines restait vert). E10 a son propre montage,
       // dans « T-D19 (ronde 1) ».
-      ingTa.value = ingTa.value.replace('1 pincée de sel', '1 pincée de sel fin'); ingTa.dispatchEvent(new Event('input', { bubbles: true }));
-      boutonTexte(ed, 'Analyser les lignes').click();
-      boutonTexte(ed, 'Enregistrer la recette').click();
+      const nom=ed.querySelectorAll('[data-role=ingredient-nom]')[2];nom.value='sel fin';nom.dispatchEvent(new Event('input',{bubbles:true}));
+      boutonTexte(ed, 'Enregistrer les modifications').click();
       await attendre(async () => (await statutDe(db, 'lg')) === 'enregistre', 'lecture close');
       const rec = (await db.getAll('recipes')).find((r) => r.original_title === 'Tarte fine aux poires');
       const ver = await db.get('recipe_versions', rec.current_version_id);
       const [p1, p3, p2] = await db.getMany('source_pages', ['p1', 'p3', 'p2']);
       const ss = await db.get('scan_sessions', 'ss1');
       eq([ver.provenance.import_id, ver.provenance.incomplete, ver.provenance.missing_page, ver.provenance.titre_lu], ['lg', false, true, 'Tarte fine aux poires'], 'T-D19 (M103) : la version porte la lecture — import_id, incomplete, missing_page, titre_lu');
-      eq(ver.ingredients.map((l) => [l.source_text, l.uncertain === true]), [['2 poires', false], ['2 c. à soupe d’huile', true], ['1 pincée de sel fin', false]], 'T-D19 (M99, M151) : la ligne pliée reste UNE ligne et garde uncertain ; [0] faux ; la ligne retapée perd uncertain');
+      eq(ver.ingredients.map((l) => [l.source_text, l.uncertain === true]), [['2 poires', false], ['2 c. à soupe\nd’huile', true], ['1 pincée sel fin', false]], 'T-D19 (M99, M151) : le texte source multiligne reste UNE ligne et garde uncertain ; [0] faux ; la ligne retapée perd uncertain');
       eq([ver.notes, rec.availability, ver.steps.length, ver.steps[0].text], ['Se congèle bien.', 'partial', 2, 'Mélanger.\nLaisser reposer.'], 'T-D19 (M150, M100, M101) : notes lues gardées ; page manquante → partial (jamais comblée) ; deux étapes, la première garde son saut de ligne');
       eq([[p1.printed_page, p1.kind, p1.role, p1.position], [p3.printed_page, p3.kind, p3.role, p3.position], [p2.kind, p2.role ?? null]], [[140, 'recipe', 'recette', 1], [null, 'recipe', 'recette', 3], [null, null]], 'T-D19 (M102, M94) : la première page reçoit p. 140, la seconde reste nulle ; kind recipe ET role recette ; positions inchangées ; p2, hors de la lecture, intacte');
       eq([ss.status, ss.recipe_ids], ['open', [rec.id]], 'T-D19 (M120) : la séance reçoit la recette, par le sac, et reste open — p2 est encore sans rôle');
@@ -2214,7 +2213,7 @@ export async function runClassementTests({ eq, ok }) {
       await poserSeance(repo, db, { id: 'ss2', pages: ['pA', 'pB'] });
       await db.mutate({ puts: { imports: [lueDuLot('lh', { classementId: 'cl_h', sessionId: 'ss2', page_ids: ['pA', 'pB'], device_id: moi, resultat: RECETTE_LUE('Clafoutis aux cerises', 60) })] }, origin: 'device' });
       scene.replaceChildren();
-      boutonTexte(await monterEditeur(repo, db, { import: 'lh' }), 'Enregistrer la recette').click();
+      boutonTexte(await monterEditeur(repo, db, { import: 'lh' }), 'Enregistrer les modifications').click();
       await attendre(async () => (await statutDe(db, 'lh')) === 'enregistre', 'seconde lecture close');
       eq((await db.get('scan_sessions', 'ss2')).status, 'done', 'T-D19 (M121, chemin de l’éditeur) : plus aucune photo sans rôle → done');
       // M152 : la ligne close par un autre onglet entre remplir et « Enregistrer » est RELUE.
@@ -2222,19 +2221,17 @@ export async function runClassementTests({ eq, ok }) {
       scene.replaceChildren();
       const ed3 = await monterEditeur(repo, db, { import: 'li' });
       await db.mutate({ puts: { imports: [{ ...(await db.get('imports', 'li')), status: 'enregistre', finished_at: NOW }] }, origin: 'device' });
-      boutonTexte(ed3, 'Enregistrer la recette').click();
-      await attendre(async () => (await db.getAll('recipes')).some((r) => r.original_title === 'Flan pâtissier'), 'fiche écrite sans la lecture');
-      const flan = (await db.getAll('recipes')).find((r) => r.original_title === 'Flan pâtissier');
-      const vFlan = await db.get('recipe_versions', flan.current_version_id);
-      eq([Object.hasOwn(vFlan.provenance, 'import_id'), vFlan.provenance.missing_page, flan.availability], [false, true, 'partial'], 'T-D19 (M152) : la ligne relue n’est plus a_verifier → la version ne nomme pas la lecture (aucun import_id) ; ce que la lecture a dit d’incomplet reste porté (I-1 du lot A, écart E-12)');
+      boutonTexte(ed3, 'Enregistrer les modifications').click();
+      await attendre(()=>!ed3.querySelector('[data-role=erreur-enregistrement]').hidden,'journal clos refusé');
+      eq([(await db.getAll('recipes')).some(r=>r.original_title==='Flan pâtissier'),await statutDe(db,'li'),ed3.etatEditeur().id!=null],[false,'enregistre',true],'T-D19 (M152) : journal clos ailleurs refuse la publication, conserve le brouillon et ne fabrique pas une provenance détachée');
       // M161 : une lecture sans notes (null).
       await db.mutate({ puts: { imports: [lueDuLot('lj', { classementId: 'cl_j', sessionId: 'ss2', page_ids: ['pA'], device_id: moi, resultat: RECETTE_LUE('Crème brûlée', 62) })] }, origin: 'device' });
       scene.replaceChildren();
       const ed4 = await monterEditeur(repo, db, { import: 'lj' });
-      eq(champDe(ed4, 'Notes')?.querySelector('textarea')?.value, '', 'T-D19 (M161) : une lecture sans notes (null) laisse la zone « Notes » vide');
-      boutonTexte(ed4, 'Enregistrer la recette').click();
+      eq(champDe(ed4, 'Notes de cette version')?.querySelector('textarea')?.value, '', 'T-D19 (M161) : une lecture sans notes (null) laisse la zone « Notes » vide');
+      boutonTexte(ed4, 'Enregistrer les modifications').click();
       await attendre(async () => (await statutDe(db, 'lj')) === 'enregistre', 'lecture sans notes close');
-      eq((await db.get('recipe_versions', (await db.getAll('recipes')).find((r) => r.original_title === 'Crème brûlée').current_version_id)).notes, '', 'T-D19 (M161) : « Enregistrer la recette » ne lève pas sur des notes nulles');
+      eq((await db.get('recipe_versions', (await db.getAll('recipes')).find((r) => r.original_title === 'Crème brûlée').current_version_id)).notes, undefined, 'T-D19 (M161) : « Enregistrer la recette » ne lève pas sur des notes nulles');
       // M148, chemin de l'éditeur : « Corriger » une fiche dont source_page_ids porte sa photo d'index.
       const pIdxY = { id: 'pIdxY', document_id: null, edition_id: 'ed1', sha256: 'sha-idx-y', printed_page: 7, file_position: null, locator: null, position: 1, issues: [], kind: 'index', created_at: DATE, updated_at: DATE };
       const pY = { ...pIdxY, id: 'pY', sha256: 'sha-y', printed_page: null, kind: 'recipe', position: 2 };
@@ -2242,9 +2239,10 @@ export async function runClassementTests({ eq, ok }) {
       await db.mutate({ puts: { recipes: [ref('rcY', 'Velouté de cresson', 30, { availability: 'partial', index_page_id: 'pIdxY', source_page_ids: ['pIdxY', 'pY'], current_version_id: 'rvY' })], recipe_versions: [vY], source_pages: [pIdxY, pY] }, origin: 'device' });
       scene.replaceChildren();
       const ed5 = await monterEditeur(repo, db, { kind: 'correction' }, { id: 'rcY' });
-      boutonTexte(ed5, 'Enregistrer une nouvelle version').click();
+      const etapeY=ed5.querySelector('[data-role=editeur-etape-texte]');etapeY.value='Cuire. Puis servir.';etapeY.dispatchEvent(new Event('input',{bubbles:true}));
+      boutonTexte(ed5, 'Enregistrer les modifications').click();
       await attendre(async () => (await db.get('recipes', 'rcY')).current_version_id !== 'rvY', 'correction écrite');
-      eq([await db.get('source_pages', 'pIdxY'), (await db.get('source_pages', 'pY')).role], [pIdxY, 'recette'], 'T-D19 (M148, chemin de l’éditeur) : « Corriger » ne réécrit pas la photo d’index de la fiche (ni kind, ni role, ni printed_page) ; les autres pages reçoivent role recette');
+      eq([await db.get('source_pages', 'pIdxY'), await db.get('source_pages', 'pY')], [pIdxY, pY], 'T-D19 (M148, chemin de l’éditeur) : « Corriger » ne réécrit pas la photo d’index de la fiche (ni kind, ni role, ni printed_page) ; les autres pages déjà liées restent aussi intactes pendant une correction de contenu');
     });
 
     await ecranT5('T-D19 (ronde 1) éditeur : séance relue dans la transaction, notes tapées gardées, saisie à la main, séance refusée, « Vérifié » après ?import=', async (repo, db) => {
@@ -2259,7 +2257,7 @@ export async function runClassementTests({ eq, ok }) {
       await db.mutate({ puts: { imports: [lueDuLot('lh', { classementId: 'cl_h', sessionId: 'ss2', page_ids: ['pA', 'pB'], device_id: moi, resultat: RECETTE_LUE('Clafoutis aux cerises', 60) })] }, origin: 'device' });
       const ed = await monterEditeur(repo, db, { import: 'lh' });
       const rendre = pieger('ss2', async () => { const s = await db.get('scan_sessions', 'ss2'); await db.mutate({ puts: { source_pages: [{ ...(await db.get('source_pages', 'pA')), id: 'pD', position: 3 }], scan_sessions: [{ ...s, page_ids: [...s.page_ids, 'pD'], recipe_ids: ['rcAutre'] }] }, origin: 'device' }); });
-      try { boutonTexte(ed, 'Enregistrer la recette').click(); await attendre(async () => (await statutDe(db, 'lh')) === 'enregistre', 'lecture close'); } finally { rendre(); }
+      try { boutonTexte(ed, 'Enregistrer les modifications').click(); await attendre(async () => (await statutDe(db, 'lh')) === 'enregistre', 'lecture close'); } finally { rendre(); }
       const clafoutis = (await db.getAll('recipes')).find((r) => r.original_title === 'Clafoutis aux cerises');
       const ss2 = await db.get('scan_sessions', 'ss2');
       eq([ss2.status, [...ss2.recipe_ids].sort()], ['open', ['rcAutre', clafoutis.id].sort()], 'T-D19 (ronde 1, E1, E2) : un autre onglet ajoute une recette et une photo à la séance entre la relecture et la transaction de l’éditeur → les DEUX recipe_ids gardés, et la séance reste open (pD, arrivée entre-temps, est sans rôle) : séance relue dans la transaction');
@@ -2268,12 +2266,15 @@ export async function runClassementTests({ eq, ok }) {
       globalThis.fetch = fauxFetch([200, corpsModele(RECETTE_LUE('Flan pâtissier', 70, { notes: 'Se congèle bien.' }))]).fetch;
       scene.replaceChildren();
       const ed2 = await monterEditeur(repo, db, { pages: 'pN', edition: 'ed1', session: 'ss3' });
-      const notes = champDe(ed2, 'Notes')?.querySelector('textarea');
+      const notes = champDe(ed2, 'Notes de cette version')?.querySelector('textarea');
       notes.value = 'Ma note à moi'; notes.dispatchEvent(new Event('input', { bubbles: true }));
       boutonTexte(ed2, 'Extraire avec l’assistant IA').click();
+      await attendre(()=>ed2.querySelector('[data-role=adopter-lecture-editeur]'),'lecture conservée');
+      ed2.querySelector('[data-role=adopter-lecture-editeur]').click();await attendre(()=>document.querySelector('dialog[open]'),'adoption proposée');
+      boutonTexte(document.querySelector('dialog[open]'),'Utiliser cette lecture').click();
       await attendre(() => champDe(ed2, 'Titre original *')?.querySelector('input')?.value === 'Flan pâtissier', 'lecture posée');
-      const zone = notes.value;
-      boutonTexte(ed2, 'Enregistrer la recette').click();
+      const zone = champDe(ed2,'Notes de cette version').querySelector('textarea').value;
+      boutonTexte(ed2, 'Enregistrer les modifications').click();
       await attendre(async () => (await db.getAll('imports')).some((i) => i.kind === 'recette' && i.status === 'enregistre' && i.page_ids?.includes('pN')), 'lecture close');
       const flan = (await db.getAll('recipes')).find((r) => r.original_title === 'Flan pâtissier');
       eq([zone, (await db.get('recipe_versions', flan.current_version_id)).notes], ['Ma note à moi', 'Ma note à moi'], 'T-D19 (ronde 1, E5) : des notes tapées avant « Extraire avec l’assistant IA » sont gardées dans la zone et dans la version (les notes lues ne vont que dans une zone vide)');
@@ -2281,8 +2282,8 @@ export async function runClassementTests({ eq, ok }) {
       scene.replaceChildren();
       const ed3 = await monterEditeur(repo, db, { pages: 'pM', edition: 'ed1', session: 'ss3' });
       const titre = champDe(ed3, 'Titre original *').querySelector('input'); titre.value = 'Tarte tatin maison'; titre.dispatchEvent(new Event('input', { bubbles: true }));
-      const ing = champDe(ed3, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)').querySelector('textarea'); ing.value = '6 pommes'; ing.dispatchEvent(new Event('input', { bubbles: true }));
-      boutonTexte(ed3, 'Enregistrer la recette').click();
+      const ing = ed3.querySelector('[data-role=texte-analyse-ingredients]'); ing.value = '6 pommes';boutonTexte(ed3,'Analyser les lignes').click();
+      boutonTexte(ed3, 'Enregistrer les modifications').click();
       await attendre(async () => (await db.getAll('recipes')).some((r) => r.original_title === 'Tarte tatin maison'), 'fiche saisie à la main');
       const tatin = (await db.getAll('recipes')).find((r) => r.original_title === 'Tarte tatin maison');
       eq([(await db.get('scan_sessions', 'ss3')).recipe_ids.includes(tatin.id), (await db.getAll('imports')).some((i) => i.page_ids?.includes('pM'))], [true, false], 'T-D19 (ronde 1, E14) : une saisie à la main depuis « Regrouper en recette » (aucune lecture du journal) → la séance reçoit la recette, comme avant D ; aucune ligne du journal');
@@ -2294,24 +2295,15 @@ export async function runClassementTests({ eq, ok }) {
       const ed4 = await monterEditeur(repo, db, { import: 'lr' });
       viderToast();
       const rendre2 = pieger('ss5', () => db.mutate({ deletes: { scan_sessions: ['ss5'] }, origin: 'device' }));
-      try { boutonTexte(ed4, 'Enregistrer la recette').click(); await attendre(() => toastDit() === 'La recette n’a pas pu être enregistrée. Réessaie.', 'refus dit'); } finally { rendre2(); }
+      try { boutonTexte(ed4, 'Enregistrer les modifications').click(); await attendre(() => !ed4.querySelector('[data-role=erreur-enregistrement]').hidden, 'refus dit'); } finally { rendre2(); }
       const lrRefusee = [await statutDe(db, 'lr'), (await db.getAll('recipes')).some((r) => r.original_title === 'Riz au lait')];
-      boutonTexte(ed4, 'Enregistrer la recette').click();
-      await attendre(async () => (await statutDe(db, 'lr')) === 'enregistre', 'lecture close sans la séance');
-      const riz = (await db.getAll('recipes')).find((r) => r.original_title === 'Riz au lait');
-      eq([lrRefusee, (await db.get('recipe_versions', riz.current_version_id)).provenance.import_id, await db.get('scan_sessions', 'ss5') ?? null], [['a_verifier', false], 'lr', null], 'T-D19 (ronde 1) : la séance disparue entre la relecture et la transaction → refus dit, rien d’écrit ; le geste suivant enregistre la fiche ET clôt la lecture (import_id), sans ressusciter la séance');
+      boutonTexte(ed4, 'Enregistrer les modifications').click();await ed4.flushEditeur();await tick();
+      eq([lrRefusee, await statutDe(db,'lr'), (await db.getAll('recipes')).some(r=>r.original_title==='Riz au lait'),await db.get('scan_sessions','ss5')??null,ed4.etatEditeur().id!=null],[['a_verifier',false],'a_verifier',false,null,true],'T-D19 (ronde 1) : séance disparue refuse les deux gestes, conserve le brouillon et le journal, sans recréer ni détacher implicitement');
       await poserSeance(repo, db, { id: 'ss6', pages: ['pK'] });
       await db.mutate({ puts: { scan_sessions: [{ ...(await db.get('scan_sessions', 'ss6')), status: 'zzz' }], imports: [lueDuLot('lq', { classementId: 'cl_q', sessionId: 'ss6', page_ids: ['pK'], device_id: moi, resultat: RECETTE_LUE('Pain perdu', 81) })] }, origin: 'device' });
       scene.replaceChildren();
       const ed5 = await monterEditeur(repo, db, { import: 'lq' });
-      viderToast();
-      boutonTexte(ed5, 'Enregistrer la recette').click();
-      await attendre(() => toastDit() === 'La recette n’a pas pu être enregistrée. Réessaie.', 'refus dit');
-      const lqRefusee = await statutDe(db, 'lq');
-      boutonTexte(ed5, 'Enregistrer la recette').click();
-      await attendre(async () => (await statutDe(db, 'lq')) === 'enregistre', 'lecture close sans la séance');
-      const ss6 = await db.get('scan_sessions', 'ss6');
-      eq([lqRefusee, ss6.status, ss6.recipe_ids, (await db.getAll('recipes')).filter((r) => r.original_title === 'Pain perdu').length], ['a_verifier', 'zzz', [], 1], 'T-D19 (ronde 1) : une séance d’un statut hors open/done → refus dit ; le geste suivant écrit SANS elle (jamais relue indéfiniment), clôt la lecture, une seule fiche ; la séance intacte');
+      eq([ed5.querySelector('[data-role=enregistrer-editeur]'),await statutDe(db,'lq'),(await db.get('scan_sessions','ss6')).status,(await db.getAll('recipes')).filter(r=>r.original_title==='Pain perdu').length,ed5.textContent.trim().length>0],[null,'a_verifier','zzz',0,true],'T-D19 (ronde 1) : séance de statut inconnu refuse l’ouverture éditable avec explication, lecture intacte et aucune fiche créée');
       // E10 (ronde 1 ; montage à part depuis la ronde 2, pour que le parcours principal de T-D19 garde sa ligne [0] NON vérifiée) : le tableau des lignes
       // est redessiné après la pose de `uncertain` — « Vérifié » coché sur la première ligne d'une lecture posée par ?import= vaut à l'enregistrement (sans
       // ce redessin, la coche modifierait un objet ligne abandonné) ; la ligne vérifiée perd `uncertain`, l'autre ligne garde le sien (faux).
@@ -2319,8 +2311,8 @@ export async function runClassementTests({ eq, ok }) {
       await db.mutate({ puts: { imports: [lueDuLot('lv', { classementId: 'cl_v', sessionId: 'ss8', page_ids: ['pV'], device_id: moi, resultat: RECETTE_LUE('Poires pochées', 82, { ingredients: [{ source_text: '4 poires', uncertain: true }, { source_text: '1 citron', uncertain: false }] }) })] }, origin: 'device' });
       scene.replaceChildren();
       const ed6 = await monterEditeur(repo, db, { import: 'lv' });
-      ed6.querySelector('table.compare tbody tr input[type="checkbox"]').click();
-      boutonTexte(ed6, 'Enregistrer la recette').click();
+      ed6.querySelector('[data-role=editeur-ingredient] input[type="checkbox"]').click();
+      boutonTexte(ed6, 'Enregistrer les modifications').click();
       await attendre(async () => (await statutDe(db, 'lv')) === 'enregistre', 'lecture close (E10)');
       const poires = (await db.getAll('recipes')).find((r) => r.original_title === 'Poires pochées');
       eq((await db.get('recipe_versions', poires.current_version_id)).ingredients.map((l) => [l.source_text, l.verification_state, l.uncertain === true]), [['4 poires', 'verified', false], ['1 citron', 'to_verify', false]], 'T-D19 (ronde 1, E10) : « Vérifié » coché dans le tableau après ?import= → la première ligne est enregistrée verified et perd uncertain ; la seconde reste to_verify, sans uncertain (le tableau suit les lignes de la lecture posée)');
@@ -2383,7 +2375,7 @@ export async function runClassementTests({ eq, ok }) {
       await db.mutate({ puts: { imports: [lecture('lk6', RECETTE_LUE('Soupe de courge rôtie', 132))] }, origin: 'device' });
       scene.replaceChildren();
       const n0 = (await db.getAll('recipes')).length;
-      boutonTexte(await monterEditeur(repo, db, { import: 'lk6' }), 'Enregistrer la recette').click();
+      boutonTexte(await monterEditeur(repo, db, { import: 'lk6' }), 'Enregistrer les modifications').click();
       await attendre(async () => (await statutDe(db, 'lk6')) === 'enregistre', 'nouvelle fiche');
       eq([(await db.getAll('recipes')).length, (await db.getAll('recipes')).some((r) => r.original_title === 'Soupe de courge rôtie')], [n0 + 1, true], 'T-D21 : ne rien choisir puis « Enregistrer la recette » → une nouvelle fiche, comme avant');
     });
@@ -2478,7 +2470,7 @@ export async function runClassementTests({ eq, ok }) {
       const ligne = (await db.getAll('imports')).find((i) => i.kind === 'recette');
       eq([f.appels.length, ligne.page_ids, ligne.recipe_id, navs.at(-1)], [2, ['pB', 'pA'], null, '/add?section=imports'], 'T-D22 : UN classement et UNE lecture (2 POST en tout), la ligne sur [pB, pA], sans référence ; Imports ensuite');
       scene.replaceChildren();
-      boutonTexte(await monterEditeur(repo, db, { import: ligne.id }), 'Enregistrer la recette').click();
+      boutonTexte(await monterEditeur(repo, db, { import: ligne.id }), 'Enregistrer les modifications').click();
       await attendre(async () => (await statutDe(db, ligne.id)) === 'enregistre', 'enregistrée');
       const rec = (await db.getAll('recipes')).find((r) => r.original_title === 'Clafoutis');
       scene.replaceChildren();
@@ -2576,7 +2568,7 @@ export async function runClassementTests({ eq, ok }) {
       eq(['Monter la page {n}', 'Descendre la page {n}', 'Retirer la page {n}', 'incertain', 'Incertain : {t}', 'Annuler', 'Ignorer', 'Reprendre', 'Relancer', 'Tu es hors ligne.', 'En cours sur un autre écran', 'Une lecture est déjà en cours : annule-la d’abord.', 'Code : {c}', 'L’assistant n’a pas répondu lisiblement. Réessaie.', 'Connecte-toi pour utiliser l’assistant.', '{n} photo ajoutée', '{n} photos ajoutées', 'p.', 'Sans livre', 'La recette n’a pas pu être enregistrée. Réessaie.', 'Une lecture = un appel à l’assistant, compté dans ton quota du jour.', 'Les photos de cette séance ne sont pas sur cet appareil.', 'Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.', 'La lecture a été interrompue. L’appel a peut-être été compté ; relancer en coûtera un autre.', 'L’appel a peut-être été compté ; relancer en coûtera un autre.', 'Page {n}', 'Une erreur est survenue', 'La demande est trop lourde : choisis moins de pages.'].filter((k) => typeof EN[k] !== 'string'), [], 'T-D20 : les clés existantes que le lot réemploie sont toujours là (ronde 1 de T6 : les trois phrases I-4 du lot A et les trois clés anciennes de regroupement.js comprises)');
       const sw = await lire('../sw.js');
       ok(sw.includes("'./src/domain/classement.js'") && sw.includes("'./src/ui/regroupement.js'"), 'T-D20 : SHELL contient les deux modules neufs du lot');
-      eq([APP_VERSION, sw.includes(`VERSION = 'cuisine-os-v${APP_VERSION}-`), MODULES_NEUFS.includes('../src/ui/regroupement.js')], ['0.25.0', true, true], 'T-D20 : APP_VERSION 0.25.0 (fixée par le chef d’orchestre : R-D-12 au lot D, R-E-18 au lot E, Global Constraints au lot F, I-UI-7 au lot UI-1), VERSION du service worker sur elle, regroupement.js dans le filet i18n');
+      eq([APP_VERSION, sw.includes(`VERSION = 'cuisine-os-v${APP_VERSION}-`), MODULES_NEUFS.includes('../src/ui/regroupement.js')], ['0.26.0', true, true], 'T-D20 : APP_VERSION 0.26.0 (fixée par le chef d’orchestre : R-D-12 au lot D, R-E-18 au lot E, Global Constraints au lot F, I-UI-7 au lot UI-1), VERSION du service worker sur elle, regroupement.js dans le filet i18n');
       const sources = await Promise.all(['../src/ui/regroupement.js', '../src/domain/classement.js'].map(lire));
       ok(sources.every((x) => x.length > 1000) && /export function panneauClassement/.test(sources[0]) && /export function proposerAppariements/.test(sources[1]), 'T-D20 : les deux modules neufs sont lus (garde contre un source vide)');
       eq(sources.map((x) => /anthropic|supabase/i.test(x)), [false, false], 'T-D20 : aucun texte ne nomme le fournisseur ni la base dans les deux modules neufs (toute casse, ronde 1 de T6)');

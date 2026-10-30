@@ -1,9 +1,19 @@
-# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — 0.25.0 EN LIGNE — L3 PUBLIÉ
+# STATE.md — Cuisine OS (Mistu) — 29 octobre 2026 — 0.26.0 LOCALE — L4 REÇU
 
-**L4 — Éditeurs et brouillons en construction.** [Spec](docs/superpowers/specs/2026-10-29-l4-editeurs-brouillons-design.md)
-relue techniquement après réception publique L3 ; branche `l4-editeurs-brouillons`, base `9ecf826`.
-Brouillons locaux conditionnés, publication atomique, édition de recette et de livre, sorties protégées.
-Cible0.26.0 ; DB6/archive3 inchangées, aucun SQL nouveau. L4 n’est pas encore reçu ni publié.
+**L4 — Éditeurs et brouillons : réception locale terminée, publication autorisée à suivre.**
+[Spec](docs/superpowers/specs/2026-10-29-l4-editeurs-brouillons-design.md), [rapport](docs/superpowers/plans/2026-10-29-l4-editeurs-brouillons.md).
+Branche `l4-editeurs-brouillons`, base `9ecf826`, contrat `de858f9`, revues techniques avant construction.
+Formulaires structurés de recette/livre, source à côté ou bascule mobile, cinq sections, brouillons locaux repris explicitement.
+Publication atomique et idempotente, métadonnées sans version superflue, lignes/paragraphes/original conservés,
+réponse payée liée au journal exact, comparaison de conflits, récupération de texte et sorties protégées.
+Titre personnalisé principal dans fiches/cartes/listes/cuisine ; valeurs corrigées également utilisées dans les exports.
+**8880/8880** navigateur (épingle8879, +333 depuis L3 sans retrait), Node232/232, générateur0, syntaxe60 et diff propres.
+Domaine129 assertions ; vrais parcours Chrome **28+12 mesures**, deux onglets, rechargement/reprise, quota,
+création hors ligne, note/photo conservées, dix nouveaux modules dans le cache unique.
+**0.26.0**, cache `cuisine-os-v0.26.0-1`, DB6/archive3 inchangées, aucun SQL nouveau.
+Brouillons propres à l’appareil, hors archive/synchronisation ; touches non confirmées et historique étranger sans index restent limités.
+Aucun compte privé, appel assistant réel ou essai physique iPhone/Safari ; production encore0.25.0 à ce stade.
+L5 est en préparation de contrat, sans code ; **L5–L10 et E1 restent à réaliser**.
 
 **L3 — Gestion visible : publié et vérifié.** Branche `l3-gestion-visible`, base publique `fc407df`.
 [Spec](docs/superpowers/specs/2026-10-29-l3-gestion-visible-design.md), [rapport](docs/superpowers/plans/2026-10-29-l3-gestion-visible.md).
