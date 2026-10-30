@@ -582,3 +582,34 @@ Après application, comparaison en lecture seule :56 fonctions avec corps, SECDE
 Capacités vérifiées dans la transaction d’application : recipe_lifecycle1, edition_lifecycle1, source_batches1, source_revisions1. Aucun contenu métier consulté ou modifié, aucun JWT utilisateur emprunté. Les preuves mutantes sont locales :327 assertions PostgreSQL UTF8, dix contrôles à deux connexions,369 vecteurs JS/SQL concordants et deux vrais moteurs avec confirmation perdue/rejeu et file inversée. Aucun essai HTTP authentifié sur appareil privé revendiqué.
 
 Traces : `.superpowers/sdd/2026-10-29-l5/production-application.json`, `catalogue-reception.json`, `privileges-serveur.json`. Aucun redéploiement de la fonction assistant.
+
+
+## Rapprochement documentaire `0011`–`0013` — lot C, 30 octobre 2026
+
+Les traces locales d’application et de comparaison déjà produites lors de L6–L8 ont été relues pour combler l’absence de ces sections. **Ce rapprochement n’est pas un nouveau postflight distant et n’est pas attribué à Neegan.** Aucune requête ni migration n’a été exécutée sur `mitsu` pendant le lot C. Le contrôle actuel par Neegan reste requis avant `0014` (README, étape 15).
+
+| Migration | Date du reçu historique UTC | SHA256 du fichier appliqué selon la trace |
+| --- | --- | --- |
+| `0011_ingredients_traductions.sql` | 30 octobre 2026, 04:16:09 | `6a5930a9782507212860a1f323afc838f14bf8f0ba678b8706681cb31ad12336` |
+| `0012_cuisine_minuteurs.sql` | 30 octobre 2026, 05:26:30 | `daa0767e323514b9d344494838f71b732e5ae8aeecf3dd9b582e7a34f8bbc669` |
+| `0013_inventaire.sql` | 30 octobre 2026, 06:11:45 | `02f0390bed59a9297e3c2138679512a26c64e8acebd7b961128ca454eaa6be3b` |
+
+Les trois empreintes correspondent toujours aux fichiers du dépôt. Traces historiques : `.superpowers/sdd/2026-10-29-l6/`, `2026-10-30-l7/`, `2026-10-30-l8/` : `production-application.json` et `catalogue-comparaison.json`. Les reçus L6/L7/L8 de `STATE.md` décrivent les comparaisons de corps, triggers, RLS et droits clients ; les différences de droits par défaut de `service_role` y sont explicitement distinguées. Ces répertoires sont des preuves locales ignorées par Git, pas une sauvegarde du serveur.
+
+### Postflight `0011` — à compléter par Neegan
+
+Date actuelle, sauvegarde, 48 fonctions attendues dans le reçu L6 et définitions éventuellement remplacées depuis, trois triggers L6, capacité `recipe_language:1`, ACL clients et héritages : **non relevés à nouveau dans le lot C**. Résultat du contrôle actuel : à consigner.
+
+### Postflight `0012` — à compléter par Neegan
+
+Date actuelle, sauvegarde, 33 fonctions attendues dans le reçu L7 et définitions éventuellement remplacées depuis, cinq triggers L7, capacité `cooking_persistence:1`, ACL clients et héritages : **non relevés à nouveau dans le lot C**. Résultat du contrôle actuel : à consigner.
+
+### Postflight `0013` — à compléter par Neegan
+
+Date actuelle, sauvegarde, fonctions et triggers L8, capacité `inventory_changes:1`, ACL clients et héritages, tables privées et transferts orphelins : **non relevés à nouveau dans le lot C**. Résultat du contrôle actuel : à consigner.
+
+## Migration `0014_maintenance_et_bornes.sql` — NON appliquée
+
+**0014 écrite, non appliquée : geste de Neegan, après son postflight de 0011–0013.** Les preuves du lot C concernent uniquement PostgreSQL local jetable. Aucun nettoyage de tombales, purge de compte, ajout de clé étrangère ou nouvelle tâche cron n’a été exécuté sur le serveur. La future date d’application, l’empreinte approuvée, la sauvegarde et le postflight devront être ajoutés ici au moment du geste.
+
+Reçu local final de C : fichier 0014 de 43 341 octets, SHA256 `94b168bb1543ec544a35854b45c09b558342db551eca7ba2ce2c6b5d66c7ab7a` ; 35/35 scénarios dédiés et 27/27 anciens prouveurs SQL sur PostgreSQL jetable. Cette empreinte identifie le fichier prêt à relire, **pas une application distante**. [Compte rendu](../../docs/superpowers/plans/2026-10-30-correctifs-audit-c-reception.md).

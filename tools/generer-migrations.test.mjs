@@ -259,7 +259,7 @@ test('0003 : les quatre fonctions recreees sont celles de 0001, aux trois listes
 // Ces fichiers ne sont pas generes : ils sont ecrits a la main et relus contre le SQL genere ci-dessus. Les tests
 // qui suivent verifient ce qu'une relecture humaine laisse passer : un motif oublie, une adresse reelle, un
 // « rollback; » qui ne serait plus la derniere instruction, et le mode d'emploi qui cite 0001 de travers.
-import { readFileSync, writeFileSync, copyFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, copyFileSync, mkdtempSync, rmSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -270,7 +270,7 @@ const lire = (chemin) => readFileSync(new URL('../' + chemin, import.meta.url), 
 const RACINE_MIG = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SCRIPT_MIG = path.join(RACINE_MIG, 'tools', 'generer-migrations.mjs');
 const MIGRATIONS = path.join(RACINE_MIG, 'supabase', 'migrations');
-const NOMS = ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql', '0005_imports.sql', '0008_corbeille_recettes.sql', '0009_corbeille_livres.sql', '0010_sources_index.sql', '0011_ingredients_traductions.sql', '0012_cuisine_minuteurs.sql', '0013_inventaire.sql'];
+const NOMS = ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql', '0005_imports.sql', '0008_corbeille_recettes.sql', '0009_corbeille_livres.sql', '0010_sources_index.sql', '0011_ingredients_traductions.sql', '0012_cuisine_minuteurs.sql', '0013_inventaire.sql', '0014_maintenance_et_bornes.sql'];
 const instructions = (texte) => texte.split('\n').map((l) => l.trim()).filter((l) => l !== '');
 // Une rubrique du README : du titre donne a la prochaine rubrique (## ou ###), pas seulement au prochain « ## » — depuis la tache 2 du
 // lot A, l'etape 10 est suivie de l'etape 11 (###), et une tranche ouverte jusqu'au « ## » suivant compterait deux fois `notify pgrst`.
@@ -601,8 +601,8 @@ test('0004 (P-8) : le commentaire dit l hypothese READ COMMITTED juste au-dessus
   assert.equal(avant.at(-1), '', 'la fonction commence en debut de ligne');
   assert.equal(avant.at(-2), "-- Le motif verrou-puis-comptage suppose READ COMMITTED (défaut de PostgREST) : en REPEATABLE READ l'instantané précéderait le verrou.");
 });
-test('0004 : hors du generateur — absente de NOMS (neuf generees depuis L7), le dossier de migrations la contient', () => {
-  assert.deepEqual(NOMS, ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql', '0005_imports.sql', '0008_corbeille_recettes.sql', '0009_corbeille_livres.sql', '0010_sources_index.sql', '0011_ingredients_traductions.sql', '0012_cuisine_minuteurs.sql', '0013_inventaire.sql']);
+test('0004 : hors du generateur — absente de NOMS (onze generees depuis la maintenance), le dossier de migrations la contient', () => {
+  assert.deepEqual(NOMS, ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql', '0005_imports.sql', '0008_corbeille_recettes.sql', '0009_corbeille_livres.sql', '0010_sources_index.sql', '0011_ingredients_traductions.sql', '0012_cuisine_minuteurs.sql', '0013_inventaire.sql', '0014_maintenance_et_bornes.sql']);
   assert.ok(!NOMS.some((n) => n.startsWith('0004')), '0004 n est pas generee');
   assert.ok(readFileSync(path.join(MIGRATIONS, '0004_assistant_journal.sql'), 'utf8').length > 0);
 });
@@ -1160,10 +1160,10 @@ test('README : etape 11 (0005, notify seule, preuve, RESULTATS) entre 10 et « O
   assert.match(etape.slice(etape.indexOf('notify pgrst') - 200, etape.indexOf('notify pgrst')), /seule/, 'collee seule');
   assert.doesNotMatch(etape, /B_UUID|B_EMAIL/, 'un seul compte de preuve');
   assert.doesNotMatch(etape, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
-  // L'arbre du README conserve les deux fichiers du lot A ; L1 porte le total à cinq migrations générées.
+  // L'arbre du README conserve les deux fichiers du lot A ; La maintenance porte le total à onze migrations générées.
   const arbre = r.slice(0, r.indexOf('## Un seul projet'));
   for (const f of ['migrations/0005_imports.sql', 'proofs/0005_imports.sql']) assert.ok(arbre.includes(f), 'arbre : ' + f);
-  assert.ok(arbre.includes('cinq migrations générées'), 'intro : cinq generees avec la corbeille L1');
+  assert.ok(arbre.includes('onze migrations générées'), 'intro : onze generees avec la maintenance');
 });
 test('RESULTATS-mitsu : section « Preuve 0005_imports.sql — à jouer » preparee, sans cle ni adresse', () => {
   const res = lire('supabase/proofs/RESULTATS-mitsu.md');
@@ -1389,4 +1389,54 @@ test('index.ts (UI-2) : apercu-web dans le flux apres image-web et avant le mode
   const decl = code.slice(d, f); const sans = code.replace(decl, '');
   const t = sans.indexOf('async function traiter(');
   assert.deepEqual(ordreDuFlux(sans.slice(0, t) + decl + sans.slice(t)), { presents: true, croissants: false }, 'mutant « apercuDe avant traiter » : rouge');
+});
+
+// Lot C : sortie du générateur dans un dossier jetable, puis dérive réellement refusée.
+test('0014 : le generateur produit la migration de maintenance dans --dir', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mistu-maintenance-generation-'));
+  try {
+    const resultat = spawnSync(process.execPath, [SCRIPT_MIG, '--dir', dir], {encoding:'utf8'});
+    assert.equal(resultat.status, 0, resultat.stderr);
+    assert.ok(readdirSync(dir).includes('0014_maintenance_et_bornes.sql'), 'migration 0014 produite');
+    const verification = spawnSync(process.execPath, [SCRIPT_MIG, '--check', '--dir', dir], {encoding:'utf8'});
+    assert.equal(verification.status, 0, verification.stderr);
+  } finally { rmSync(dir, {recursive:true, force:true}); }
+});
+
+test('0014 : --check refuse une migration de maintenance absente ou alteree', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mistu-maintenance-derive-'));
+  try {
+    const resultat = spawnSync(process.execPath, [SCRIPT_MIG, '--dir', dir], {encoding:'utf8'});
+    assert.equal(resultat.status, 0, resultat.stderr);
+    const migration = path.join(dir, '0014_maintenance_et_bornes.sql');
+    assert.ok(readdirSync(dir).includes(path.basename(migration)), 'migration 0014 avant mutation');
+    writeFileSync(migration, readFileSync(migration, 'utf8') + '\n-- mutation de preuve\n');
+    let verification = spawnSync(process.execPath, [SCRIPT_MIG, '--check', '--dir', dir], {encoding:'utf8'});
+    assert.equal(verification.status, 1);
+    assert.match(verification.stderr, /différent du généré : 0014_maintenance_et_bornes\.sql/);
+    rmSync(migration);
+    verification = spawnSync(process.execPath, [SCRIPT_MIG, '--check', '--dir', dir], {encoding:'utf8'});
+    assert.equal(verification.status, 1);
+    assert.match(verification.stderr, /différent du généré : 0014_maintenance_et_bornes\.sql/);
+  } finally { rmSync(dir, {recursive:true, force:true}); }
+});
+
+// Les migrations déjà livrées ne changent pas avec la maintenance additive.
+test('maintenance : empreintes des treize migrations historiques inchangees', () => {
+  const attendues = {
+  "0001_tables_et_regles.sql": "e90ff35ec7c031f63dfb903e6885103ed7e42202866f59359ce019d00b85ee51",
+  "0002_stockage.sql": "2e90d2b1beb7270601f83c7408b1a2a2be32c800772f14f454960b233a2d5944",
+  "0003_assistant_config.sql": "37f9f80d62cf82457b177f35979892ce7deeaf2067567a506228e145ad8efd39",
+  "0004_assistant_journal.sql": "842074f30d80a819f2ef9dac3cb81fc9d845ee88b2be115ca69c712140674217",
+  "0005_imports.sql": "1af9e999d88958ea44ed739900cef842e54d1473b9d3f6a825ee23a388600ae0",
+  "0006_lecture_web.sql": "b2d4cf5944e2c2dc0c3982f0acbcd88d3b61d0f849d3693635aa98d1d286f234",
+  "0007_apercu_web.sql": "70168ef84f16d914532aa57eddf4c9b8162234c7cff4381e54145cfd59ab3739",
+  "0008_corbeille_recettes.sql": "d7bbb381d8b7f56c28e74ae32be9c6f3d596ffdf908bbbf244e5235d853a63a3",
+  "0009_corbeille_livres.sql": "1acc501bd34db30c5240fadc8ece75fafae9ef21b6524d4474fe9f219eb5e1a9",
+  "0010_sources_index.sql": "7314afe7c0a177328dfb2c0618af65d26d1cb84a6328624d21016268815fd9fb",
+  "0011_ingredients_traductions.sql": "6a5930a9782507212860a1f323afc838f14bf8f0ba678b8706681cb31ad12336",
+  "0012_cuisine_minuteurs.sql": "daa0767e323514b9d344494838f71b732e5ae8aeecf3dd9b582e7a34f8bbc669",
+  "0013_inventaire.sql": "02f0390bed59a9297e3c2138679512a26c64e8acebd7b961128ca454eaa6be3b"
+};
+  for (const [nom, empreinte] of Object.entries(attendues)) assert.equal(sha(readFileSync(path.join(MIGRATIONS, nom))), empreinte, nom);
 });

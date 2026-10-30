@@ -1,6 +1,6 @@
 # Supabase — comment appliquer et prouver le serveur de synchronisation
 
-Ce dossier contient **tout le serveur** de Cuisine OS : cinq migrations générées (`0001`, `0002`, `0003`, `0005`, `0008`) et trois
+Ce dossier contient **tout le serveur** de Cuisine OS : onze migrations générées (`0001`, `0002`, `0003`, `0005`, `0008` à `0014`) et trois
 écrites à la main (`0004`, `0006`, `0007`), dans `migrations/` ; les preuves à jouer après les avoir appliquées (`proofs/`) et la fonction de la passerelle de l'assistant
 (`functions/`). Rien n'est appliqué automatiquement : chaque étape est un geste de
 Neegan dans l'éditeur SQL du tableau de bord Supabase. Spec de référence :
@@ -25,6 +25,13 @@ supabase/
   migrations/0008_corbeille_recettes.sql générée par tools/corbeille-sql.mjs (via generer-migrations.mjs), lot L1, étape 14
   proofs/0008_corbeille_recettes.sql     preuve mutante réservée à une base de test ; rollback final
   proofs/0008_corbeille_concurrence.cjs  deux sessions sur le PostgreSQL local de preuve uniquement
+  migrations/0009_corbeille_livres.sql   cycle des éditions, générée
+  migrations/0010_sources_index.sql      sources et index, générée
+  migrations/0011_ingredients_traductions.sql traductions, générée
+  migrations/0012_cuisine_minuteurs.sql  cuisine et minuteries, générée
+  migrations/0013_inventaire.sql         inventaire, générée
+  migrations/0014_maintenance_et_bornes.sql maintenance, générée ; NON appliquée
+  proofs/0014_maintenance.sql           preuves mutantes, base locale jetable uniquement
   functions/assistant/                   la fonction de la passerelle (index.ts, logique.js, lecture-web.js, deno.json) ; déployée par le CLI, étape 10
   proofs/0001_hook.md                    gabarit : capture du crochet « Before User Created »
   proofs/0001_providers.md               gabarit : capture des fournisseurs de connexion
@@ -447,6 +454,38 @@ exécutées séparément sur PostgreSQL local. Résultats et limites dans `proof
 
 Conserver les protections serveur si une version de l’interface doit être retirée. Une bibliothèque DB5
 ne s’ouvre pas avec l’ancien logiciel DB4 ; un retour arrière ne doit pas effacer les marqueurs de corbeille.
+
+### 15. De `0009` à `0014` — reçus, maintenance et suppression administrative
+
+**État du lot C : `0014` écrite pour relecture, non appliquée.** Son application est un geste de Neegan, après son postflight de `0011`–`0013`. Publier le site ou committer le fichier SQL ne l’applique pas. Aucun redéploiement de la fonction `assistant` n’est requis.
+
+| Migration | Objet | État documenté de `mitsu` |
+| --- | --- | --- |
+| `0009_corbeille_livres.sql` | Cycle des éditions | Reçu historique dans `RESULTATS-mitsu.md` |
+| `0010_sources_index.sql` | Sources, index, transferts privés | Reçu historique dans `RESULTATS-mitsu.md` |
+| `0011_ingredients_traductions.sql` | Versions structurées et traductions | Reçu historique rapproché ; postflight de Neegan à consigner |
+| `0012_cuisine_minuteurs.sql` | Cuisine et minuteries | Reçu historique rapproché ; postflight de Neegan à consigner |
+| `0013_inventaire.sql` | Inventaire | Reçu historique rapproché ; postflight de Neegan à consigner |
+| `0014_maintenance_et_bornes.sql` | Purge des tombales, verrous bornés, purge administrative, transferts | **Non appliquée** |
+
+Sur une base neuve, appliquer les migrations manquantes dans cet ordre après `0001`–`0008`, une fois chacune. Sur `mitsu`, **ne pas recoller `0009`–`0013`** : vérifier d’abord ce qui est déjà installé. Les empreintes historiques et les preuves locales ne remplacent pas le catalogue distant actuel.
+
+Avant `0014`, Neegan consigne dans `proofs/RESULTATS-mitsu.md` la date et le résultat de ces contrôles en lecture seule :
+
+1. Sauvegarde terminée et moyen de restauration identifié ; catalogue et droits actuels conservés sans données métier ni identifiants personnels.
+2. Corps installés de L6/L7/L8, `l1_guard_recipe`, `l2_guard_write`, `sync_push_v2` et `sync_capabilities` comparés au résultat d’un PostgreSQL local ayant reçu `0001`–`0013`. Les gardes L1/L2 doivent contenir les trois exceptions successives de traduction, cuisine et inventaire.
+3. Fonctions attendues, `security definer`/`invoker`, propriétaire, `search_path`, droits `PUBLIC`/`anon`/`authenticated`/`service_role`, triggers activés et RLS. Une différence de privilèges par défaut de `service_role` doit être expliquée ; aucun héritage par les rôles clients ne doit être supposé.
+4. Capacités `recipe_language:1`, `cooking_persistence:1`, `inventory_changes:1` et deux tables privées L5 sans accès client. Contrôler l’absence de transferts dont le propriétaire n’existe plus, sans afficher leur contenu. `0014` refuse atomiquement ces orphelins ; elle ne les efface pas silencieusement.
+
+Les requêtes de catalogue sont exécutées dans une transaction `begin read only; … rollback;`. Ne pas jouer les preuves mutantes sur `mitsu`, même si elles se terminent par `rollback`.
+
+Après ce postflight et la décision de Neegan : comparer le SHA256 du fichier relu avec `shasum -a 256 supabase/migrations/0014_maintenance_et_bornes.sql`, puis appliquer **ce fichier exact, une seule fois**, sous `postgres`. La transaction du fichier borne les attentes de verrous, installe les corps complets des gardes, les limites de verrous, la purge administrative et les clés étrangères privées ; elle inscrit le nettoyage des transferts à 04 h 30 dans `pg_cron`. Une erreur doit annuler l’ensemble, sans continuer instruction par instruction.
+
+Après application, consigner les corps et ACL, les deux clés étrangères validées avec cascade, ainsi que les deux tâches `cuisine-os-tombales` et `cuisine-os-transferts`. `admin_purge_owner(uuid)` doit être refusée à `PUBLIC`, `anon` et `authenticated`, et accordée à `service_role`. Observer ensuite les exécutions réelles dans `cron.job_run_details` ; un test local de la commande ne prouve pas le fonctionnement de l’ordonnanceur distant. Recharger le schéma PostgREST selon la notification du fichier.
+
+**Supprimer un compte, après installation de `0014` :** retirer son admission et fermer ses sessions, traiter ses objets du stockage via l’API de stockage habituelle, puis exécuter `select public.admin_purge_owner('…');` dans l’éditeur SQL sous `postgres`, **PUIS Delete user**. Remplacer le jeton uniquement dans l’éditeur, jamais dans le dépôt. La fonction purge les lignes synchronisées et les deux tables privées de transfert du seul propriétaire ciblé, même sans JWT ou si son adresse n’est plus admise. Une session portant un UID différent de la cible est refusée avant tout verrou ; ne pas emprunter le JWT d’un autre compte. Elle ne supprime ni le compte Auth lui-même, ni les objets binaires du bucket. L’opération est destructive et réservée au geste explicite de Neegan.
+
+La preuve `proofs/0014_maintenance.sql` et `tools/prover-purge-tombales.mjs` sont exclusivement locales : elles utilisent des comptes synthétiques, mutent des fixtures et vérifient les refus exacts. Les commandes rejouables et les limites du cluster de réception sont dans le [reçu du lot C](../docs/superpowers/plans/2026-10-30-correctifs-audit-c-reception.md). Un clone sans extension `pg_cron` ne prouve que l’enregistrement des commandes et leur exécution manuelle, pas leur planification réelle.
 
 ## Où coller les sorties
 

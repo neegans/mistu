@@ -1,0 +1,96 @@
+// Preuves mutantes réservées au cluster jetable local de l'audit C. Aucun SQL distant.
+// Usage : MISTU_PSQL=/chemin/psql node tools/prover-purge-tombales.mjs mistu_audit_c_rouge
+import {execFileSync} from 'node:child_process';
+import {readFileSync} from 'node:fs';
+import {resolve,dirname,join} from 'node:path';
+import {fileURLToPath} from 'node:url';
+const racine=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+const database=process.argv[2];if(!/^mistu_audit_c_[a-z0-9_]+$/.test(database||'')||database==='mistu_audit_c_0013')throw Error('Clone local jetable audit C requis');
+const pg=process.env.MISTU_PSQL||'/private/tmp/mistu-plan-postgres-mount/Postgres.app/Contents/Versions/17/bin/psql';
+const args=['-X','-qAt','-h','127.0.0.1','-p','55449','-U','postgres','-d',database,'-v','ON_ERROR_STOP=1','-v','VERBOSITY=verbose'];
+const env={...Object.fromEntries(Object.entries(process.env).filter(([k])=>!k.startsWith('PG'))),PGPASSFILE:join(racine,'.superpowers/sdd/2026-10-30-audit-c/sans-mot-de-passe'),PGCONNECT_TIMEOUT:'5'};
+const run=sql=>execFileSync(pg,args,{input:sql,encoding:'utf8',env,maxBuffer:8*1024*1024,stdio:['pipe','pipe','pipe']});
+const identite=JSON.parse(run("select json_build_object('data',current_setting('data_directory'),'port',inet_server_port(),'owner',current_user,'database',current_database(),'encoding',current_setting('server_encoding'));"));
+if(resolve(identite.data)!==join(racine,'.superpowers/sdd/2026-10-30-audit-c/postgres')||identite.port!==55449||identite.owner!=='postgres'||identite.database!==database||identite.encoding!=='UTF8')throw Error('Identité du cluster local non conforme');
+const q=s=>"'"+String(s).replaceAll("'","''")+"'",j=x=>q(JSON.stringify(x))+'::jsonb';
+const uid='00000000-0000-0000-0000-000000000141',autre='00000000-0000-0000-0000-000000000142',date='2026-07-01T12:00:00.000Z';
+const version={id:'preuve',recipe_id:'parent',kind:'extraction',status:'proposed',ingredients:[],ingredient_structure:{format:1,blocks:[]},steps:[]};
+const fixtures={
+ recipes:{id:'preuve',original_title:'Recette de preuve',lifecycle_id:'cycle_recette',trashed_at:date,edition_id:null},
+ book_editions:{id:'preuve',book_id:'livre',lifecycle_id:'cycle_edition',trashed_at:date,trash_mode:'keep_recipes'},
+ recipe_versions:version,
+ cook_sessions:{id:'preuve',status:'active',selected_version_ids:[],progress:{format:2,by_version:{}},cooking_state:{format:1,incarnation:'ck_op_'+'a'.repeat(64),active_revision:'ck_op_'+'a'.repeat(64),lang_revision:'ck_op_'+'a'.repeat(64),receipts:[],receipt_floor:0}},
+ timer_launches:{id:'preuve',timer_format:1,cook_session_id:'session',recipe_version_id:'version',step_id:'etape',device_id:'appareil',duration_seconds:90,channel:'shortcut',requested_at:date,handoff_state:'requested',source_timer:{ordinal:0,seconds:90,seconds_max:null,sha256:'b'.repeat(64)},legacy_launch_id:null,recipe_title_snapshot:'Pain',task_label_snapshot:'Attendre',mirror:{format:1,started_at:date,deadline_at:'2026-07-01T12:01:30.000Z'},cooking_incarnation:'ck_op_'+'a'.repeat(64),cooking_revision:'ck_op_'+'a'.repeat(64),cooking_receipts:[],cooking_receipt_floor:0,created_at:date,updated_at:date},
+ inventory:{id:'preuve',label:'Soupe',stock:{format:1,unit:'portion',initial:4,remaining:3,state:'available'},stock_revision:'iv_op_'+'a'.repeat(64),stock_last_action:null,stock_receipts:[],stock_receipt_floor:0},
+ imports:{id:'preuve',kind:'traduction',status:'applied',recipe_id:'parent',source_version_id:'version',translation_capture:{format:1}},
+ scan_sessions:{id:'preuve',status:'done',page_ids:[],document_ids:[],source_state:{format:1}}
+};
+const prefix=`begin;set local statement_timeout='15s';set local lock_timeout='3s';
+create function pg_temp.assertion(v boolean,label text)returns void language plpgsql as $$begin if v is distinct from true then raise exception 'assertion: %',label;end if;end$$;
+create function pg_temp.refus(stmt text,code text,motif text default null)returns void language plpgsql as $$declare etat text;message text;begin begin execute stmt;exception when others then get stacked diagnostics etat=returned_sqlstate,message=message_text;if etat=code and (motif is null or message=motif) then return;end if;raise exception 'Refus inattendu % / % ; attendu % / %',etat,message,code,motif;end;raise exception 'Action acceptee au lieu du refus % : %',code,stmt;end$$;
+insert into private.allowed_users(email)values('audit-a@example.test'),('audit-b@example.test') on conflict do nothing;
+insert into auth.users(id,email)values(${q(uid)},'audit-a@example.test'),(${q(autre)},'audit-b@example.test');
+`;
+const session=(id=uid)=>`select set_config('app.proof_uid',${q(id)},true),set_config('app.proof_email',${q(id===uid?'audit-a@example.test':'audit-b@example.test')},true);`;
+const sansJWT="reset role;select set_config('app.proof_uid','',true),set_config('app.proof_email','',true),set_config('request.jwt.claim.sub','',true),set_config('request.jwt.claims','',true),set_config('app.l1_purge_all','',true),set_config('app.purge','',true),set_config('app.maintenance','',true);select pg_temp.assertion(auth.uid() is null,'purge sans JWT');";
+const gardes=(store,acte)=>`do $$declare t record;begin for t in select tgname from pg_trigger where tgrelid='public.${store}'::regclass and not tgisinternal and tgname not like '%_seq' and tgname not like '%_statement' loop execute format('alter table public.${store} ${acte} trigger %I',t.tgname);end loop;end$$;`;
+function semer(store,lignes){return gardes(store,'disable')+lignes.map(([id,age,owner=uid])=>session(owner)+`set local role authenticated;insert into public.${store}(owner_id,id,data,updated_at,deleted_at)values(auth.uid(),${q(id)},${j({...fixtures[store],id})},clock_timestamp()-interval '100 days',${age===null?'null':`now()-interval '${age} days'`});reset role;`).join('\n')+gardes(store,'enable')+`select pg_temp.assertion(not exists(select 1 from pg_trigger where tgrelid='public.${store}'::regclass and not tgisinternal and tgenabled<>'O'),'gardes ${store} reactivees avant action');`+sansJWT}
+const preuves=[];
+function verifier(label,sql){try{const sortie=run(prefix+sql+'\nrollback;');preuves.push({label,ok:true,sqlstate:'00000',sortie:sortie.trim().split('\n').filter(Boolean).slice(-2)})}catch(error){const brut=String(error.stderr||error.message);preuves.push({label,ok:false,sqlstate:brut.match(/ERROR:\s+([A-Z0-9]{5}):/)?.[1]||null,erreur:brut.trim()})}}
+for(const store of Object.keys(fixtures))verifier('purge isolee '+store,semer(store,[['ancienne',91],['recente',89],['frontiere90',90],['vivante',null],['vide',91]])+`
+-- La ligne déjà vide reste un témoin d'idempotence, posée uniquement au semis privilégié.
+${gardes(store,'disable')}select set_config('app.maintenance','on',true);update public.${store} set data='{}' where owner_id=${q(uid)} and id='vide';${gardes(store,'enable')}${sansJWT}
+create temporary table avant as select * from public.${store} where owner_id=${q(uid)};
+select pg_temp.assertion(public.purge_tombstones()=1,'une seule tombale ancienne videe ${store}');
+select pg_temp.assertion((select data='{}'::jsonb from public.${store} where owner_id=${q(uid)} and id='ancienne'),'contenu vide ${store}');
+select pg_temp.assertion(not exists(select 1 from public.${store} x join avant a using(owner_id,id) where (x.updated_at,x.deleted_at,x.server_seq) is distinct from (a.updated_at,a.deleted_at,a.server_seq)),'dates et sequence preservees ${store}');
+select pg_temp.assertion(not exists(select 1 from public.${store} x join avant a using(owner_id,id) where x.id in('recente','frontiere90','vivante') and x.data is distinct from a.data),'recente et vivante conservees ${store}');
+select pg_temp.assertion(public.purge_tombstones()=0,'purge idempotente ${store}');`);
+// Les sorties historiques des helpers sont distinctes de l'autorité de maintenance.
+// Des propriétaires différents rendent ces deux gardes réellement causales ; ALTER OWNER est annulé.
+verifier('garde L5 isolee de son helper',semer('scan_sessions',[['ancienne',91]])+`alter function public.l5_apply_source_command(jsonb) owner to service_role;select pg_temp.assertion(public.purge_tombstones()=1,'maintenance L5 avec propriétaires distincts');select pg_temp.assertion((select data='{}'::jsonb from public.scan_sessions where owner_id=${q(uid)}),'session purgée par autorité maintenance');`);
+verifier('garde journal L6 isolee de son helper',semer('imports',[['ancienne',91]])+`alter function public.l6_apply_translation_command(jsonb) owner to service_role;select pg_temp.assertion(public.purge_tombstones()=1,'maintenance journal L6 avec propriétaires distincts');select pg_temp.assertion((select data='{}'::jsonb from public.imports where owner_id=${q(uid)}),'journal purgé par autorité maintenance');`);
+const six=['recipes','book_editions','recipe_versions','cook_sessions','timer_launches','inventory'];
+verifier('purge des six entites ensemble',six.map(store=>semer(store,[['ancienne',91]])).join('\n')+`select pg_temp.assertion(public.purge_tombstones()=6,'six tombales videes ensemble');`+six.map(store=>`select pg_temp.assertion((select data='{}'::jsonb from public.${store} where owner_id=${q(uid)}),'contenu ${store} vide');`).join('\n'));
+for(const [n,refus]of [[500,false],[501,true]])verifier('borne lignes '+n,session()+`set local role authenticated;`+(refus?`select pg_temp.refus(${q(`select public.l2_lock_rows((select jsonb_agg(jsonb_build_object('store','ingredients','id','borne')) from generate_series(1,${n})))`)},'22023');`:`select public.l2_lock_rows((select jsonb_agg(jsonb_build_object('store','ingredients','id','borne')) from generate_series(1,${n})));`));
+for(const [n,refus]of [[2000,false],[2001,true]]){const appel=`select public.l2_lock_rows(jsonb_build_array(jsonb_build_object('store','ingredients','id','borne','recipe_contexts',(select jsonb_agg(jsonb_build_object('recipe_id','r-'||i)) from generate_series(1,${n}) i))))`;verifier('borne identifiants '+n,session()+`set local role authenticated;`+(refus?`select pg_temp.refus(${q(appel)},'22023');`:appel+';'))}
+
+// Les identifiants de recette et d'édition occupent deux espaces de verrous distincts.
+for(const [n,refus]of [[1000,false],[1001,true]]){const appel=`select public.l2_lock_rows(jsonb_build_array(jsonb_build_object('store','ingredients','id','borne','recipe_contexts',(select jsonb_agg(jsonb_build_object('recipe_id','commun-'||i)) from generate_series(1,${n}) i),'edition_contexts',(select jsonb_agg(jsonb_build_object('edition_id','commun-'||i)) from generate_series(1,${n}) i))))`;verifier('borne combinee recettes editions '+(2*n),session()+`set local role authenticated;`+(refus?`select pg_temp.refus(${q(appel)},'22023');`:appel+';'))}
+verifier('identifiants repetes comptes une fois',session()+`set local role authenticated;select public.l2_lock_rows(jsonb_build_array(jsonb_build_object('store','ingredients','id','borne','recipe_contexts',(select jsonb_agg(jsonb_build_object('recipe_id','unique')) from generate_series(1,2500)))));`);
+const editionsDerivees=gardes('book_editions','disable')+session()+`set local role authenticated;insert into public.book_editions(owner_id,id,data,updated_at)select auth.uid(),'edition-'||i,jsonb_build_object('id','edition-'||i,'book_id','livre'),clock_timestamp() from generate_series(1,1001)i;reset role;`+gardes('book_editions','enable')+gardes('recipes','disable')+session()+`set local role authenticated;insert into public.recipes(owner_id,id,data,updated_at)select auth.uid(),'recette-'||i,jsonb_build_object('id','recette-'||i,'edition_id','edition-'||i,'original_title','Recette'),clock_timestamp() from generate_series(1,1001)i;reset role;`+gardes('recipes','enable');
+verifier('borne inclut editions derivees des recettes',editionsDerivees+session()+`set local role authenticated;select pg_temp.refus(${q("select public.l2_lock_rows(jsonb_build_array(jsonb_build_object('store','ingredients','id','borne','recipe_contexts',(select jsonb_agg(jsonb_build_object('recipe_id','recette-'||i)) from generate_series(1,1001)i))))")},'22023');`);
+const motifs={recipes:'cycle',book_editions:'cycle',recipe_versions:'version_immuable',cook_sessions:'cooking_reserved',timer_launches:'cooking_reserved',inventory:'inventory_reserved',imports:'translation_reserved',scan_sessions:'source_reserved'};
+for(const store of Object.keys(fixtures))verifier('GUC maintenance authenticated '+store,semer(store,[['ancienne',91]])+session()+`set local role authenticated;set local app.maintenance='on';select pg_temp.refus(${q(`update public.${store} set data='{}' where owner_id=auth.uid() and id='ancienne'`)},'23514',${q(motifs[store])});reset role;select pg_temp.assertion((select data<>'{}'::jsonb from public.${store} where owner_id=${q(uid)}),'GUC seul ne vide rien');`);
+verifier('maintenance ne change pas une ligne vivante',semer('timer_launches',[['vivante',null]])+`set local app.maintenance='on';select pg_temp.refus(${q("update public.timer_launches set data='{}' where id='vivante'")},'42501','adresse non autorisée');`);
+verifier('maintenance authenticated autres champs',semer('timer_launches',[['ancienne',91]])+session()+`set local role authenticated;set local app.maintenance='on';select pg_temp.refus(${q("update public.timer_launches set data='{}',id='autre-identite',updated_at=clock_timestamp() where id='ancienne'")},'23514','cooking_reserved');`);
+verifier('maintenance authenticated autre compte',semer('timer_launches',[['autre',91,autre]])+session()+`set local role authenticated;set local app.maintenance='on';do $$declare n integer;begin update public.timer_launches set data='{}' where owner_id=${q(autre)} and id='autre';get diagnostics n=row_count;perform pg_temp.assertion(n=0,'aucune ligne adverse visible en UPDATE');end$$;reset role;select pg_temp.assertion((select data<>'{}'::jsonb from public.timer_launches where owner_id=${q(autre)} and id='autre'),'autre compte intact');`);
+verifier('purge planifiee couvre deux comptes',semer('inventory',[['ancienne-a',91],['ancienne-b',91,autre]])+`select pg_temp.assertion(public.purge_tombstones()=2,'purge globale sans JWT des deux propriétaires');select pg_temp.assertion(not exists(select 1 from public.inventory where data<>'{}'::jsonb),'deux contenus vides');`);
+const privees=`insert into private.mistu_source_transfers(owner_id,transfer_id,store,id,purpose,header,begin_operation_id,begin_payload_sha256,chain_sha256,state,closed_at) values
+(${q(uid)},'transfert-a','scan_sessions','session-a','bootstrap','{}','op-a','hash-a','chain-a','completed',clock_timestamp()),
+(${q(autre)},'transfert-b','scan_sessions','session-b','bootstrap','{}','op-b','hash-b','chain-b','completed',clock_timestamp());
+insert into private.mistu_source_transfer_parts(owner_id,transfer_id,ordinal,operation_id,payload_sha256,previous_chain_sha256,chain_sha256,rows)values
+(${q(uid)},'transfert-a',0,'part-a','hash-a','prev-a','chain-a','[]'),(${q(autre)},'transfert-b',0,'part-b','hash-b','prev-b','chain-b','[]');`;
+verifier('preuve administrative 0014',readFileSync(join(racine,'supabase/proofs/0014_maintenance.sql'),'utf8'));
+verifier('admin cible retiree sans JWT et autre compte intact',Object.keys(fixtures).map(store=>semer(store,[['cible',91],['cible',91,autre]])).join('\n')+privees+sansJWT+`
+delete from private.allowed_users where email='audit-a@example.test';
+select set_config('app.purge','avant-purge',true),set_config('app.l1_purge_all','avant-l1',true),set_config('app.admin_purge_owner','avant-admin',true);
+set local role service_role;
+select pg_temp.assertion(public.admin_purge_owner(${q(uid)}::uuid)=10,'dix lignes cibles purgées public et privées');
+select pg_temp.assertion(current_setting('app.purge',true)='avant-purge' and current_setting('app.l1_purge_all',true)='avant-l1' and current_setting('app.admin_purge_owner',true)='avant-admin','trois GUC restaurés');
+select pg_temp.refus('select public.admin_purge_owner(null)','22023');reset role;`+
+Object.keys(fixtures).map(store=>`select pg_temp.assertion(not exists(select 1 from public.${store} where owner_id=${q(uid)}),'cible absente ${store}');select pg_temp.assertion((select count(*)=1 and bool_and(data<>'{}'::jsonb) from public.${store} where owner_id=${q(autre)}),'autre compte intact ${store}');`).join('\n')+`
+select pg_temp.assertion(not exists(select 1 from private.mistu_source_transfers where owner_id=${q(uid)}) and not exists(select 1 from private.mistu_source_transfer_parts where owner_id=${q(uid)}),'transferts et parties cibles absents');
+select pg_temp.assertion((select count(*)=1 from private.mistu_source_transfers where owner_id=${q(autre)}) and (select count(*)=1 from private.mistu_source_transfer_parts where owner_id=${q(autre)}),'transferts et parties autre compte conservés');
+delete from auth.users where id=${q(uid)};select pg_temp.assertion(exists(select 1 from auth.users where id=${q(autre)}),'suppression finale auth sans toucher autre compte');`);
+verifier('admin annule toutes les suppressions et restaure ses GUC sur exception',semer('recipes',[['cible',91]])+semer('inventory',[['cible',91]])+privees+sansJWT+`
+create function pg_temp.arret_admin()returns trigger language plpgsql as $$begin raise exception 'refus de preuve' using errcode='P3333';end$$;
+create trigger preuve_arret before delete on public.inventory for each row execute function pg_temp.arret_admin();
+select set_config('app.purge','avant-purge',true),set_config('app.l1_purge_all','avant-l1',true),set_config('app.admin_purge_owner','avant-admin',true);
+set local role service_role;select pg_temp.refus(${q(`select public.admin_purge_owner(${q(uid)}::uuid)`)},'P3333','refus de preuve');
+select pg_temp.assertion(current_setting('app.purge',true)='avant-purge' and current_setting('app.l1_purge_all',true)='avant-l1' and current_setting('app.admin_purge_owner',true)='avant-admin','trois GUC restaurés après exception');reset role;
+select pg_temp.assertion((select count(*)=1 from public.recipes where owner_id=${q(uid)}) and (select count(*)=1 from public.inventory where owner_id=${q(uid)}),'suppressions publiques annulées ensemble');
+select pg_temp.assertion((select count(*)=1 from private.mistu_source_transfers where owner_id=${q(uid)}) and (select count(*)=1 from private.mistu_source_transfer_parts where owner_id=${q(uid)}),'suppressions privées annulées ensemble');`);
+verifier('cascade des deux tables privees',privees+`delete from auth.users where id=${q(uid)};select pg_temp.assertion(not exists(select 1 from private.mistu_source_transfers where owner_id=${q(uid)}) and not exists(select 1 from private.mistu_source_transfer_parts where owner_id=${q(uid)}),'cascade cible privée complète');select pg_temp.assertion((select count(*)=1 from private.mistu_source_transfers where owner_id=${q(autre)}) and (select count(*)=1 from private.mistu_source_transfer_parts where owner_id=${q(autre)}),'cascade sans toucher autre compte');`);
+
+console.log(JSON.stringify({database,identite,total:preuves.length,reussies:preuves.filter(p=>p.ok).length,preuves},null,2));if(preuves.some(p=>!p.ok))process.exitCode=1;
