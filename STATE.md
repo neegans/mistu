@@ -1,16 +1,21 @@
-# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L7 REÇU LOCALEMENT, 0.28.0 EN LIGNE
+# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L7 PUBLIÉ, 0.29.0 EN LIGNE
 
-**L7 — cuisine et minuteries : réception locale terminée, publication en préparation.**
+**L7 — cuisine et minuteries : publié et vérifié.**
 [Spec](docs/superpowers/specs/2026-10-29-l7-cuisine-minuteurs-design.md), [protocole](docs/superpowers/specs/2026-10-30-l7-protocole-cuisine.md), [rapport](docs/superpowers/plans/2026-10-29-l7-cuisine-minuteurs.md).
 Branche `l7-cuisine-minuteurs`, base publique L6 code87855c4/reçu c5b6c08. Revues techniques A/B/C/root ; aucune relecture personnelle attribuée à Neegan.
 Deux régions ingrédients/étape, bonne version active, progrès qualifié et bilan atomique local ; suivis persistants, comparaison/récupération et demandes système explicites.
-Cible0.29.0/cache0.29.0-1, DB6/archive6, migration0012 additive/cooking_persistence1. Aucun déploiement L7 à cette entrée ; public0.28.0.
+**0.29.0** en ligne, cache0.29.0-1, DB6/archive6, migration0012 additive/cooking_persistence1 appliquée.
 **10653/10653** navigateur (épingle10652, +492 depuis L6, aucun scénario retiré), zéro erreur JavaScript/requête extérieure. Node232/232 et générateur0.
 PostgreSQL neuf0001→0012, gardes/ACL et27 contrôles de concurrence réels ; deux moteurs31 contrôles/14RPC, archive et reprise sans écho.
 Parcours Chrome8 mesures/36 gestes, deux onglets, rechargement réellement hors ligne avec note/photo et11 modules en cache unique.
 Voix/Wake Lock simulés ; aucun essai physique iPhone/Safari/TM7, aucune alarme système revendiquée ni appel assistant réel.
 La poursuite et publication sont autorisées par « deploy avant », « et enchaine sur le restant des lots », puis « continu ».
 **L8–L10 et E1 restent à terminer.**
+
+
+**L7 publié et reçu le 30 octobre.** SQL0012 appliqué une seule fois à **05:26:30UTC (01 h26 HAE)**, sous transaction gardée ; SHA256 `daa0767e323514b9d344494838f71b732e5ae8aeecf3dd9b582e7a34f8bbc669`. Catalogue distant :33 fonctions/corps et droits clients exacts,5 triggers/RLS conformes,2 tables privées L5 inchangées. Les33 différences service_role sont les ACL par défaut du rôle serveur privilégié ; ni anon ni authenticated n’en hérite, vérifié à distance. Capacité cooking_persistence1 confirmée sous rôle authenticated en lecture seule ; aucune donnée métier serveur consultée.
+Code **8fb0784** poussé par avance rapide dans main ; Pages construit à **05:27:42UTC (01 h27 HAE)**. **75 fichiers** publics identiques et **10653/10653** tests publics, zéro erreur JavaScript/requête extérieure. Parcours public **8 mesures/36 gestes** : deux onglets sans remontage, même minuteur/échéance, note et photo ouverte/décodée après rechargement réellement hors ligne ; cache unique0.29.0-1 et11 modules présents. Captures publiques relues. Aucun essai physique iPhone/Siri/TM7 ni appel assistant réel. **L8–L10 et E1 restent à terminer.**
+
 
 **L6 — Groupes d’ingrédients et recette en français : publié et vérifié.**
 [Spec](docs/superpowers/specs/2026-10-29-l6-ingredients-groupes-traductions-design.md),

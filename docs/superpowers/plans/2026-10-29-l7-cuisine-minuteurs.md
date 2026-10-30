@@ -1,6 +1,6 @@
 # L7 — Plan de construction et réception cuisine
 
-**30 octobre 2026 — réception locale terminée, publication en préparation.** [Spec](../specs/2026-10-29-l7-cuisine-minuteurs-design.md), [protocole](../specs/2026-10-30-l7-protocole-cuisine.md), plan directeur §13 et maquettes relues. Base publique L6 code87855c4/reçu c5b6c08. Cible0.29.0/cache0.29.0-1, DB6/archive6, SQL0012 et cooking_persistence1. Autorisation générale de poursuivre et publier ; aucune relecture personnelle de Neegan inventée. Voir la réception constatée en fin de document ; les sections1–6 conservent le plan initial.
+**30 octobre 2026 — publié et vérifié.** [Spec](../specs/2026-10-29-l7-cuisine-minuteurs-design.md), [protocole](../specs/2026-10-30-l7-protocole-cuisine.md), plan directeur §13 et maquettes relues. Base publique L6 code87855c4/reçu c5b6c08. Cible0.29.0/cache0.29.0-1, DB6/archive6, SQL0012 et cooking_persistence1. Autorisation générale de poursuivre et publier ; aucune relecture personnelle de Neegan inventée. Voir la réception constatée en fin de document ; les sections1–6 conservent le plan initial.
 
 ## 1. Avant le premier code
 
@@ -126,3 +126,7 @@ Les reproductions ont notamment fermé l’effacement des marqueurs par un vieux
 Migration0012 additive seulement ;0001–0011 inchangées. Transaction de livraison répétée sur base neuve, deuxième passage refusé avant mutation. SHA256 : `daa0767e323514b9d344494838f71b732e5ae8aeecf3dd9b582e7a34f8bbc669`. Aucun SQL de production ni code public L7 appliqué à cette réception locale.
 
 Preuves sous `.superpowers/sdd/2026-10-30-l7/` : rapports A/B/C, suite, preuves SQL, concurrence, pipeline et parcours. Aucun appel assistant réel ni compte privé. Voix/Wake Lock simulés dans Chrome ; aucun essai physique iPhone/Safari, Siri/Horloge ou TM7. Le suivi indicatif ne prouve aucune alarme système. L8–L10 et E1 restent à terminer.
+
+
+**L7 publié et reçu le 30 octobre.** SQL0012 appliqué une seule fois à **05:26:30UTC (01 h26 HAE)**, sous transaction gardée ; SHA256 `daa0767e323514b9d344494838f71b732e5ae8aeecf3dd9b582e7a34f8bbc669`. Catalogue distant :33 fonctions/corps et droits clients exacts,5 triggers/RLS conformes,2 tables privées L5 inchangées. Les33 différences service_role sont les ACL par défaut du rôle serveur privilégié ; ni anon ni authenticated n’en hérite, vérifié à distance. Capacité cooking_persistence1 confirmée sous rôle authenticated en lecture seule ; aucune donnée métier serveur consultée.
+Code **8fb0784** poussé par avance rapide dans main ; Pages construit à **05:27:42UTC (01 h27 HAE)**. **75 fichiers** publics identiques et **10653/10653** tests publics, zéro erreur JavaScript/requête extérieure. Parcours public **8 mesures/36 gestes** : deux onglets sans remontage, même minuteur/échéance, note et photo ouverte/décodée après rechargement réellement hors ligne ; cache unique0.29.0-1 et11 modules présents. Captures publiques relues. Aucun essai physique iPhone/Siri/TM7 ni appel assistant réel. **L8–L10 et E1 restent à terminer.**
