@@ -3765,3 +3765,17 @@ Parcours publics inventaire **11 mesures/33 gestes**, repas/courses **8/28** ; d
 ## E1 — Cookidoo — décision documentaire du 30 octobre 2026
 
 Automatisation écartée pour cette livraison : la recherche officielle ciblée ne démontre pas de voie autorisée de création tierce depuis Mistu. Aucune déclaration universelle d'absence d'API. La copie manuelle existante et les gardes Thermomix sont conservées ; aucun code ajouté. Aucun compte privé ou essai Canada/Cookidoo/TM7, aucune preuve de bout en bout. Spec et plan `2026-10-30-e1-cookidoo` consignent sources, limites et conditions de réouverture ; revue technique root/C. E1 clos sur l'alternative documentaire « démontrer ou écarter ». L9/L10 restent à terminer.
+
+
+## L9 — Confort et accessibilité — réception locale du 30 octobre 2026
+
+**L9 — confort et accessibilité : réception locale terminée, publication en préparation.**
+[Spec](docs/superpowers/specs/2026-10-29-l9-confort-accessibilite-design.md), [rapport](docs/superpowers/plans/2026-10-30-l9-confort-accessibilite.md).
+Branche l9-confort-accessibilite, contrat36caf1f ; base L8 code9bb96ac/reçu c9b2048. Revues techniques A/B/C/root ; aucune relecture personnelle attribuée à Neegan.
+Navigation/focus/titres et chargement cohérents, lien d’évitement, groupes de boutons nommés, contraintes au clavier, dialogues nommés avec repli en ligne et conservation du focus. Barre haute/basse mesurée, retour dans le flux sur petite surface, messages au-dessus de la navigation, cibles44px et mouvement réduit.
+**0.31.0**, cache0.31.0-1, DB6/archive7 inchangés, aucun SQL nouveau ni module de production neuf. Public encore0.30.0 à ce reçu.
+**11262/11262** navigateur (épingle11261, +179 depuis L8, aucun scénario retiré), zéro erreur JavaScript/requête extérieure. Node232/232, générateur0, syntaxe36 fichiers et diff propres.
+A41 contrôles/navigation et géométrie, B62/dialogues, C68/sélecteurs, root8/lisibilité ; régressions L3/navigation45, Carnet301, Thème81 et corbeille/réponses payées conservées. Les attentes historiques de rangée fixe et tablist partiel suivent le nouveau contrat ; les montages iframe disposent leur contrôleur dans la bonne fenêtre.
+Parcours Chrome : navigation12 observations/deux onglets, dialogues20 observations/10 captures, clavier des contraintes6 ;40 configurations de lecture FR/EN320→1280/texte100–200/pastille, plus lien d’évitement, petite hauteur, message, réduction du mouvement à chaud et zoom visuel200% CDP. Captures relues.
+Cuisine8 mesures/36 gestes, photo décodée et note conservées après rechargement réellement hors ligne ; minuteurs sans remontage, API voix/Wake Lock simulées. Aucun essai physique iPhone/Safari/lecteur vocal ni certification WCAG ; zoom CDP distinct du zoom physique. Aucun compte privé ou appel assistant réel.
+E1 clos sur la décision documentaire d’écarter l’automatisation Cookidoo pour cette livraison, transfert manuel existant conservé. **L10 reste à terminer.**

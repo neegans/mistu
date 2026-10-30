@@ -365,11 +365,23 @@ export function libellePuce(chip, ingredientsById) {
 
 export function filterChips(chips, ingredientsById, onRemove) {
   if (!chips.length) return null;
-  return el('div', { class: 'chips' }, ...chips.map((c) => el('span', { class: `chip ${onRemove ? 'removable' : ''} ${c.kind === 'diet' || c.kind === 'exclude' ? 'warn' : ''}`, onClick: onRemove ? () => onRemove(c) : null, title: onRemove ? t('Retirer ce filtre') : '' }, libellePuce(c, ingredientsById))));
+  return el('div', { class: 'chips' }, ...chips.map((c) => {
+    const libelle = libellePuce(c, ingredientsById);
+    return el(onRemove ? 'button' : 'span', {
+      class: `chip ${onRemove ? 'removable' : ''} ${c.kind === 'diet' || c.kind === 'exclude' ? 'warn' : ''}`,
+      type: onRemove ? 'button' : null,
+      'aria-label': onRemove ? t('Retirer le filtre : {filtre}', {filtre:libelle}) : null,
+      onClick: onRemove ? () => onRemove(c) : null,
+      title: onRemove ? t('Retirer ce filtre') : null,
+    }, libelle);
+  }));
 }
 
 export function field(labelText, input, hint = null) {
-  return el('label', { class: 'field' }, el('span', null, labelText), input, hint ? el('small', null, hint) : null);
+  // Un groupe porte son propre nom ; un label HTML autour de plusieurs boutons ne nommerait que le premier.
+  const groupe = input?.getAttribute?.('role') === 'group';
+  if (groupe && !input.hasAttribute('aria-label') && !input.hasAttribute('aria-labelledby')) input.setAttribute('aria-label', labelText);
+  return el(groupe ? 'div' : 'label', { class: 'field' }, el('span', null, labelText), input, hint ? el('small', null, hint) : null);
 }
 
 export function select(options, value, onChange, { placeholder = null } = {}) {
@@ -380,8 +392,17 @@ export function select(options, value, onChange, { placeholder = null } = {}) {
   return s;
 }
 
-export function segmented(options, value, onChange) {
-  return el('div', { class: 'segmented', role: 'tablist' }, ...options.map((o) => el('button', { type: 'button', class: o.value === value ? 'active' : '', onClick: () => onChange(o.value) }, o.label)));
+export function segmented(options, value, onChange, {nom = null} = {}) {
+  const groupe = el('div', { class: 'segmented', role: 'group', 'aria-label': nom }, ...options.map((o) => el('button', {
+    type: 'button', class: o.value === value ? 'active' : '', 'aria-pressed': String(o.value === value),
+    dataset: {value:o.value}, onClick: () => onChange(o.value),
+  }, o.label)));
+  // La décision appartient au lecteur (parfois après commit). Projeter ne déclenche aucun geste métier.
+  groupe.selectionner = selection => [...groupe.children].forEach((b,i) => {
+    const actif = options[i].value === selection;
+    b.classList.toggle('active', actif); b.setAttribute('aria-pressed', String(actif));
+  });
+  return groupe;
 }
 
 // Quantité d'un ingrédient dans les unités souhaitées, avec hypothèses au toucher (spec §29.2).

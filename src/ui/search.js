@@ -135,6 +135,9 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   });
 
   const results = el('div', null);
+  const modeChoix = segmented(MODES.map(([v,l]) => ({value:v,label:t(l)})), state.mode, v => {
+    state.mode=v;modeChoix.selectionner(v);run();
+  }, {nom:t('Mode de recherche')});
   const header = el('div', { class: 'card sage stack' },
     forRecipe ? el('div', { class: 'card flat' },
       el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Avec quoi on mange ça ?')),
@@ -143,7 +146,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       el('div', { class: 'row', style: { marginTop: '.4rem' } }, ...['salade', 'soupe', 'legumes', 'feculent', 'autre'].map((r) => el('a', { class: `btn small ${r === role ? 'active' : ''}`, href: `#/search${buildQuery({ ...query, role: r })}` }, label('recipe_type', r))))) : null,
     el('div', { class: 'search-bar' }, input, el('button', { class: 'btn primary', onClick: run }, t('Chercher'))),
     el('div', { class: 'row between' },
-      segmented(MODES.map(([v, l]) => ({ value: v, label: t(l) })), state.mode, (v) => { state.mode = v; run(); }),
+      modeChoix,
       el('div', { class: 'row' },
         el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: state.favorites, onChange: (e) => { state.favorites = e.target.checked; run(); } }), t('Favoris')),
         el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: state.cooked, onChange: (e) => { state.cooked = e.target.checked; run(); } }), t('Déjà cuisinées')))));

@@ -20,8 +20,8 @@ export function navLinks(path, cls) {
   return NAV.map((n) => el('a', { href: n.href === '/library' ? lienBibliotheque() : `#${n.href}`, 'data-nav-destination': n.href, 'aria-current': n.match(path) ? 'page' : null, class: `${cls} ${n.add ? 'add' : ''} ${n.match(path) ? 'active' : ''}` }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone(n.ico)), el('span', null, t(n.label))));
 }
 
-export function coquille(path) {
-  const main = el('main', { class: 'content', id: 'main' });
+export function coquille(path, { fenetre = window } = {}) {
+  const main = el('main', { class: 'content', id: 'main', tabindex: '-1' });
   // Fidélité aux maquettes (28 octobre 2026) : dès 900 px, la navigation est une rangée d'onglets DANS la barre du haut (plus de panneau latéral) ;
   // les Réglages restent sur la roue de la barre. Sous 900 px, cette rangée est cachée (règle aside.sidenav d'origine) et nav.tabs sert, comme avant.
   // Revue du 28 octobre : un aside est un repère « complémentaire » ; role navigation le dit pour ce qu'il est.
@@ -35,5 +35,37 @@ export function coquille(path) {
     pastille(),
     el('a', { class: 'btn small', href: '#/search', title: t('Recherche') }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone('loupe')), el('span', { class: 'nowrap' }, t('Qu’est-ce qu’on cuisine ?'))),
     el('a', { href: '#/settings', class: 'btn small', title: t('Réglages'), 'aria-label': t('Réglages') }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone('roue'))));
-  return { root: el('div', null, top, el('div', { class: 'frame' }, main), tabs), main, side, tabs };
+  const lien = el('a', { class: 'lien-evitement', href: '#main', onClick: event => {
+    event.preventDefault(); main.focus({ preventScroll: true }); main.scrollIntoView({ block: 'start', behavior: 'instant' });
+  } }, t('Aller au contenu'));
+  const root = el('div', { class: 'coquille' }, lien, top, el('div', { class: 'frame' }, main), tabs);
+  const dispose = installerGeometrieCoquille({ root, tabs, topbar: top, fenetre });
+  return { root, main, side, tabs, dispose };
+}
+
+// Le contenu réserve seulement l'espace réellement occupé par la navigation fixe.
+export function installerGeometrieCoquille({ root, tabs, topbar, fenetre = window }) {
+  let frame = null, detruit = false;
+  const mesurer = () => {
+    frame = null; if (detruit) return;
+    const visible = fenetre.getComputedStyle(tabs).display !== 'none';
+    const hauteur = visible ? Math.ceil(tabs.getBoundingClientRect().height) : 0;
+    const viewport = fenetre.visualViewport?.height || fenetre.innerHeight;
+    const flux = hauteur > viewport / 4;
+    if (topbar) {
+      const fixable = fenetre.getComputedStyle(root).getPropertyValue('--barre-fixable').trim() === '1';
+      const hauteurHaute = Math.ceil(topbar.getBoundingClientRect().height);
+      const hauteDansFlux = fixable && hauteurHaute > viewport / 4;
+      if (root.classList.contains('barre-dans-flux') !== hauteDansFlux) root.classList.toggle('barre-dans-flux', hauteDansFlux);
+      const marge = `${fixable && !hauteDansFlux ? hauteurHaute : 0}px`;
+      if (root.style.getPropertyValue('--topbar-h') !== marge) root.style.setProperty('--topbar-h', marge);
+    }
+    if (root.classList.contains('nav-dans-flux') !== flux) root.classList.toggle('nav-dans-flux', flux);
+    const valeur = `${flux ? 0 : hauteur}px`;
+    if (root.style.getPropertyValue('--nav-h') !== valeur) root.style.setProperty('--nav-h', valeur);
+  };
+  const programmer = () => { if (!detruit && frame === null) frame = fenetre.requestAnimationFrame(mesurer); };
+  const observer = fenetre.ResizeObserver ? new fenetre.ResizeObserver(programmer) : null;
+  observer?.observe(tabs); if (topbar) observer?.observe(topbar); fenetre.addEventListener('resize', programmer); fenetre.visualViewport?.addEventListener('resize', programmer); programmer();
+  return () => { if (detruit) return; detruit = true; observer?.disconnect(); fenetre.removeEventListener('resize', programmer); fenetre.visualViewport?.removeEventListener('resize', programmer); if (frame !== null) fenetre.cancelAnimationFrame(frame); frame = null; };
 }

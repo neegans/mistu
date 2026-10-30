@@ -165,50 +165,96 @@ export function creerNavigation({ fenetre = globalThis.window, session = stockag
     if (/^\/books\//.test(e.route)) (e.onglets ||= {})[e.etat.onglet] = copie(e.etat);
     e.touche = Date.now(); persister();
   }
-  async function restaurerVue({ racine, cleEntree = active?.cleEntree, portee = active?.portee, estCourante = () => true } = {}) {
+  const presentations = new WeakMap();
+  let presentationActive = null;
+  const nomGroupe = node => node?.getAttribute('aria-label') || node?.getAttribute('aria-labelledby')?.split(/\s+/).map(id => node.ownerDocument.getElementById(id)?.textContent.trim() || '').join(' ') || null;
+  function preparerPresentationVue({ mode, estCourante = () => true } = {}) {
+    if (presentationActive) annulerPresentationVue(presentationActive);
+    const jeton = Object.freeze({}), node = fenetre.document?.activeElement;
+    const etat = { mode, estCourante, revision, node, y: fenetre.scrollY || 0, repere: node && {
+      focus: node.dataset?.navFocus || null, item: node.closest?.('[data-nav-id]')?.dataset.navId || null,
+      id: node.id || null, name: node.getAttribute?.('name'), valeur: node.getAttribute?.('data-value'), groupe: nomGroupe(node.closest?.('[role=group]')), tag: node.tagName, type: node.getAttribute?.('type')
+    }, interrompu: false, annule: false, nettoyer: null };
+    const stopper = () => { etat.interrompu = true; etat.nettoyer?.(); };
+    const noms = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
+    etat.nettoyer = () => { for (const nom of noms) fenetre.removeEventListener(nom, stopper, true); };
+    for (const nom of noms) fenetre.addEventListener(nom, stopper, { passive: true, capture: true });
+    presentations.set(jeton, etat); presentationActive = jeton; return jeton;
+  }
+  function annulerPresentationVue(jeton) {
+    const etat = presentations.get(jeton); if (!etat) return;
+    etat.annule = true; etat.nettoyer?.(); if (presentationActive === jeton) presentationActive = null;
+  }
+  async function restaurerVue({ racine, cleEntree = active?.cleEntree, portee = active?.portee, estCourante = () => true, presentation, mode, main } = {}) {
+    const jeton = presentation || preparerPresentationVue({ mode, estCourante }), etat = presentations.get(jeton);
+    let focusDeplace = false, positionRestauree = false;
+    const resultat = motif => ({ motif, focusDeplace, positionRestauree });
+    if (!etat || etat.annule || jeton !== presentationActive) return resultat('perime');
+    mode = etat.mode ?? mode;
     const key = ++derniereRestauration, rev = revision, entry = trouver(cleEntree, portee), ancre = entry?.etat.ancre;
-    let interrompu = false, observer = null, timer = null, reprises = 0, ouverture = null;
-    const nettoyer = () => { observer?.disconnect(); clearTimeout(timer); for (const nom of ['wheel', 'touchstart', 'pointerdown', 'keydown']) fenetre.removeEventListener(nom, stopper); };
-    const stopper = () => { interrompu = true; nettoyer(); };
-    const vivante = () => !interrompu && key === derniereRestauration && rev === revision && admissible(portee) && estCourante() && racine?.isConnected;
-    for (const nom of ['wheel', 'touchstart', 'pointerdown', 'keydown']) fenetre.addEventListener(nom, stopper, { passive: true });
+    let observer = null, timer = null, reprises = 0, ouverture = null;
+    const nettoyerInitial = etat.nettoyer;
+    const nettoyer = () => { observer?.disconnect(); clearTimeout(timer); nettoyerInitial(); };
+    etat.nettoyer = nettoyer;
+    const motifArret = () => etat.annule || key !== derniereRestauration || rev !== revision || etat.revision !== revision || !admissible(portee) || !etat.estCourante() || !estCourante() || !racine?.isConnected ? 'perime' : etat.interrompu ? 'interaction' : null;
+    const cibler = id => id && [...racine.querySelectorAll('[data-nav-id]')].find(n => n.dataset.navId === id);
+    const utilisable = n => n && !n.disabled && !n.closest?.('[hidden],[inert]') && n.getClientRects().length && racine.contains(n);
+    const focaliser = node => {
+      if (!utilisable(node) && node !== main) return;
+      if (fenetre.document.activeElement === node) return;
+      if (!node.matches('a[href],button,input,select,textarea,[tabindex]')) node.setAttribute('tabindex', '-1');
+      node.focus({ preventScroll: true }); focusDeplace ||= fenetre.document.activeElement === node;
+    };
+    const cibleOuverture = () => { const node = ouverture || racine.querySelector('[data-nav-ouverture="focus"]'); return utilisable(node) ? node : null; };
+    const deplacer = () => {
+      if (mode === 'rafraichissement') {
+        const avant = fenetre.scrollY; fenetre.scrollTo({ top: etat.y, behavior: 'instant' }); positionRestauree ||= fenetre.scrollY !== avant; return;
+      }
+      const explicite = cibleOuverture(), node = ancre && (cibler(ancre.id) || cibler(ancre.suivant) || cibler(ancre.precedent));
+      if (explicite) ouverture = explicite;
+      const rect = explicite?.getBoundingClientRect();
+      const y = explicite ? fenetre.scrollY + rect.top - Math.max(16, ((fenetre.innerHeight || 0) - rect.height) / 2)
+        : node ? fenetre.scrollY + node.getBoundingClientRect().top - ancre.decalage : ancre?.y || 0;
+      const maximum = Math.max(0, (fenetre.document?.documentElement.scrollHeight || 0) - (fenetre.innerHeight || 0)), avant = fenetre.scrollY;
+      fenetre.scrollTo({ top: Math.min(Math.max(0, y), maximum), behavior: 'instant' });
+      positionRestauree ||= fenetre.scrollY !== avant;
+    };
     try {
-      const cibler = id => [...racine.querySelectorAll('[data-nav-id]')].find(n => n.dataset.navId === id);
-      const cibleOuverture = () => {
-        const node = ouverture || racine.querySelector('[data-nav-ouverture="focus"]');
-        return node && !node.disabled && node.getClientRects().length && racine.contains(node) ? node : null;
-      };
-      const deplacer = () => {
-        const explicite = cibleOuverture(), node = ancre && (cibler(ancre.id) || cibler(ancre.suivant) || cibler(ancre.precedent));
-        if (explicite) ouverture = explicite;
-        const rect = explicite?.getBoundingClientRect();
-        const y = explicite ? fenetre.scrollY + rect.top - Math.max(16, ((fenetre.innerHeight || 0) - rect.height) / 2)
-          : node ? fenetre.scrollY + node.getBoundingClientRect().top - ancre.decalage : ancre?.y || 0;
-        const maximum = Math.max(0, (fenetre.document?.documentElement.scrollHeight || 0) - (fenetre.innerHeight || 0));
-        fenetre.scrollTo({ top: Math.min(Math.max(0, y), maximum), behavior: 'instant' });
-      };
+      let arret = motifArret(); if (arret) return resultat(arret);
       for (let i = 0; i < 3; i++) {
         await new Promise(resolve => (fenetre.requestAnimationFrame || (f => setTimeout(f, 0)))(resolve));
-        if (!vivante()) return false;
-        deplacer();
+        arret = motifArret(); if (arret) return resultat(arret); deplacer();
       }
-      if (ouverture && cibleOuverture() && vivante()) {
-        ouverture.focus({ preventScroll: true });
-        // Une ouverture explicite vaut pour ce montage ; un changement d'onglet retrouve ensuite son ancre.
-        ouverture.removeAttribute('data-nav-ouverture');
-      } else if (ancre?.focus && vivante()) {
-        const scope = ancre.focusId ? cibler(ancre.focusId) || cibler(ancre.suivant) || cibler(ancre.precedent) || racine : racine;
-        const node = scope.matches?.('[data-nav-focus="' + ancre.focus + '"]') ? scope : scope.querySelector('[data-nav-focus="' + ancre.focus + '"]');
-        (node || (ancre.focus === 'element' ? scope.querySelector('a[href],button') : null) || racine.querySelector('[data-nav-focus="titre"]'))?.focus?.({ preventScroll: true });
+      let motif = ancre ? 'ancre' : 'sans_cible';
+      if (mode === 'rafraichissement') {
+        motif = 'rafraichissement';
+        if (!etat.node?.isConnected && etat.repere) {
+          const r = etat.repere;
+          let scope = r.item ? cibler(r.item) : racine;
+          if (!r.focus && !r.id && !r.name && r.groupe && r.valeur !== null) {
+            const groupes = scope ? [scope, ...scope.querySelectorAll('[role=group]')].filter(n => n.getAttribute('role') === 'group' && nomGroupe(n) === r.groupe) : [];
+            scope = groupes.length === 1 ? groupes[0] : null;
+          }
+          const candidates = scope ? [scope, ...scope.querySelectorAll('*')].filter(n => n.tagName === r.tag && (r.focus ? n.dataset.navFocus === r.focus : r.id ? n.id === r.id : r.name ? n.getAttribute('name') === r.name && n.getAttribute('type') === r.type : r.groupe && r.valeur !== null ? n.getAttribute('data-value') === r.valeur : false)) : [];
+          if (candidates.length === 1) focaliser(candidates[0]);
+        }
+      } else if (ouverture && cibleOuverture()) {
+        focaliser(ouverture); ouverture.removeAttribute('data-nav-ouverture'); motif = 'ouverture';
+      } else if (mode !== 'panneau') {
+        if (ancre?.focus) {
+          const scope = ancre.focusId ? cibler(ancre.focusId) || cibler(ancre.suivant) || cibler(ancre.precedent) || racine : racine;
+          const node = [scope, ...scope.querySelectorAll('[data-nav-focus]')].find(n => n.dataset.navFocus === ancre.focus);
+          focaliser(node || (ancre.focus === 'element' ? scope.querySelector('a[href],button') : null) || racine.querySelector('[data-nav-focus="titre"]'));
+        } else if (mode === 'navigation' && !ancre) {
+          const cible = racine.matches?.('h1') ? racine : racine.querySelector('h1') || main || racine.closest('main');
+          if (cible) { focaliser(cible); motif = 'repli'; }
+        }
       }
-      if ((ancre || ouverture) && fenetre.ResizeObserver && vivante()) {
-        observer = new fenetre.ResizeObserver(() => {
-          if (!vivante() || reprises++ >= 3) { nettoyer(); return; }
-          deplacer();
-        });
+      if (mode !== 'rafraichissement' && (ancre || ouverture) && fenetre.ResizeObserver && !motifArret()) {
+        observer = new fenetre.ResizeObserver(() => { if (motifArret() || reprises++ >= 3) { nettoyer(); return; } deplacer(); });
         observer.observe(racine); timer = setTimeout(nettoyer, 500);
       }
-      return true;
+      return resultat(motif);
     } finally { if (!observer) nettoyer(); }
   }
   function lienBibliotheque() {
@@ -228,7 +274,22 @@ export function creerNavigation({ fenetre = globalThis.window, session = stockag
     fenetre.history.scrollRestoration = 'manual';
     return () => racine?.removeEventListener('click', click);
   }
-  return { porteeNavigation, activerEntree, lireContexteListe, memoriserListe, lienAvecOrigine, retourConnu, invaliderNavigation, capturerVue, restaurerVue, lienBibliotheque, installerRetours };
+  return { porteeNavigation, activerEntree, lireContexteListe, memoriserListe, lienAvecOrigine, retourConnu, invaliderNavigation, capturerVue, preparerPresentationVue, annulerPresentationVue, restaurerVue, lienBibliotheque, installerRetours };
 }
 const navigation = creerNavigation();
-export const { porteeNavigation, activerEntree, lireContexteListe, memoriserListe, lienAvecOrigine, retourConnu, invaliderNavigation, capturerVue, restaurerVue, lienBibliotheque, installerRetours } = navigation;
+export const { porteeNavigation, activerEntree, lireContexteListe, memoriserListe, lienAvecOrigine, retourConnu, invaliderNavigation, capturerVue, preparerPresentationVue, annulerPresentationVue, restaurerVue, lienBibliotheque, installerRetours } = navigation;
+
+// Le titre suit uniquement le contenu visible courant, sans action de focus.
+export function suivreTitreVue({ racine, estCourante = () => true, document = globalThis.document }) {
+  let detruit = false;
+  const actualiser = () => {
+    if (detruit || !estCourante() || !racine.isConnected) return;
+    const titre = (racine.matches?.('h1') ? racine : racine.querySelector('h1'))?.textContent.trim();
+    const valeur = titre ? `${titre} — ${t('Cuisine OS')}` : t('Cuisine OS');
+    if (document.title !== valeur) document.title = valeur;
+  };
+  const Observer = document.defaultView?.MutationObserver;
+  const observer = Observer ? new Observer(actualiser) : null;
+  observer?.observe(racine, { childList: true, subtree: true, characterData: true }); actualiser();
+  return () => { detruit = true; observer?.disconnect(); };
+}

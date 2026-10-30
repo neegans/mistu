@@ -30,7 +30,7 @@
   --radius-btn: 8px;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --topbar-h: 64px;
-  --nav-h: max(64px, 4.5rem);
+  --nav-h: calc(max(64px, 4.5rem) + var(--safe-b));
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
   /* Anciens noms (T-2) : alias des jetons ci-dessus, pour les règles qui les portent encore. */
@@ -90,13 +90,13 @@ pre { background: var(--paper-2); padding: .6rem .8rem; border-radius: 8px; over
 :focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
 /* T-6 : mouvement réduit = aucune transition ni animation. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { transition: none !important; animation: none !important; }
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
 
 /* Layout */
 .app { min-height: 100vh; display: flex; flex-direction: column; }
 .topbar {
-  display: flex; align-items: center; gap: .6rem; min-height: calc(var(--topbar-h) + var(--safe-t));
+  display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; min-height: calc(64px + var(--safe-t));
   padding: calc(.5rem + var(--safe-t)) 1rem .5rem;
   background: var(--paper); color: var(--ink); border-bottom: 1px solid var(--line); -webkit-tap-highlight-color: var(--tap);
   position: sticky; top: 0; z-index: 20;
@@ -121,20 +121,20 @@ pre { background: var(--paper-2); padding: .6rem .8rem; border-radius: 8px; over
 /* Pastille « N non envoyés » : présente seulement quand la file d'envoi n'est pas vide (spec § 4.2). */
 .pastille { background: var(--warn-bg); color: var(--warn); border-radius: var(--radius-pill); padding: .15rem .55rem; font-size: .78rem; font-weight: 600; white-space: nowrap; }
 .frame { display: flex; flex: 1; min-height: 0; }
-main.content { flex: 1; padding: 1rem 1rem calc(var(--nav-h) + var(--safe-b) + 1rem); max-width: 1100px; width: 100%; margin: 0 auto; }
+main.content { flex: 1; padding: 1rem 1rem calc(var(--nav-h) + 1rem); max-width: 1100px; width: 100%; margin: 0 auto; }
 nav.tabs {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
-  display: flex; justify-content: space-around; align-items: stretch;
+  display: flex; flex-wrap: wrap; justify-content: space-around; align-items: stretch;
   background: var(--card); border-top: 1px solid var(--line);
-  padding-bottom: var(--safe-b); height: calc(var(--nav-h) + var(--safe-b));
+  padding-bottom: var(--safe-b); height: auto;
 }
 nav.tabs a {
-  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  flex: 1 1 auto; min-width: max-content; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 2px; text-decoration: none; color: var(--muted); font-size: .72rem; padding: .3rem 0; min-height: 48px;
 }
-nav.tabs a > span:not(.ico) { max-width: 100%; overflow-wrap: anywhere; text-align: center; }
+nav.tabs a > span:not(.ico) { max-width: 100%; overflow-wrap: normal; word-break: normal; text-align: center; }
 /* La destination la plus longue garde sa largeur sur les petits téléphones. */
-nav.tabs a[href^="#/library"] { flex: 1.3; }
+nav.tabs a[href^="#/library"] { flex-grow: 1.3; }
 nav.tabs a .ico { font-size: 1.3rem; line-height: 1; }
 nav.tabs a.active { color: var(--action); font-weight: 600; box-shadow: inset 0 2px 0 var(--action); }
 /* T-5 : l'onglet est collé au bas de l'écran (--safe-b vaut 0 sans barre d'accueil) : l'anneau rentre, sinon son bas sort de l'écran. */
@@ -175,8 +175,8 @@ aside.sidenav { display: none; }
   .topbar a[href="#/search"] .nowrap { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 @media (max-width: 599px) {
-  /* Le nom peut passer sur deux lignes lorsque le texte est agrandi. */
-  .topbar .brand { min-width: 0; flex-shrink: 1; white-space: normal; overflow-wrap: anywhere; }
+  /* Les commandes passent sur une autre rangée avant de couper un mot de la marque. */
+  .topbar .brand { min-width: max-content; flex-shrink: 0; white-space: normal; overflow-wrap: normal; }
 }
 
 /* B04 (lot I1, D-I14) : là où la barre du haut est serrée, la pastille montre sa forme courte « {n} à envoyer » (data-court, posée par majPastille) ;
@@ -234,7 +234,7 @@ section.plain > h2 { margin: 0 0 .8rem; padding-bottom: .4rem; border-bottom: 1p
 @media (hover: hover) { .btn.primary:hover { background: var(--action-2); border-color: var(--action-2); } }
 .btn.sage { background: var(--accent-bg); border-color: var(--accent-bg); color: var(--accent); }
 .btn.danger { color: var(--danger); border-color: var(--danger-line); }
-.btn.small { padding: .3rem .75rem; min-height: 36px; font-size: .85rem; }
+.btn.small { padding: .3rem .75rem; min-height: 44px; min-width: 44px; font-size: .85rem; }
 .btn.big { font-size: 1.15rem; padding: .9rem 1.4rem; min-height: 56px; }
 .btn.block { width: 100%; justify-content: center; }
 .btn.active { outline: 2px solid var(--accent); }
@@ -291,11 +291,11 @@ section.plain > h2 { margin: 0 0 .8rem; padding-bottom: .4rem; border-bottom: 1p
 
 /* Un champ est le plus souvent un <label>, mais pas quand il contient un groupe de boutons (puces « Cuisines ») :
    un <label> enveloppant volerait le clic vers la première puce (R-UX-8). Le sélecteur vise donc la classe. */
-.field { display: flex; flex-direction: column; gap: .25rem; font-size: .9rem; color: var(--muted); }
+.field { display: flex; flex-direction: column; gap: .25rem; font-size: .9rem; color: var(--muted); min-width: 0; max-width: 100%; }
 .field > span { font-weight: 600; color: var(--ink); }
 input[type=text], input[type=number], input[type=search], input[type=url], input[type=password], input[type=date], input[type=datetime-local], select, textarea {
   font: inherit; font-size: 1rem; padding: .55rem .75rem; border: 1px solid var(--field-line); border-radius: var(--radius);
-  background: #fff; color: var(--ink); width: 100%; min-height: 44px;
+  background: #fff; color: var(--ink); width: 100%; min-width: 0; max-width: 100%; min-height: 44px;
 }
 textarea { min-height: 96px; resize: vertical; }
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--action); border-color: var(--action); }
@@ -312,7 +312,7 @@ label.check { display: inline-flex; gap: .45rem; align-items: center; font-size:
 .segmented { display: inline-flex; flex-wrap: wrap; gap: .25rem; border: 0; border-radius: var(--radius-btn); background: transparent; }
 /* R-VIS-11 : dans un champ (colonne flex), la pilule prend la largeur de ses options, sans queue vide qui se lirait comme un champ. */
 .field > .segmented { align-self: flex-start; }
-.segmented button { border: 0; background: transparent; padding: .45rem .9rem; font: inherit; cursor: pointer; color: var(--ink); border-radius: var(--radius-btn); min-height: 40px; }
+.segmented button { border: 0; background: transparent; padding: .45rem .9rem; font: inherit; cursor: pointer; color: var(--ink); border-radius: var(--radius-btn); min-height: 44px; min-width: 44px; }
 .segmented button.active { background: var(--action); color: var(--paper); }
 /* Les onglets soulignés (segments de la Bibliothèque, Ingrédients / Préparation de la fiche) : du texte sur un filet, l'actif en encre et souligné olive. */
 .segmented.onglets { display: flex; gap: 1.5rem; border-bottom: 1px solid var(--line); border-radius: 0; }
@@ -642,9 +642,10 @@ details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
 .progress > div { height: 100%; background: var(--action); }
 .mirror { font-family: var(--sans); font-size: 2.2rem; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--action); }
 
-.toast { position: fixed; left: 50%; bottom: calc(var(--nav-h) + var(--safe-b) + 12px); transform: translateX(-50%); background: var(--ink); color: var(--cream); padding: .6rem 1rem; border-radius: 12px; z-index: 50; box-shadow: var(--shadow); font-size: .95rem; max-width: 90vw; }
+.toast { position: fixed; left: 50%; bottom: calc(var(--nav-h) + 12px); transform: translateX(-50%); background: var(--ink); color: var(--cream); padding: .6rem 1rem; border-radius: 12px; z-index: 50; box-shadow: var(--shadow); font-size: .95rem; max-width: 90vw; }
 @media (min-width: 900px) { .toast { bottom: 20px; } }
-dialog { border: 0; border-radius: var(--radius); padding: 1.2rem; max-width: 560px; width: calc(100vw - 2rem); box-shadow: var(--shadow); background: var(--card); color: var(--ink); }
+dialog { border: 0; border-radius: var(--radius); padding: clamp(12px, 3vw, 20px); max-width: 560px; width: calc(100vw - 24px); max-height: calc(100dvh - 24px); box-shadow: var(--shadow); background: var(--card); color: var(--ink); }
+dialog > h2 { font-size: 1.35rem; }
 dialog::backdrop { background: var(--backdrop); }
 .actions-directes { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .actions-directes .btn, .btn.actions-contenu { min-height: 44px; }
@@ -768,4 +769,25 @@ dialog::backdrop { background: var(--backdrop); }
   .inventaire-lots > .row > *, .inventaire-lot .row > .btn, .inventaire-formulaire > .row > .btn { flex: 1 1 10rem; }
   .inventaire-formulaire { padding: 1rem; }
   .courses-ligne .row > .btn { flex: 1 1 8rem; }
+}
+
+/* L9 : une navigation haute revient dans le flux, sans recouvrir la lecture. */
+.coquille { min-height: 100dvh; display: flex; flex-direction: column; --barre-fixable: 1; }
+.coquille.nav-dans-flux nav.tabs { position: static; width: 100%; }
+.coquille.barre-dans-flux .topbar { position: static; }
+.coquille .frame { min-width: 0; }
+.coquille main { min-width: 0; scroll-margin-top: calc(var(--topbar-h) + 1rem); }
+.coquille main :is(button,a,input,select,textarea,summary) { scroll-margin-bottom: calc(var(--nav-h) + 1rem); scroll-margin-top: calc(var(--topbar-h) + 1rem); }
+.lien-evitement { position: fixed; left: 1rem; top: .5rem; z-index: 100; transform: translateY(-200%); background: var(--card); color: var(--ink); border: 2px solid var(--action); border-radius: var(--radius-btn); padding: .6rem 1rem; min-height: 44px; }
+.lien-evitement:focus { transform: none; }
+button.chip { font: inherit; cursor: pointer; min-width: 44px; min-height: 44px; }
+.repas-planification { min-width: 0; max-width: 100%; }
+@media (max-width: 899.98px) { .topbar { position: static; } .coquille { --barre-fixable: 0; } }
+.dialogue-inline[open] { display: block; position: relative; inset: auto; margin: 1rem auto; max-height: none; }
+.dialogue-inline::backdrop { background: transparent; }
+/* Les états restent immédiats ; seuls leurs couleurs et contours évoluent. */
+.btn, .segmented button, button.chip { transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease; }
+@media (prefers-reduced-motion: no-preference) {
+  dialog[open] { animation: l9-apparition 180ms ease-out; }
+  @keyframes l9-apparition { from { opacity: .65; } to { opacity: 1; } }
 }

@@ -1,5 +1,5 @@
 // Lot I2 : formulaire partagé et mémoire personnelle. Les écritures relisent les lignes en transaction.
-import { el, formatDate, pickFiles as pickDom, confirmDialog as confirmDom, toast as toastDom } from '../core/dom.js';
+import { ouvrirDialogue, el, formatDate, pickFiles as pickDom, confirmDialog as confirmDom, toast as toastDom } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { urlDeBlob, revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { sha256Hex } from '../core/hash.js';
@@ -219,8 +219,8 @@ export function ouvrirCuissons(items, options = {}) {
     el('h2', null, options.session ? t('Cuisson terminée — à refaire ?') : t('J’ai cuisiné ce plat')), ...(options.suivisActifs>0?[el('p',{class:'status warn'},t('{n} suivis de durée sont encore en cours. Terminer la séance ne les arrête pas.',{n:options.suivisActifs}))]:[]), ...forms.map(f => f.root), message);
   const liberer = protegerSaisie(dlg);
   return new Promise(resolve => {
-    let enCours = false, fini = false;
-    const fermer = resultat => { if (fini) return; fini = true; forms.forEach(f => f.detruire()); dlg.close(); dlg.remove(); liberer(); resolve(resultat); };
+    let enCours = false, fini = false, presentation;
+    const fermer = resultat => { if (fini) return; fini = true; forms.forEach(f => f.detruire()); presentation?.fermer(); dlg.remove(); liberer(); resolve(resultat); };
     const annuler = el('button', { type: 'button', class: 'btn', onClick: () => { if (!enCours) fermer(false); } }, t('Annuler'));
     const enregistrer = el('button', { type: 'button', class: 'btn primary', onClick: async () => {
       if (enCours) return;
@@ -249,7 +249,7 @@ export function ouvrirCuissons(items, options = {}) {
     } }, t('Enregistrer'));
     dlg.append(el('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '1rem' } }, annuler, enregistrer));
     dlg.addEventListener('cancel', e => { e.preventDefault(); if (!enCours) fermer(false); });
-    document.body.append(dlg); dlg.showModal();
+    presentation = ouvrirDialogue(dlg, { focusInitial: annuler, estCourante: courante });
   });
 }
 
@@ -261,8 +261,8 @@ function ouvrirPhotosCuisson(recipe, cuisson, selection, { repo, pickFiles, toas
     el('h2', null, t('Ajouter une photo à cette cuisson')), el('p', { class: 'muted' }, titreDe(recipe) + ' · ' + formatDate(cuisson.cooked_at)), photos.root, message);
   const liberer = protegerSaisie(dlg);
   return new Promise(resolve => {
-    let enCours = false, fini = false;
-    const fermer = resultat => { if (fini) return; fini = true; photos.detruire(); dlg.close(); dlg.remove(); liberer(); resolve(resultat); };
+    let enCours = false, fini = false, presentation;
+    const fermer = resultat => { if (fini) return; fini = true; photos.detruire(); presentation?.fermer(); dlg.remove(); liberer(); resolve(resultat); };
     const annuler = el('button', { type: 'button', class: 'btn', onClick: () => { if (!enCours) fermer(false); } }, t('Annuler'));
     const enregistrer = el('button', { type: 'button', class: 'btn primary', onClick: async () => {
       if (enCours) return;
@@ -279,7 +279,7 @@ function ouvrirPhotosCuisson(recipe, cuisson, selection, { repo, pickFiles, toas
     } }, t('Enregistrer'));
     dlg.append(el('div', { class: 'row' }, annuler, enregistrer));
     dlg.addEventListener('cancel', e => { e.preventDefault(); if (!enCours) fermer(false); });
-    document.body.append(dlg); dlg.showModal(); photos.ajouter(selection);
+    presentation = ouvrirDialogue(dlg, { focusInitial: annuler }); photos.ajouter(selection);
   });
 }
 
@@ -289,13 +289,13 @@ export function ouvrirTextePersonnel({ store, id, champ, valeur, titre }, { repo
     const source = recipe ?? await repo.get('recipes', store === 'recipes' ? id : (await repo.get('cook_history', id))?.recipe_id);
     return {recettes:[await capturerRecette(repo, source, {ctx, historique:store === 'cook_history'})].filter(Boolean)};
   })().catch(erreur => ({erreur}));
-  let attendu = textePersonnel(valeur), enCours = false;
+  let attendu = textePersonnel(valeur), enCours = false, presentation;
   const input = el('textarea', { value: attendu, rows: 7, 'aria-label': titre, style: { width: '100%', minWidth: '0' } });
   const message = el('div', { role: 'alert', class: 'stack' });
   const dlg = el('dialog', { dataset: { role: 'dialogue-note' }, style: { maxWidth: 'min(36rem, calc(100vw - 2rem))' } }, el('h2', null, titre), input,
     el('small', { class: 'muted' }, t('Facultatif · 10 000 caractères au plus.')), message);
   const liberer = protegerSaisie(dlg);
-  const fermer = () => { dlg.close(); dlg.remove(); liberer(); };
+  const fermer = () => { presentation?.fermer(); dlg.remove(); liberer(); };
   const bouton = el('button', { type: 'button', class: 'btn primary', onClick: async () => {
     if (enCours) return;
     enCours = true; bouton.disabled = true; message.replaceChildren();
@@ -311,7 +311,7 @@ export function ouvrirTextePersonnel({ store, id, champ, valeur, titre }, { repo
   } }, t('Enregistrer'));
   dlg.append(el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn', onClick: () => { if (!enCours) fermer(); } }, t('Annuler')), bouton));
   dlg.addEventListener('cancel', e => { e.preventDefault(); if (!enCours) fermer(); });
-  document.body.append(dlg); dlg.showModal(); input.focus(); return dlg;
+  presentation = ouvrirDialogue(dlg, { focusInitial: input }); return dlg;
 }
 
 export async function monterNotesPersonnelles(recipe, options = {}) {

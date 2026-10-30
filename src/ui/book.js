@@ -4,7 +4,7 @@ import { renderLivreEditeur } from './livre-editeur.js';
 import { projeterBibliotheque } from '../domain/bibliotheque.js';
 import { pagesActivesSeance, validerEtatSources } from '../domain/sources-format.js';
 import { actionsLivre, boutonsActions, menuActions } from './actions-contenu.js';
-import { lireContexteListe, porteeNavigation, retourConnu, memoriserListe, capturerVue, restaurerVue } from './navigation-contexte.js';
+import { lireContexteListe, porteeNavigation, retourConnu, memoriserListe, capturerVue, preparerPresentationVue, restaurerVue } from './navigation-contexte.js';
 import { el, toast, pickFiles, confirmDialog, promptDialog } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate, refresh, remplacerAdresse } from '../core/router.js';
@@ -409,17 +409,18 @@ export async function renderBook(params, query, ctx, deps = {}) {
   // change reçu entre le rendu et le montage n'est pas perdu), un rendu jamais inséré ne prend pas l'abonnement de la fiche affichée, et une fiche quittée se
   // retire au premier change sans rien redessiner — au plus UNE fiche livre retenue par la MediaQueryList de la fenêtre.
   const contenu = root.querySelector('.two-col.livre');
-  const onglets = el('div', { class: 'onglets-livre', role: 'tablist', 'aria-label': t('Contenu du livre') });
+  const onglets = el('div', { class: 'onglets-livre', role: 'group', 'aria-label': t('Contenu du livre') });
   let ongletCourant=etat.onglet;
   const afficher = (source,initial=false) => {
+    const presentation = !initial ? preparerPresentationVue({mode:'panneau',estCourante:()=>root.isConnected}) : null;
     if(!initial)capturerVue(root);
     ongletCourant=source?'sources':'recettes';
     if(contenu)contenu.hidden=source; sources.hidden=!source;
-    [...onglets.children].forEach((bouton,i)=>{bouton.setAttribute('aria-selected',String(source===(i===1)));bouton.classList.toggle('active',source===(i===1));});
-    if(!initial){const sousEtat=lireContexteListe({route,query:{onglet:ongletCourant},portee});memoriserListe({...sousEtat,route,portee,onglet:ongletCourant});restaurerVue({racine:root,cleEntree:etat.cleEntree,portee,estCourante:()=>root.isConnected});}
+    [...onglets.children].forEach((bouton,i)=>{bouton.setAttribute('aria-pressed',String(source===(i===1)));bouton.classList.toggle('active',source===(i===1));});
+    if(!initial){const sousEtat=lireContexteListe({route,query:{onglet:ongletCourant},portee});memoriserListe({...sousEtat,route,portee,onglet:ongletCourant});restaurerVue({racine:root,cleEntree:etat.cleEntree,portee,presentation,mode:'panneau',estCourante:()=>root.isConnected});}
   };
-  onglets.append(el('button',{role:'tab','aria-selected':'true',dataset:{role:'ouvrir-recettes'},onClick:()=>afficher(false)},t('Recettes')),
-    el('button',{role:'tab','aria-selected':'false',onClick:()=>afficher(true),dataset:{role:'ouvrir-pages-source'}},t('Pages source ({n})',{n:pages.length})));
+  onglets.append(el('button',{type:'button','aria-pressed':'true',dataset:{role:'ouvrir-recettes'},onClick:()=>afficher(false)},t('Recettes')),
+    el('button',{type:'button','aria-pressed':'false',onClick:()=>afficher(true),dataset:{role:'ouvrir-pages-source'}},t('Pages source ({n})',{n:pages.length})));
   if(contenu)contenu.before(onglets);else root.append(onglets);root.append(sources);afficher(etat.onglet==='sources',true);
   return root;
 }

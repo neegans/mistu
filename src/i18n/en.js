@@ -1,6 +1,16 @@
 // Dictionnaire anglais : clé = chaîne française de référence. Une clé absente affiche le français.
 // Couverture : navigation, accueil, recherche, fiche recette, mode cuisine, réglages et libellés d'état.
 export const EN = {
+  'OK': 'OK',
+  'Choisir': 'Choose',
+  "Retirer le filtre : {filtre}": "Remove filter: {filtre}",
+  "Conservation des contraintes…": "Saving meal requirements…",
+  "Contraintes enregistrées.": "Meal requirements saved.",
+  "Contraintes non enregistrées. Tes choix restent affichés.": "Meal requirements could not be saved. Your choices are still shown.",
+  "Mode de recherche": "Search mode",
+  "Contenu de la recette": "Recipe content",
+  "Cuisine OS": "Cuisine OS",
+  'Aller au contenu': 'Skip to content',
   "Cet envoi de stock reste conservé. Revois les copies dans l’inventaire.": "This stock change is still saved. Review the copies in your inventory.",
   "La copie locale du lot reste récupérable sur cet appareil.": "The local batch copy remains available on this device.",
   "Conserve ou annule cette saisie avant de modifier une autre ligne.": "Save or cancel this input before editing another line.",

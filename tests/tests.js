@@ -1,3 +1,16 @@
+import {runL9CadreTests} from './l9-navigation.js';
+import {runL9DialoguesTests} from './l9-dialogues.js';
+import {runL9DialoguesRepliTests} from './l9-dialogues.js';
+import {runL9DialoguesMetierTests} from './l9-dialogues.js';
+import {runL9DialoguesCycleTests} from './l9-dialogues.js';
+import {runL9DialoguesMetierRepliTests} from './l9-dialogues.js';
+import {runL9LisibiliteTests} from './l9-lisibilite.js';
+import {runL9NavigationTests} from './l9-navigation.js';
+import {runL9CoquilleTests} from './l9-navigation.js';
+import {runL9BarreTests} from './l9-navigation.js';
+import {runL9SelecteursTests} from './l9-selecteurs.js';
+import {runL9ContraintesRepasTests} from './l9-selecteurs.js';
+import {runL9RaccordsSelecteursTests} from './l9-selecteurs.js';
 import {runL8InventaireComparaisonRejeuTests} from './l8-inventaire-comparaison.js';
 import {runL8InventaireReglagesTests} from './l8-inventaire-reglages.js';
 import {runL8SyncAdoptionTests} from './l8-sync.js';
@@ -603,6 +616,19 @@ try { await runL8InventaireComparaisonRejeuTests({eq,ok}); } catch (e) { ok(fals
 try { await runL8InventaireReglagesTests({eq,ok}); } catch (e) { ok(false, 'runL8InventaireReglagesTests : ' + (e.stack || e)); }
 try { await runL8SyncAdoptionTests({eq,ok}); } catch (e) { ok(false, 'runL8SyncAdoptionTests : ' + (e.stack || e)); }
 try { await runL8SyncBornesTests({eq,ok}); } catch (e) { ok(false, 'runL8SyncBornesTests : ' + (e.stack || e)); }
+try { await runL9DialoguesTests({eq,ok}); } catch (e) { ok(false, 'runL9DialoguesTests : ' + (e.stack || e)); }
+try { await runL9DialoguesRepliTests({eq,ok}); } catch (e) { ok(false, 'runL9DialoguesRepliTests : ' + (e.stack || e)); }
+try { await runL9DialoguesMetierTests({eq,ok}); } catch (e) { ok(false, 'runL9DialoguesMetierTests : ' + (e.stack || e)); }
+try { await runL9DialoguesCycleTests({eq,ok}); } catch (e) { ok(false, 'runL9DialoguesCycleTests : ' + (e.stack || e)); }
+try { await runL9DialoguesMetierRepliTests({eq,ok}); } catch (e) { ok(false, 'runL9DialoguesMetierRepliTests : ' + (e.stack || e)); }
+try { await runL9LisibiliteTests({eq,ok}); } catch (e) { ok(false, 'runL9LisibiliteTests : ' + (e.stack || e)); }
+try { await runL9NavigationTests({eq,ok}); } catch (e) { ok(false, 'runL9NavigationTests : ' + (e.stack || e)); }
+try { await runL9CoquilleTests({eq,ok}); } catch (e) { ok(false, 'runL9CoquilleTests : ' + (e.stack || e)); }
+try { await runL9BarreTests({eq,ok}); } catch (e) { ok(false, 'runL9BarreTests : ' + (e.stack || e)); }
+try { await runL9SelecteursTests({eq,ok}); } catch (e) { ok(false, 'runL9SelecteursTests : ' + (e.stack || e)); }
+try { await runL9ContraintesRepasTests({eq,ok}); } catch (e) { ok(false, 'runL9ContraintesRepasTests : ' + (e.stack || e)); }
+try { await runL9RaccordsSelecteursTests({eq,ok}); } catch (e) { ok(false, 'runL9RaccordsSelecteursTests : ' + (e.stack || e)); }
+try { await runL9CadreTests({eq,ok}); } catch (e) { ok(false, 'runL9CadreTests : ' + (e.stack || e)); }
 try { await runL7ObservationsBaseTests({eq,ok}); } catch (e) { ok(false, 'runL7ObservationsBaseTests : ' + (e.stack || e)); }
 
 try { await runL7CuisineArchiveTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineArchiveTests : ' + (e.stack || e)); }
@@ -617,7 +643,7 @@ try { await runL7MinuteursCommandesTests({eq,ok}); } catch (e) { ok(false, 'runL
 try { await runL7MinuteursDepotEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursDepotEcranTests : ' + (e.stack || e)); }
 try { await runL7MinuteursEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursEcranTests : ' + (e.stack || e)); }
 try { await runL7VoixTests({eq,ok}); } catch (e) { ok(false, 'runL7VoixTests : ' + (e.stack || e)); }
-eq(results.length, 11082,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 11261,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

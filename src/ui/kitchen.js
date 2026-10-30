@@ -11,7 +11,7 @@ import { pageHeader, section, segmented, field, select, emptyState } from './com
 export async function renderKitchen(params, query, ctx, deps = {}) {
   const tab = query.tab || 'appliances';
   const root = el('div', null, pageHeader(t('Ma cuisine')),
-    el('div', { style: { marginBottom: '1rem' } }, segmented([{ value: 'appliances', label: t('Appareils') }, { value: 'inventory', label: t('Inventaire') }], tab, (v) => navigate('/kitchen' + buildQuery({ tab: v })))));
+    el('div', { style: { marginBottom: '1rem' } }, segmented([{ value: 'appliances', label: t('Appareils') }, { value: 'inventory', label: t('Inventaire') }], tab, (v) => navigate('/kitchen' + buildQuery({ tab: v })), {nom:t('Ma cuisine')})));
   const contenu = tab === 'inventory' ? await creerInventaire({ctx,query,...deps}) : appliancesTab(ctx);
   root.append(contenu); root.dispose=()=>contenu.dispose?.(); root.actualiser=()=>contenu.actualiser?.();
   return root;

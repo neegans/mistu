@@ -49,11 +49,11 @@ export async function runThemeTests({ eq, ok }) {
   const R = regles(hors); const base = (s) => R.filter((r) => r.sel === s && !r.media).map((r) => declarations(r.corps));
   const iRow = R.findIndex((r) => r.sel === '.row' && !r.media); const iStatus = R.findIndex((r) => r.sel === '.status' && !r.media);
   ok(iRow >= 0 && iStatus > iRow, `R-VIS-14 (T-1) : la règle .status vient APRÈS la règle .row dans la feuille servie (positions ${iRow} et ${iStatus})`);
-  const calePile = /^calc\(\s*var\(--nav-h\)\s*\+\s*var\(--safe-b\)\s*\+/;
+  const calePile = /^calc\(\s*var\(--nav-h\)\s*\+/;
   const toastBas = base('.toast').map((d) => d.bottom).filter(Boolean).pop();
   const mainBas = base('main.content').map((d) => d['padding-bottom'] || (termes(d.padding).length >= 3 ? termes(d.padding)[2] : termes(d.padding)[0])).filter(Boolean).pop();
-  ok(calePile.test(toastBas || ''), `R-VIS-14 (T-1) : .toast (règle de base) calé sur calc(var(--nav-h) + var(--safe-b) + …) : « ${toastBas} »`);
-  ok(calePile.test(mainBas || ''), `R-VIS-14 (T-1) : main.content (règle de base) a son bas calé sur calc(var(--nav-h) + var(--safe-b) + …) : « ${mainBas} »`);
+  ok(calePile.test(toastBas || ''), `R-VIS-14 (T-1) : .toast (règle de base) calé sur calc(var(--nav-h) + …), hauteur incluant la zone sûre : « ${toastBas} »`);
+  ok(calePile.test(mainBas || ''), `R-VIS-14 (T-1) : main.content (règle de base) a son bas calé sur calc(var(--nav-h) + …), hauteur incluant la zone sûre : « ${mainBas} »`);
   eq([...hors.matchAll(/([^{}]+)\{[^{}]*\b56px[^{}]*\}/g)].map((m) => m[1].trim()), ['.btn.big', '.navigation-cuisine .btn'], 'T-11 : gestes principaux et navigation cuisine gardent 56px (le panneau latéral suit --topbar-h)');
   // Survol réservé aux appareils à pointeur (sur iOS il reste collé après une tape) : les deux :hover des boutons vivent sous @media (hover: hover), aucun au niveau racine.
   const survols = [...hors.matchAll(/@media\s*\(hover:\s*hover\)\s*\{\s*([^{}]+)\{/g)].map((m) => m[1].trim());
@@ -131,12 +131,12 @@ export async function runThemeTests({ eq, ok }) {
     const barre = document.createElement('div'); barre.className = 'search-bar'; const champ = document.createElement('input'); champ.type = 'search'; barre.append(champ); support.append(barre);
     if (Math.round(champ.getBoundingClientRect().height) !== 52) fautes.push(`.search-bar input ${champ.getBoundingClientRect().height} px ≠ 52`);
     eq(fautes, [], 'composants : chaque règle reliée à sa paire (couleur rendue sur fond rendu ≥ 4,5) ; .chip.removable ≥ 32, .search-bar input = 52 (mesurés)');
-    // R-VIS-3 : la marque et la pilule de recherche sont des cibles principales, comme la roue (44 px) ; la barre garde 64 px.
+    // R-VIS-3 : la marque et la pilule de recherche sont des cibles principales, comme la roue (44 px) ; la barre garde au moins 64 px et peut passer sur plusieurs rangées (L9).
     const pilule = document.createElement('a'); pilule.className = 'btn small'; pilule.href = '#/search'; pilule.append('⌕ ', Object.assign(document.createElement('span'), { className: 'nowrap', textContent: 'Qu’est-ce qu’on cuisine ?' }));
     const roue = document.createElement('a'); roue.className = 'btn small'; roue.href = '#/settings'; roue.textContent = '⚙';
     top.append(Object.assign(document.createElement('span'), { className: 'spacer' }), pilule, roue);
     const [rb, rp, rr] = [brand, pilule, roue].map((x) => x.getBoundingClientRect());
-    ok(rb.height >= 44 && rp.height >= 44 && rp.width >= 44 && rr.height >= 44 && rr.width >= 44 && Math.round(top.getBoundingClientRect().height) === 64, 'R-VIS-3 : marque, pilule de recherche et roue ≥ 44 px ; barre haute = 64 px (mesurés)');
+    ok(rb.height >= 44 && rp.height >= 44 && rp.width >= 44 && rr.height >= 44 && rr.width >= 44 && Math.round(top.getBoundingClientRect().height) >= 64 && [rb,rp,rr].every(r=>r.top>=top.getBoundingClientRect().top&&r.bottom<=top.getBoundingClientRect().bottom), 'R-VIS-3 : marque, recherche et roue ≥ 44 px ; barre ≥ 64 px contenant toutes ses rangées (mesurés, L9)');
     // R-VIS-5 : l'auteur d'une couverture se lit sur les DEUX arrêts du dégradé, opacité comprise (un titre sur deux lignes le remonte vers accent-2).
     const auteur = Object.assign(document.createElement('div'), { className: 'author', textContent: 'Josée Di Stasio · 2004' }); cov.append(auteur);
     const op = parseFloat(getComputedStyle(auteur).opacity); const ca = rgbVersHex(getComputedStyle(auteur).color).match(/[0-9a-f]{2}/g).map((h) => parseInt(h, 16));

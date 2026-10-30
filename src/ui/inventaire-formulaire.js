@@ -1,4 +1,4 @@
-import {el} from '../core/dom.js';
+import {el,ouvrirDialogue} from '../core/dom.js';
 import {t,label} from '../core/i18n.js';
 import {field,select as selectComposant} from './components.js';
 import {protegerSaisie,recettesActives} from './state.js';
@@ -29,9 +29,9 @@ export async function ouvrirFormulaireLot({service,portee,lu=null,references=nul
  if(!lu&&!refs.history){const versions=(ctx.recipe_versions||[]).filter(v=>recettesActives(ctx).some(r=>r.id===v.recipe_id)),choice=select([{value:'',label:t('Sans recette source')},...versions.map(v=>({value:v.id,label:(ctx.recipesById?.get(v.recipe_id)?.display_title||ctx.recipesById?.get(v.recipe_id)?.original_title||t('Recette'))+' · '+label('version_kind',v.kind)}))],refs.version?.id||'',id=>{const v=versions.find(x=>x.id===id),r=ctx.recipesById?.get(v?.recipe_id);refs=v&&r?clone({recipe:r,version:v,edition:ctx.editionsById?.get(r.edition_id)||null,history:null}):referencesVides();afficherSource();});details.append(field(t('Recette source'),choice));}
  const message=el('p',{role:'alert',class:'status warn',hidden:true}),contenu=el('fieldset',{class:'stack'},field(t('Quoi'),champs.label),field(t('Combien'),mode),quantite,field(t('Où'),champs.location),legacy?el('p',{class:'status warn'},t('Confirme la quantité de cet ancien lot. Aucun stock ne sera utilisé à cet enregistrement.')):null,details);
  const dlg=el('dialog',{class:'inventaire-formulaire',dataset:{role:'formulaire-lot'},style:{maxWidth:'min(42rem, calc(100vw - 2rem))'}},el('h2',null,lu?t('Modifier le lot'):t('Ajouter un lot')),contenu,message);
- let occupe=false,ferme=false,intention=null,signature=null;const avant=document.activeElement,liberer=protegerSaisie(dlg);const nombreVisible=()=>{quantite.hidden=mode.value!=='connue';initial.disabled=mode.value!=='connue';};mode.addEventListener('change',nombreVisible);nombreVisible();
+ let occupe=false,ferme=false,intention=null,signature=null,presentation;const liberer=protegerSaisie(dlg);const nombreVisible=()=>{quantite.hidden=mode.value!=='connue';initial.disabled=mode.value!=='connue';};mode.addEventListener('change',nombreVisible);nombreVisible();
  return new Promise(resolve=>{
-  const fermer=r=>{if(ferme)return;ferme=true;dlg.close();dlg.remove();liberer();if(avant?.isConnected)avant.focus();resolve(r);};
+  const fermer=r=>{if(ferme)return;ferme=true;presentation?.fermer();dlg.remove();liberer();resolve(r);};
   const annuler=el('button',{type:'button',class:'btn',onClick:()=>{if(!occupe)fermer(null);}},t('Annuler'));
   const enregistrer=el('button',{type:'button',class:'btn primary',dataset:{role:'enregistrer-lot'},onClick:()=>{void(async()=>{
    if(occupe||ferme)return;occupe=true;contenu.disabled=true;annuler.disabled=true;enregistrer.disabled=true;message.hidden=true;
@@ -47,13 +47,13 @@ export async function ouvrirFormulaireLot({service,portee,lu=null,references=nul
     const r=await service.appliquer({intention});if(!['conserve','deja_conserve'].includes(r.issue)){message.hidden=false;message.textContent=texteErreurInventaire(r);return;}fermer(r);
    }catch(e){message.hidden=false;message.textContent=texteErreurInventaire(e);}finally{occupe=false;if(!ferme){contenu.disabled=false;nombreVisible();annuler.disabled=false;enregistrer.disabled=false;}}
   })();}},t('Enregistrer'));
-  dlg.append(el('div',{class:'row'},annuler,enregistrer));dlg.addEventListener('cancel',e=>{e.preventDefault();if(!occupe)fermer(null);});document.body.append(dlg);dlg.showModal();champs.label.focus();
+  dlg.append(el('div',{class:'row'},annuler,enregistrer));dlg.addEventListener('cancel',e=>{e.preventDefault();if(!occupe)fermer(null);});presentation=ouvrirDialogue(dlg,{focusInitial:champs.label,estCourante});
  });
 }
 export function ouvrirMouvementLot({service,portee,lu,action,estCourante=()=>true}){
  const amount=el('input',{type:'text',name:'amount',inputmode:'decimal'}),message=el('p',{class:'status warn',role:'alert',hidden:true}),apercu=el('div',{class:'stack'}),dlg=el('dialog',{class:'inventaire-formulaire',dataset:{role:'mouvement-lot'}},el('h2',null,action==='consume'?t('Utiliser une quantité'):action==='finish'?t('Tout consommé'):t('Annuler cette consommation')),el('p',null,lu.projection.label),el('p',null,t('Restant : {quantite}',{quantite:quantiteInventaire(lu.projection)})),...(action==='consume'?[field(t('Quantité utilisée'),amount)]:[]),apercu,message);
- const liberer=protegerSaisie(dlg),avant=document.activeElement;let intention=null,occupe=false,ferme=false;
- return new Promise(resolve=>{const fermer=r=>{if(ferme)return;ferme=true;dlg.close();dlg.remove();liberer();if(avant?.isConnected)avant.focus();resolve(r);};
+ const liberer=protegerSaisie(dlg);let intention=null,occupe=false,ferme=false,presentation;
+ return new Promise(resolve=>{const fermer=r=>{if(ferme)return;ferme=true;presentation?.fermer();dlg.remove();liberer();resolve(r);};
   const annuler=el('button',{class:'btn',type:'button',onClick:()=>{if(!occupe)fermer(null);}},t('Annuler'));
   const confirmer=el('button',{class:'btn primary',type:'button',dataset:{role:'confirmer-mouvement'},onClick:()=>{void(async()=>{
    if(occupe||ferme)return;occupe=true;confirmer.disabled=true;annuler.disabled=true;amount.disabled=true;message.hidden=true;
@@ -61,6 +61,6 @@ export function ouvrirMouvementLot({service,portee,lu,action,estCourante=()=>tru
     const r=await service.appliquer({intention});if(!['conserve','deja_conserve'].includes(r.issue)){message.hidden=false;message.textContent=texteErreurInventaire(r);return;}fermer(r);
    }catch(e){message.hidden=false;message.textContent=texteErreurInventaire(e);}finally{occupe=false;if(!ferme){confirmer.disabled=false;annuler.disabled=false;amount.disabled=false;}}
   })();}},t('Voir le résultat'));
-  amount.addEventListener('input',()=>{intention=null;apercu.replaceChildren();confirmer.textContent=t('Voir le résultat');});dlg.append(el('div',{class:'row'},annuler,confirmer));dlg.addEventListener('cancel',e=>{e.preventDefault();if(!occupe)fermer(null);});document.body.append(dlg);dlg.showModal();(action==='consume'?amount:confirmer).focus();
+  amount.addEventListener('input',()=>{intention=null;apercu.replaceChildren();confirmer.textContent=t('Voir le résultat');});dlg.append(el('div',{class:'row'},annuler,confirmer));dlg.addEventListener('cancel',e=>{e.preventDefault();if(!occupe)fermer(null);});presentation=ouvrirDialogue(dlg,{focusInitial:action==='consume'?amount:annuler,estCourante});
  });
 }

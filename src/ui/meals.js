@@ -108,6 +108,22 @@ export async function renderMeal(params, query, ctx, deps = {}) {
       (deps.refresh ?? refresh)(); return true;
     } catch { (deps.toast ?? toast)(t('Les modifications du repas n’ont pas pu être enregistrées. Réessaie après rechargement.')); return false; }
   };
+  let sequenceContraintes = 0;
+  const etatContraintes = el('small', {role:'status', dataset:{role:'etat-contraintes'}});
+  const contraintes = el('div', {class:'chips',role:'group',dataset:{role:'contraintes-repas'}}, ...DIET_TAGS.map(d => {
+    const selectionne = meal.constraints_snapshot.diets.includes(d);
+    const bouton = el('button', {type:'button',class:`chip clickable ${selectionne ? 'warn' : 'outline'}`,'aria-pressed':String(selectionne),onClick:async() => {
+      const sequence = ++sequenceContraintes, choix = meal.constraints_snapshot.diets;
+      meal.constraints_snapshot.diets = choix.includes(d) ? choix.filter(x => x !== d) : [...choix,d];
+      const actif = meal.constraints_snapshot.diets.includes(d);
+      bouton.classList.toggle('warn',actif);bouton.classList.toggle('outline',!actif);bouton.setAttribute('aria-pressed',String(actif));
+      etatContraintes.textContent = t('Conservation des contraintes…');
+      const enregistre = await save(['constraints_snapshot']);
+      if (!dispose && sequence === sequenceContraintes) etatContraintes.textContent = enregistre
+        ? t('Contraintes enregistrées.') : t('Contraintes non enregistrées. Tes choix restent affichés.');
+    }},label('diet',d));
+    return bouton;
+  }));
   root.append(pageHeader(meal.title, { back: { href: '/meals', label: t('Ma semaine') }, actions: [
     el('button', { class: 'btn', onClick: async () => { const v = await promptDialog(t('Titre'), { value: meal.title }); if (v) { meal.title = v.trim(); save(['title']); } } }, t('Renommer')),
     el('button', { class: 'btn', onClick: redo }, t('Refaire ce repas')),
@@ -117,8 +133,8 @@ export async function renderMeal(params, query, ctx, deps = {}) {
     field(t('Portions du repas'), el('input', { type: 'number', min: 1, value: meal.servings??'', placeholder:t('inconnues'), onChange: async (e) => { try{meal.servings=portionsSaisies(e.target.value);for(const it of meal.items)if(!it.servings_custom){it.servings=meal.servings;it.servings_custom=false;}await save(['servings','items']);}catch{(deps.toast??toast)(t('Indique des portions valides ou laisse vide.'));} } })),
     champPlanificationRepas(meal,{...deps,repo:R,garde,saisie,planification,capturerHistorique:contextesHistoriques}),
     champHeureRepas(meal, {...deps,repo:R,garde,saisie,planification,capturerHistorique:contextesHistoriques}),
-    field(t('Contraintes de ce repas (invités inclus)'), el('div', { class: 'chips' }, ...DIET_TAGS.map((d) => el('span', { class: `chip clickable ${meal.constraints_snapshot.diets.includes(d) ? 'warn' : 'outline'}`, onClick: () => { const s = meal.constraints_snapshot.diets; meal.constraints_snapshot.diets = s.includes(d) ? s.filter((x) => x !== d) : [...s, d]; save(['constraints_snapshot']); } }, label('diet', d)))),
-      t('Liées à ce repas seulement ; le profil personnel n’est pas modifié.'))));
+    field(t('Contraintes de ce repas (invités inclus)'), contraintes,
+      t('Liées à ce repas seulement ; le profil personnel n’est pas modifié.')), etatContraintes));
 
   root.append(...mentions);
   // Éléments

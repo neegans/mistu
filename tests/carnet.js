@@ -33,7 +33,7 @@ export async function runCarnetTests({ eq, ok }) {
   await bloc('jetons', async () => {
     eq([jetons['--action'], jetons['--action-2'], jetons['--action-bg'], jetons['--tap']], ['#454e3b', '#363d2e', '#ebece4', 'rgba(69,78,59,.15)'], 'D-UI-2 amendé (fidélité aux maquettes, 28 octobre) : --action, --action-2, --action-bg et --tap sont l’olive sombre échantillonnée sur les maquettes (§ 3.1)');
     // Ronde 1 (M11) : « les 25 autres : inchangés » (§ 3.1) — theme.js n’en épingle que sept par valeur ; les 35 autres déclarations de :root (34, puis --radius-btn des maquettes) le sont ici, une à une, dans l'ordre.
-    eq(Object.fromEntries(Object.entries(jetons).filter(([k]) => !['--action', '--action-2', '--action-bg', '--tap'].includes(k))), { '--paper': '#f8f5ef', '--paper-2': '#f1ece3', '--card': '#fffdf9', '--ink': '#242821', '--muted': '#636860', '--line': '#e4dfd5', '--field-line': '#8f8a80', '--accent': '#45604a', '--accent-2': '#55705a', '--accent-bg': '#e4ebe2', '--warn': '#8b5f10', '--warn-bg': '#fbf1dc', '--warn-line': '#ead9b3', '--danger': '#9c2f22', '--danger-bg': '#f9e4df', '--danger-line': '#e9bfb6', '--ok': '#3d6b4a', '--ok-bg': '#e2efe4', '--backdrop': 'rgba(36,40,33,.45)', '--radius': '12px', '--radius-pill': '999px', '--shadow': '0 1px 2px rgba(36,40,33,.05), 0 8px 24px rgba(36,40,33,.06)', '--serif': 'ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif', '--radius-btn': '8px', '--sans': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', '--topbar-h': '64px', '--nav-h': 'max(64px, 4.5rem)', '--safe-b': 'env(safe-area-inset-bottom, 0px)', '--safe-t': 'env(safe-area-inset-top, 0px)', '--cream': 'var(--paper)', '--cream-2': 'var(--paper-2)', '--green': 'var(--accent)', '--green-2': 'var(--accent-2)', '--sage': '#b9c8bb', '--sage-2': 'var(--accent-bg)' }, 'D-UI-2 / § 3.1 : les 35 autres déclarations de :root, une à une (fidélité aux maquettes, 28 octobre : --serif passe aux serifs du système, New York d’abord ; --radius-btn neuf, 8 px ; L0 : navigation adaptée au texte agrandi ; le reste inchangé)');
+    eq(Object.fromEntries(Object.entries(jetons).filter(([k]) => !['--action', '--action-2', '--action-bg', '--tap'].includes(k))), { '--paper': '#f8f5ef', '--paper-2': '#f1ece3', '--card': '#fffdf9', '--ink': '#242821', '--muted': '#636860', '--line': '#e4dfd5', '--field-line': '#8f8a80', '--accent': '#45604a', '--accent-2': '#55705a', '--accent-bg': '#e4ebe2', '--warn': '#8b5f10', '--warn-bg': '#fbf1dc', '--warn-line': '#ead9b3', '--danger': '#9c2f22', '--danger-bg': '#f9e4df', '--danger-line': '#e9bfb6', '--ok': '#3d6b4a', '--ok-bg': '#e2efe4', '--backdrop': 'rgba(36,40,33,.45)', '--radius': '12px', '--radius-pill': '999px', '--shadow': '0 1px 2px rgba(36,40,33,.05), 0 8px 24px rgba(36,40,33,.06)', '--serif': 'ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif', '--radius-btn': '8px', '--sans': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', '--topbar-h': '64px', '--nav-h': 'calc(max(64px, 4.5rem) + var(--safe-b))', '--safe-b': 'env(safe-area-inset-bottom, 0px)', '--safe-t': 'env(safe-area-inset-top, 0px)', '--cream': 'var(--paper)', '--cream-2': 'var(--paper-2)', '--green': 'var(--accent)', '--green-2': 'var(--accent-2)', '--sage': '#b9c8bb', '--sage-2': 'var(--accent-bg)' }, 'D-UI-2 / § 3.1 : les 35 autres déclarations de :root, une à une (fidélité aux maquettes, 28 octobre : --serif passe aux serifs du système, New York d’abord ; --radius-btn neuf, 8 px ; L0 : navigation adaptée au texte agrandi ; le reste inchangé)');
     const c =(a, b) => Number(contraste(hex(a), hex(b)).toFixed(2));
     eq([c('--action', '--paper'), c('--action', '--card'), c('--action', '--accent-bg'), c('--action', '--paper-2'), c('--action-2', '--paper'), c('--muted', '--action-bg'), c('--action', '--action-bg'), c('--warn', '--action-bg')], [8.02, 8.59, 7.18, 7.42, 10.35, 4.8, 7.34, 4.72], 'D-UI-2 amendé (olive sombre des maquettes) : les huit contrastes de § 3.1, recalculés par la formule de theme.js (olive sur papier, carte, accent-bg et paper-2 ; survol sur papier ; gris, olive et ambre sur action-bg)');
     eq([css.includes('#bc3026'), css.includes('#98231b'), css.includes('#f7e3e0'), /rgba\(188,\s*48,\s*38/.test(css)], [false, false, false, false], 'D-UI-2 : plus aucune tomate dans la feuille servie (ni #bc3026, ni #98231b, ni #f7e3e0, ni rgba(188,48,38,…))');
@@ -712,7 +712,7 @@ export async function runCarnetTests({ eq, ok }) {
       const onglets = () => q(corpsE, '[data-role="onglets-corps"]');
       const ing = () => q(corpsE, '[data-role="section-ingredients"]'); const prep = () => q(corpsE, '[data-role="section-preparation"]');
       const actif = () => textes(onglets(), 'button.active');
-      eq([detailsE.open, onglets().hidden, ing().hidden, prep().hidden, actif(), onglets().getAttribute('role')], [false, false, false, true, ['Ingrédients'], 'tablist'], 'fiche T3 < 760 px : details FERMÉ ; segmented visible (tablist) ; Ingrédients visible, Préparation cachée (hidden), segment actif « Ingrédients »');
+      eq([detailsE.open, onglets().hidden, ing().hidden, prep().hidden, actif(), onglets().getAttribute('role')], [false, false, false, true, ['Ingrédients'], 'group'], 'fiche T3 < 760 px : details FERMÉ ; segmented visible (groupe de choix) ; Ingrédients visible, Préparation cachée (hidden), segment actif « Ingrédients »');
       const hashAvant = location.hash; const ingAvant = ing(); const prepAvant = prep(); const corpsAvant = corpsE.firstElementChild;
       [...onglets().querySelectorAll('button')].find((b) => b.textContent === 'Préparation').click();
       eq([ing().hidden, prep().hidden, actif(), location.hash === hashAvant, reseau, ing() === ingAvant && prep() === prepAvant, corpsE.firstElementChild === corpsAvant, corpsE.contains(ingAvant), ing().querySelectorAll('li').length],
@@ -1783,13 +1783,14 @@ export async function runCarnetTests({ eq, ok }) {
       const f = document.createElement('iframe'); f.setAttribute('aria-hidden', 'true'); f.setAttribute('title', 'scène de mesure');
       f.style.cssText = `position:absolute;left:-12000px;top:0;width:${largeur}px;height:600px;border:0`;
       document.body.append(f);
+      let c;
       try {
         const d = f.contentDocument;
         d.open(); d.write('<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body><div id="app"></div></body></html>'); d.close();
         const lien = d.createElement('link'); lien.rel = 'stylesheet'; lien.href = new URL('../styles.css?v=' + Date.now(), location.href).href;
         await new Promise((r) => { lien.onload = r; lien.onerror = r; d.head.append(lien); });
         if (f.contentWindow.innerWidth !== largeur) throw new Error(`cadre ${largeur} : innerWidth ${f.contentWindow.innerWidth}`);
-        const c = coquille('/library');
+        c = coquille('/library', {fenetre: f.contentWindow});
         d.getElementById('app').append(c.root);
         const p = c.root.querySelector('.pastille'); p.replaceChildren(Object.assign(d.createElement('span'), { className: 'long', textContent: '12 modifications à envoyer' })); p.dataset.court = '12 à envoyer'; p.hidden = false; // ce que pose majPastille (B04, lot I1)
         await new Promise((r) => requestAnimationFrame(() => r()));
@@ -1801,17 +1802,17 @@ export async function runCarnetTests({ eq, ok }) {
         // une largeur) ; ailleurs, le texte entier se voit — jamais une pastille vide.
         const serree = largeur < 600 || (largeur >= 900 && largeur <= 1099);
         const longue = B(p.querySelector('.long'));
-        mesures.push([largeur, d.documentElement.scrollWidth <= largeur, B(roue).left >= 0 && B(roue).right <= largeur, B(p).right <= B(rech).left,
+        mesures.push([largeur, d.documentElement.scrollWidth <= largeur, B(roue).left >= 0 && B(roue).right <= largeur, (B(p).bottom <= B(rech).top || B(p).right <= B(rech).left),
           largeur >= 900 ? visibles.length : S(c.tabs).display !== 'none', B(libelle).width <= 1, rech.textContent.trim(), Math.round(B(rech).width) >= 44,
           serree ? longue.width <= 1 : longue.width > 40, B(p).width >= 40]);
-      } finally { f.remove(); }
+      } finally { c?.dispose(); f.remove(); }
     }
     eq(mesures, [
       [375, true, true, true, true, true, 'Qu’est-ce qu’on cuisine ?', true, true, true], [390, true, true, true, true, true, 'Qu’est-ce qu’on cuisine ?', true, true, true],
       [768, true, true, true, true, false, 'Qu’est-ce qu’on cuisine ?', true, true, true], [900, true, true, true, 5, true, 'Qu’est-ce qu’on cuisine ?', true, true, true],
       [960, true, true, true, 5, true, 'Qu’est-ce qu’on cuisine ?', true, true, true], [1099, true, true, true, 5, true, 'Qu’est-ce qu’on cuisine ?', true, true, true],
       [1100, true, true, true, 5, false, 'Qu’est-ce qu’on cuisine ?', true, true, true], [1280, true, true, true, 5, false, 'Qu’est-ce qu’on cuisine ?', true, true, true]],
-      'barre du haut, pastille « 12 modifications à envoyer » visible (forme courte « 12 à envoyer » là où la barre est serrée) : aucune page plus large que la fenêtre, roue Réglages entière, pastille avant la recherche ; ≥ 900 px cinq onglets dans la barre, < 900 px les onglets bas ; recherche réduite à sa loupe sous 600 px et de 900 à 1099 px (le mot reste dans le lien) ; recherche ≥ 44 px (mesurés à 375, 390, 768, 900, 960, 1099, 1100, 1280 px)');
+      'barre du haut, pastille « 12 modifications à envoyer » visible (forme courte « 12 à envoyer » là où la barre est serrée) : aucune page plus large que la fenêtre, roue Réglages entière, pastille avant la recherche sur sa rangée ou la précédente ; ≥ 900 px cinq onglets dans la barre, < 900 px les onglets bas ; recherche réduite à sa loupe sous 600 px et de 900 à 1099 px (le mot reste dans le lien) ; recherche ≥ 44 px (mesurés à 375, 390, 768, 900, 960, 1099, 1100, 1280 px)');
     // Un titre sans espace (une adresse collée en titre de signet) reste DANS sa carte à 375 px : overflow-wrap des titres gardé (revue du 28 octobre).
     {
       const { buildDocs } = await import('../src/domain/search.js');
@@ -1834,6 +1835,7 @@ export async function runCarnetTests({ eq, ok }) {
     const c = coquille('/library');
     eq([c.side.getAttribute('role'), c.side.getAttribute('aria-label'), [...c.side.querySelectorAll('a.active')].map((a) => a.getAttribute('href'))], ['navigation', 'Navigation', ['#/library']],
       'coquille : la rangée d’onglets de la barre est un repère de navigation (role) ; l’onglet de la route est actif');
+    c.dispose();
   });
 
   // Correctif mobile du 29 octobre : la langue choisie est visible et suit le lien vers l’éditeur manuel.

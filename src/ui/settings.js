@@ -1010,7 +1010,7 @@ export function syncSectionL4(model, gestes = {}, { choisirQualite = choisirQual
   if (actualiser) bloc.append(actualiser);
   // R-UX-8 / B-15 : le segmented n'est JAMAIS dans un <label> (field() en rend un) : même habillage .field, par un div.
   bloc.append(el('div', { class: 'field' }, el('span', null, t('Qualité d’envoi des photos')),
-    segmented([{ value: 'reduite', label: t('Réduite (≈ 400 Ko, 2 000 px)') }, { value: 'originale', label: t('Originale') }], model.qualite, (v) => choisirQualite(v)),
+    segmented([{ value: 'reduite', label: t('Réduite (≈ 400 Ko, 2 000 px)') }, { value: 'originale', label: t('Originale') }], model.qualite, (v) => choisirQualite(v), {nom:t('Qualité d’envoi des photos')}),
     // Ronde 1 (S-9, R-G-4 ; à ratifier, spec § 4.1 item 4, § 5 et § 11 à amender) : « Réduite » n'est pas toujours réduite — octetsAEnvoyer envoie
     // tel quel une image petite et légère, une photo au-delà du mur de pixels ou que ce navigateur ne décode pas, une réduction qui serait plus lourde,
     // un PDF ou un EPUB. L'aide le dit au lieu de promettre « métadonnées retirées » sans exception.

@@ -25,6 +25,7 @@ export const MODULES_NEUFS = ['../src/ui/inventaire.js', '../src/ui/inventaire-t
 // livre (book.js) ; le refus « non vide » dit la phrase de main (« Un livre avec des recettes… »), sans entrée en.js jusqu’ici : l’entrée est posée, la
 // chaîne n’est pas neuve.
 export const CHAINES_NEUVES_AILLEURS = {
+  '../src/core/dom.js': ['Confirmer', 'Annuler', 'OK', 'Choisir'],
   '../src/ui/book.js': ['Voir plus', 'Filtrer les recettes de ce livre', 'Filtrer les pages source', 'Ajouter une recette', 'Ajouter des pages d’index', 'Pages source', 'Recettes', 'Mots-clés', 'Autre mot-clé', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre',
     // Lot G, tâche 6 : la couverture par état (§ 4.2).
     'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Fichier illisible reçu du serveur.', 'Le téléchargement n’a pas abouti.',
@@ -67,7 +68,7 @@ export const CHAINES_NEUVES_AILLEURS = {
     // Lot UI-1 « Carnet », tâche 5 : les textes courts d'availabilityBadge (D-UI-10).
     'À importer', 'À importer · p. {p}', 'Disponible', 'Partielle'],
   // Lot B, tâche 4 : « Garder et lire » et le doublon sur une carte de l'onglet Web.
-  '../src/ui/search.js': ['Garder et lire', 'Tu as déjà gardé cette adresse.', 'Ouvrir la fiche', 'Adresse non reconnue.', 'Le lien n’a pas pu être gardé. Réessaie.'],
+  '../src/ui/search.js': ['Mode de recherche', 'Garder et lire', 'Tu as déjà gardé cette adresse.', 'Ouvrir la fiche', 'Adresse non reconnue.', 'Le lien n’a pas pu être gardé. Réessaie.'],
   // Lot UI-1, tâche 2 : la Bibliothèque — en-tête (« Bibliothèque » : clé posée par la tâche 1), segments, filtre, puces, grille bornée, pied et liste « à importer ».
   '../src/ui/library.js': ['Bibliothèque', 'Tes livres, tes trouvailles, tes recettes.', 'Recettes', 'Ajouter une recette', 'Une recette, un ingrédient…', 'Toutes', 'De mes livres', 'Du web',
     'Recettes de mes livres à importer', 'Voir plus', 'À importer', 'Aucune recette pour l’instant.',
@@ -3850,9 +3851,9 @@ export async function runAjouterTests({ eq, ok }) {
     const sw = await lire('../sw.js');
     ok(sw.length > 300 && sw.includes('SHELL'), `statique sw.js : le source est bien lu (${sw.length} caractères, SHELL présent) — sans quoi les inclusions ci-dessous ne prouveraient rien (S4)`);
     for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js', './src/domain/lecture-web.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
-    ok(/VERSION = 'cuisine-os-v0\.30\.0-\d+'/.test(sw), 'sw.js : VERSION 0.30.0');
+    ok(/VERSION = 'cuisine-os-v0\.31\.0-\d+'/.test(sw), 'sw.js : VERSION 0.31.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.30.0', 'APP_VERSION 0.30.0 (lot UI-1, carnet)');
+    eq(APP_VERSION, '0.31.0', 'APP_VERSION 0.31.0 (lot UI-1, carnet)');
     const { GOOGLE_BOOKS } = await import('../src/sync/config.js');
     ok(typeof GOOGLE_BOOKS?.key === 'string' && (GOOGLE_BOOKS.key === '' || /^AIza[0-9A-Za-z_-]{35}$/.test(GOOGLE_BOOKS.key)), 'config : la clé Google Books est vide ou au format d’une clé d’API publique — un test de forme, jamais de valeur (S2/F2)');
   }

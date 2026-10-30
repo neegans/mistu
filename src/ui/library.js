@@ -56,7 +56,7 @@ export async function renderLibrary(params, query, ctx, deps = {}) {
   actions.push(el('a', { class: 'btn', href: '#/corbeille' }, t('Corbeille')));
   const root = el('div', null,
     pageHeader(t('Bibliothèque'), { subtitle: t('Tes livres, tes trouvailles, tes recettes.'), actions, back: tab === 'a-importer' ? { href: '/library?tab=recettes', label: t('Recettes') } : null }),
-    el('div', { style: { marginBottom: '1rem' } }, onglets(segmented([{ value: 'recettes', label: t('Recettes') }, { value: 'books', label: t('Livres') }, { value: 'dishes', label: t('Plats') }], segment, (v) => navigate('/library' + buildQuery({ tab: v }))))));
+    el('div', { style: { marginBottom: '1rem' } }, onglets(segmented([{ value: 'recettes', label: t('Recettes') }, { value: 'books', label: t('Livres') }, { value: 'dishes', label: t('Plats') }], segment, (v) => navigate('/library' + buildQuery({ tab: v })), {nom:t('Bibliothèque')}))));
   if (tab === 'dishes') root.append(await dishesTab(ctx));
   else if (tab === 'books') root.append(await booksTab(ctx,etat));
   else {

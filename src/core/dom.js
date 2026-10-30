@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 // Petit constructeur DOM : les contenus utilisateur passent toujours par textContent (pas d'innerHTML).
 
 export function el(tag, attrs = null, ...children) {
@@ -42,63 +44,107 @@ export function toast(message, ms = 2800) {
   let t = document.querySelector('.toast');
   if (!t) {
     t = el('div', { class: 'toast', role: 'status' });
-    document.body.append(t);
   }
+  const contenant = document.querySelector('.coquille') || document.body;
+  if (t.parentNode !== contenant) contenant.append(t);
   t.textContent = message;
   t.style.display = 'block';
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.style.display = 'none'; }, ms);
 }
 
-// Boîtes de dialogue basées sur <dialog>, avec repli sur window.confirm/prompt.
-export function confirmDialog(message, { okLabel = 'Confirmer', cancelLabel = 'Annuler', danger = false, body = null } = {}) {
-  if (typeof HTMLDialogElement === 'undefined') return Promise.resolve(window.confirm(message));
-  return new Promise((resolve) => {
-    const dlg = el('dialog', null,
-      el('p', { style: { fontWeight: '600' } }, message),
-      body,
-      el('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '.8rem' } },
-        el('button', { class: 'btn', onClick: () => { dlg.close(); resolve(false); } }, cancelLabel),
-        el('button', { class: `btn ${danger ? 'danger' : 'primary'}`, onClick: () => { dlg.close(); resolve(true); } }, okLabel)));
-    dlg.addEventListener('close', () => { dlg.remove(); resolve(false); });
-    document.body.append(dlg);
-    dlg.showModal();
-  });
+// Présentation uniquement : aucune décision ni écriture métier n'appartient à ce helper.
+let prochainTitreDialogue = 0, sequenceDialogues = 0;
+const visibleUtilisable = node => !!(node?.isConnected && !node.disabled && !node.closest('[hidden],[inert]') && node.getClientRects().length);
+function focuserDialogue(node) {
+  if (!visibleUtilisable(node)) return false;
+  if (!node.matches('a[href],button,input,select,textarea,[tabindex]')) node.tabIndex = -1;
+  node.focus(); return document.activeElement === node;
+}
+export function ouvrirDialogue(dlg, { titre = null, focusInitial = null, retourFocus = null, estCourante = () => true } = {}) {
+  if (estCourante() === false) { dlg.dispatchEvent(new Event('cancel', { cancelable: true })); return { fermer() {}, dispose() {}, mode: 'ignore' }; }
+  const avant = document.activeElement, main = avant?.closest('main') || document.querySelector('main'), route = location.hash;
+  const titreNode = titre instanceof Element ? titre : dlg.querySelector('h1,h2,h3');
+  if (titreNode) {
+    if (!titreNode.id) titreNode.id = `dialogue-titre-${++prochainTitreDialogue}`;
+    dlg.setAttribute('aria-labelledby', titreNode.id); dlg.removeAttribute('aria-label');
+  } else if (typeof titre === 'string' && titre) dlg.setAttribute('aria-label', titre);
+  let mode = 'modal', termine = false, detruit = false, observer;
+  ++sequenceDialogues;
+  const nettoyer = () => { observer?.disconnect(); dlg.removeEventListener('close', fermetureNative); dlg.removeEventListener('keydown', clavier); };
+  const restaurer = () => {
+    const sequence = sequenceDialogues, focusAvantRetour = document.activeElement;
+    // Les continuations de fermeture peuvent réactiver le déclencheur dans leur finally.
+    queueMicrotask(() => queueMicrotask(() => {
+      if (detruit || sequence !== sequenceDialogues || location.hash !== route || estCourante() === false) return;
+      if (document.activeElement !== focusAvantRetour && document.activeElement !== document.body && visibleUtilisable(document.activeElement)) return;
+      const cible = typeof retourFocus === 'function' ? retourFocus() : retourFocus || avant;
+      if (focuserDialogue(cible)) return;
+      const parent = [...document.querySelectorAll('dialog[open]')].at(-1);
+      if (parent && parent !== dlg && focuserDialogue(parent.querySelector('h1,h2,h3') || parent)) return;
+      const courant = main?.isConnected ? main : document.querySelector('main');
+      focuserDialogue(courant?.querySelector('h1') || courant);
+    }));
+  };
+  const terminer = () => { if (termine) return; termine = true; nettoyer(); restaurer(); };
+  function fermetureNative() { terminer(); }
+  function clavier(event) {
+    if (mode !== 'inline' || event.key !== 'Escape') return;
+    event.preventDefault(); event.stopPropagation();
+    if (dlg.dispatchEvent(new Event('cancel', { cancelable: true }))) fermer();
+  }
+  function fermer() {
+    if (termine) return;
+    if (mode === 'modal') { try { dlg.close(); } catch {} terminer(); }
+    else { dlg.removeAttribute('open'); terminer(); dlg.dispatchEvent(new Event('close')); }
+  }
+  const dispose = () => { detruit = true; nettoyer(); };
+  if (!dlg.isConnected) document.body.append(dlg);
+  dlg.addEventListener('close', fermetureNative); dlg.addEventListener('keydown', clavier);
+  try { if (typeof HTMLDialogElement === 'undefined' || typeof dlg.showModal !== 'function') throw new Error('dialogue_indisponible'); dlg.showModal(); }
+  catch { mode = 'inline'; dlg.setAttribute('open', ''); dlg.setAttribute('role', 'dialog'); dlg.setAttribute('aria-modal', 'false'); dlg.classList.add('dialogue-inline'); }
+  observer = new MutationObserver(() => { if (!dlg.isConnected) dispose(); });
+  observer.observe(document.body, { childList: true, subtree: true });
+  const cible = typeof focusInitial === 'function' ? focusInitial() : focusInitial;
+  if (estCourante() !== false) focuserDialogue(cible || dlg.querySelector('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),a[href]') || titreNode || dlg);
+  return { fermer, dispose, mode };
 }
 
-export function promptDialog(message, { value = '', placeholder = '', okLabel = 'OK', multiline = false } = {}) {
-  if (typeof HTMLDialogElement === 'undefined') return Promise.resolve(window.prompt(message, value));
-  return new Promise((resolve) => {
-    const input = multiline
-      ? el('textarea', { placeholder, value })
-      : el('input', { type: 'text', placeholder, value });
-    const dlg = el('dialog', null,
-      el('p', { style: { fontWeight: '600' } }, message),
-      input,
-      el('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '.8rem' } },
-        el('button', { class: 'btn', onClick: () => { dlg.close(); resolve(null); } }, 'Annuler'),
-        el('button', { class: 'btn primary', onClick: () => { const v = input.value; dlg.close(); resolve(v); } }, okLabel)));
-    dlg.addEventListener('close', () => { dlg.remove(); resolve(null); });
-    document.body.append(dlg);
-    dlg.showModal();
-    setTimeout(() => input.focus(), 30);
+// Signatures historiques conservées. Le choix explicite reste identique dans les replis.
+function dialogueSimple(message, { body = null, input = null, okLabel, cancelLabel, danger = false, annulation = null, valeur = () => true, repliNatif = null } = {}) {
+  return new Promise(resolve => {
+    const titre = el('h2', null, message), route = location.hash;
+    if (input) { if (!input.id) input.id = `dialogue-champ-${++prochainTitreDialogue}`; }
+    const label = input ? el('label', { for: input.id, class: 'dialogue-label' }, message) : null;
+    const dlg = el('dialog', null, titre, body, label, input);
+    let fini = false, presentation;
+    const finir = resultat => {
+      if (fini) return; fini = true;
+      window.removeEventListener('hashchange', quitter);
+      dlg.removeEventListener('close', annuler);
+      presentation?.fermer(); dlg.remove(); resolve(resultat);
+    };
+    const annuler = () => finir(annulation), quitter = () => { if (location.hash !== route) annuler(); };
+    const non = el('button', { type: 'button', class: 'btn', onClick: annuler }, cancelLabel);
+    const oui = el('button', { type: 'button', class: `btn ${danger ? 'danger' : 'primary'}`, onClick: () => finir(valeur()) }, okLabel);
+    dlg.append(el('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '.8rem' } }, non, oui));
+    dlg.addEventListener('close', annuler); dlg.addEventListener('cancel', event => { event.preventDefault(); annuler(); });
+    window.addEventListener('hashchange', quitter);
+    presentation = ouvrirDialogue(dlg, { titre, focusInitial: input || non });
+    if (presentation.mode === 'inline' && repliNatif) finir(repliNatif());
   });
 }
-
-// Choix parmi une liste : options = [{value, label, hint?}] ; retourne value ou null.
-export function chooseDialog(message, options, { okLabel = 'Choisir' } = {}) {
-  return new Promise((resolve) => {
-    const select = el('select', null, ...options.map((o) => el('option', { value: o.value }, o.label + (o.hint ? ` — ${o.hint}` : ''))));
-    const dlg = el('dialog', null,
-      el('p', { style: { fontWeight: '600' } }, message),
-      select,
-      el('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '.8rem' } },
-        el('button', { class: 'btn', onClick: () => { dlg.close(); resolve(null); } }, 'Annuler'),
-        el('button', { class: 'btn primary', onClick: () => { const v = select.value; dlg.close(); resolve(v); } }, okLabel)));
-    dlg.addEventListener('close', () => { dlg.remove(); resolve(null); });
-    document.body.append(dlg);
-    dlg.showModal();
-  });
+export function confirmDialog(message, { okLabel = t('Confirmer'), cancelLabel = t('Annuler'), danger = false, body = null } = {}) {
+  return dialogueSimple(message, { body, okLabel, cancelLabel, danger, annulation: false, repliNatif: body == null ? () => window.confirm(message) : null });
+}
+export function promptDialog(message, { value = '', placeholder = '', okLabel = t('OK'), multiline = false } = {}) {
+  const input = el(multiline ? 'textarea' : 'input', { ...(multiline ? {} : { type: 'text' }), placeholder, value });
+  return dialogueSimple(message, { input, okLabel, cancelLabel: t('Annuler'), annulation: null, valeur: () => input.value, repliNatif: () => window.prompt(message, value) });
+}
+// options = [{value,label,hint?}] ; retourne la valeur choisie ou null.
+export function chooseDialog(message, options, { okLabel = t('Choisir') } = {}) {
+  const input = el('select', null, ...options.map(o => el('option', { value: o.value }, o.label + (o.hint ? ` — ${o.hint}` : ''))));
+  return dialogueSimple(message, { input, okLabel, cancelLabel: t('Annuler'), annulation: null, valeur: () => input.value });
 }
 
 export function downloadBlob(blob, filename) {

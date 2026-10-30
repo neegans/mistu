@@ -40,7 +40,7 @@ import { renderCreerIA } from './ui/creer-ia.js';
 import { renderImportCible } from './ui/import-cible.js';
 import { porteEntreeModel, renderPorteEntree } from './ui/porte-entree.js';
 
-import { activerEntree, porteeNavigation, capturerVue, restaurerVue, invaliderNavigation, installerRetours, lienBibliotheque } from './ui/navigation-contexte.js';
+import { activerEntree, porteeNavigation, capturerVue, preparerPresentationVue, annulerPresentationVue, restaurerVue, suivreTitreVue, invaliderNavigation, installerRetours, lienBibliotheque } from './ui/navigation-contexte.js';
 
 function shell() { return coquille(parseHash().path); }
 
@@ -49,6 +49,7 @@ let coquilleARefaire = false;
 let renderSeq = 0;
 let porteeAffichee = null;
 let gardeRefusee = null;
+let arreterTitre = null;
 // Les notifications transportent seulement des noms de magasins. Cook relit sa portée
 // et conserve ses contrôleurs ; les autres routes retrouvent un cache invalidé.
 let baseObservee = null, arreterObservation = null;
@@ -66,6 +67,7 @@ function assurerObservationBase() {
 }
 
 function libererVue(){
+  arreterTitre?.(); arreterTitre = null;
   for(const node of current?.main.querySelectorAll('[data-role="photo-visible"]')||[])node.dispose?.();
   current?.main.firstElementChild?.dispose?.();
   revoquerUrlsDeBlob();
@@ -74,10 +76,11 @@ function libererVue(){
 async function onRoute({ handler, params, query, path, navigation = {} }) {
   assurerObservationBase();
   const seq = ++renderSeq, base = repo.db, generation = getSyncGeneration();
+  const estCourante = () => seq === renderSeq && base === repo.db && generation === getSyncGeneration();
+  const presentation = preparerPresentationVue({ mode: navigation.type === 'refresh' ? 'rafraichissement' : 'navigation', estCourante });
   if (current) capturerVue(current.main);
   // onRoute n'est appelé qu'après la garde de sortie. La langue peut changer pendant une saisie retenue.
-  if(coquilleARefaire){libererVue();current=null;coquilleARefaire=false;}
-  const estCourante = () => seq === renderSeq && base === repo.db && generation === getSyncGeneration();
+  if(coquilleARefaire){libererVue();current?.dispose();current=null;coquilleARefaire=false;}
   // La coquille est reconstruite au premier rendu et après un changement de langue : la pastille neuve est remise
   // à l'état RÉEL du moteur tout de suite, sinon elle resterait vide jusqu'à la prochaine passe.
   if (!current) { current = shell(); replace(document.getElementById('app'), current.root); majPastille(getSyncState().moteur?.etat(), !!getSyncState().user); }
@@ -92,10 +95,12 @@ async function onRoute({ handler, params, query, path, navigation = {} }) {
   // seul endroit qui voit tous les changements de vue. Sans cela, chaque couverture affichée retiendrait ses octets
   // en mémoire jusqu'au rechargement de la page.
   libererVue();
+  current.main.setAttribute('aria-busy', 'true');
   replace(current.main, el('p', { class: 'muted' }, t('Chargement…')));
+  let porteeRendue = porteeAffichee;
   try {
     const ctx = await getData();
-    if (!estCourante()) { if (seq === renderSeq) refresh(); return; }
+    if (!estCourante()) { annulerPresentationVue(presentation); if (seq === renderSeq) refresh(); return; }
     let portee = porteeNavigation(ctx);
     const guard = getSyncState().guard;
     const changee = porteeAffichee && (porteeAffichee.proprietaire !== portee.proprietaire || porteeAffichee.base !== portee.base || porteeAffichee.epoque !== portee.epoque);
@@ -106,17 +111,23 @@ async function onRoute({ handler, params, query, path, navigation = {} }) {
       query = ['/library', '/search'].includes(path) || path.startsWith('/books/') ? {} : Object.fromEntries(Object.entries(query).filter(([k]) => !['origine', 'retour_nav'].includes(k)));
       remplacerAdresse(path + (Object.keys(query).length ? '?' + new URLSearchParams(query) : ''));
     }
-    porteeAffichee = portee;
+    porteeAffichee = portee; porteeRendue = portee;
     activerEntree({ cleEntree: navigation.cleEntree, position: navigation.position, chaine: navigation.chaine, type: navigation.type, route: path, query, portee });
     const node = await handler(params, query, { ...ctx, navigation: { cleEntree: navigation.cleEntree, portee } });
-    if (!estCourante()) { node.dispose?.(); for (const photo of node.querySelectorAll('[data-role="photo-visible"]')) photo.dispose?.(); if (seq === renderSeq) refresh(); return; }
+    if (!estCourante()) { annulerPresentationVue(presentation); node.dispose?.(); for (const photo of node.querySelectorAll('[data-role="photo-visible"]')) photo.dispose?.(); if (seq === renderSeq) refresh(); return; }
     replace(current.main, node);
     for (const a of current.root.querySelectorAll('[data-nav-destination="/library"]')) a.href = lienBibliotheque();
-    await restaurerVue({ racine: node, cleEntree: navigation.cleEntree, portee, estCourante });
+    current.main.removeAttribute('aria-busy');
+    arreterTitre = suivreTitreVue({ racine: node, estCourante });
+    await restaurerVue({ racine: node, main: current.main, cleEntree: navigation.cleEntree, portee, estCourante, presentation });
   } catch (e) {
     logError('route', { error: e });
-    if (!estCourante()) { if (seq === renderSeq) refresh(); return; }
-    replace(current.main, el('div', { class: 'card danger' }, el('h2', null, t('Une erreur est survenue')), el('p', { class: 'muted' }, t('Code : {c}', { c: e?.name || 'Erreur' })), el('button', { class: 'btn', onClick: () => location.reload() }, t('Recharger'))));
+    if (!estCourante()) { annulerPresentationVue(presentation); if (seq === renderSeq) refresh(); return; }
+    const erreur = el('div', { class: 'card danger' }, el('h1', null, t('Une erreur est survenue')), el('p', { class: 'muted' }, t('Code : {c}', { c: e?.name || 'Erreur' })), el('button', { class: 'btn', onClick: () => location.reload() }, t('Recharger')));
+    replace(current.main, erreur); current.main.removeAttribute('aria-busy');
+    arreterTitre = suivreTitreVue({ racine: erreur, estCourante });
+    const effet = await restaurerVue({ racine: erreur, main: current.main, cleEntree: navigation.cleEntree, portee: porteeRendue || porteeNavigation({}), estCourante, presentation });
+    if (estCourante() && !effet.focusDeplace) erreur.querySelector('h1').setAttribute('role', 'alert');
   }
 }
 

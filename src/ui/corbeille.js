@@ -1,6 +1,6 @@
 import { capturerRecette, capturerEdition } from './recette-garde.js';
 // Corbeille individuelle : le contenu reste en base ; seule une commande explicite change son cycle de vie.
-import { el, formatDate } from '../core/dom.js';
+import { ouvrirDialogue, el, formatDate } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { refresh } from '../core/router.js';
 import * as repoModule from '../model/repo.js';
@@ -143,13 +143,13 @@ export async function panneauCycleLivre(edition, ctx, deps = {}) {
   }
   function choisir(initial,contexte) {
     return new Promise(resolve=>{
-      let bilan=initial,occupe=false,ferme=false;
+      let bilan=initial,occupe=false,ferme=false,presentation;
       const compteurs=el('ul',{class:'list plain',dataset:{role:'bilan-retrait-livre'}}),statut=el('p',{role:'status',class:'status warn',hidden:true});
       const dlg=el('dialog',{dataset:{role:'dialogue-corbeille-livre'},style:{maxWidth:'min(42rem, calc(100vw - 2rem))'}},
         el('h2',null,t('Que veux-tu garder dans ta bibliothèque ?')),compteurs,
         el('p',{class:'muted'},t('Les sources, les photos et les anciens repas sont conservés. Ces nombres décrivent les données présentes sur cet appareil.')),statut);
       const liberer=protegerSaisie(dlg);
-      const fermer=()=>{if(ferme)return;ferme=true;dlg.close();dlg.remove();liberer();requestAnimationFrame(()=>{if(bouton.isConnected)bouton.focus();});resolve();};
+      const fermer=()=>{if(ferme)return;ferme=true;presentation?.fermer();dlg.remove();liberer();resolve();};
       const dessiner=()=>{const c=bilan.compteurs;compteurs.replaceChildren(...[
         ['{n} recette(s) disponible(s)',c.disponibles],['{n} recette(s) partielle(s)',c.partielles],['{n} référence(s)',c.references],['{n} recette(s) déjà retirée(s)',c.dejaRetirees],['{n} page(s) source',c.pages],['{n} import(s) ouvert(s)',c.importsOuverts],['{n} import(s) en cours',c.importsEnCours],['{n} import(s) à l’état à vérifier',c.importsInconnus]
       ].map(([texte,n])=>el('li',null,t(texte,{n}))));};
@@ -170,7 +170,7 @@ export async function panneauCycleLivre(edition, ctx, deps = {}) {
       dlg.addEventListener('cancel',e=>{e.preventDefault();if(!occupe)fermer();});
       const routeAvant=location.hash,quitter=()=>{if(location.hash!==routeAvant&&!occupe)fermer();};
       window.addEventListener('hashchange',quitter);dlg.addEventListener('close',()=>window.removeEventListener('hashchange',quitter),{once:true});
-      dessiner();document.body.append(dlg);dlg.showModal();dlg.querySelector('button').focus();
+      dessiner();presentation=ouvrirDialogue(dlg,{focusInitial:()=>[...dlg.querySelectorAll('button')].at(-1),retourFocus:bouton});
     });
   }
   return root;

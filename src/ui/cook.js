@@ -41,7 +41,7 @@ export async function renderCook(params,query,ctx,deps={}){
  const etat=el('p',{class:'status warn',role:'status',hidden:true,dataset:{role:'etat-cuisine'}});
  const terminer=el('button',{class:'btn',type:'button',onClick:()=>finir([])},t('Terminer'));
  const langues=[{value:'original',label:t('Original')},{value:'fr',label:t('Français')},{value:'en',label:t('Anglais')}];
- const langueChoix=segmented(langues,'original',lang=>geste('langue',{lang}));langueChoix.dataset.role='langue-cuisine';langueChoix.setAttribute('role','group');langueChoix.setAttribute('aria-label',t('Langue de lecture'));
+ const langueChoix=segmented(langues,'original',lang=>geste('langue',{lang}),{nom:t('Langue de lecture')});langueChoix.dataset.role='langue-cuisine';
  const entete=el('div',{class:'cuisine-entete'},titre,el('div',{class:'row'},terminer,fiche));
  const avertissements=el('div',{class:'stack',dataset:{role:'avertissements-cuisine'}}),onglets=el('div',{class:'row cuisine-recettes',role:'group','aria-label':t('Recette active')});
  const outils=el('div',{class:'row cuisine-outils'},langueChoix),contenu=el('div',{class:'cuisine-contenu'}),navigation=el('div',{class:'controls cuisine-navigation navigation-cuisine'}),photoHote=el('div');
@@ -116,7 +116,7 @@ export async function renderCook(params,query,ctx,deps={}){
   if(pr?.traductionId){const row=affiche.traductions.find(r=>r.id===pr.traductionId);if(row)traductionsChoisies.set(cleTraduction(active.version.id),{id:row.id,exact:cleRendu(projectionCandidateTraduction(row))});}
   titre.textContent=items.length>1?t('Repas — {n} recettes',{n:items.length})+(pr?' · '+pr.titre.texte:''):pr?.titre.texte||t('Cuisine');
   fiche.hidden=!active?.recipe||!active?.version;if(!fiche.hidden)fiche.href=`#/recipes/${encodeURIComponent(active.recipe.id)}?v=${encodeURIComponent(active.version.id)}`;
-  for(const [i,b]of [...langueChoix.children].entries()){b.classList.toggle('active',langues[i].value===projection.lang);b.setAttribute('aria-pressed',String(langues[i].value===projection.lang));}
+  langueChoix.selectionner(projection.lang);
   for(const it of items){const b=mutation(it.recipe?.display_title||it.recipe?.original_title||t('Version indisponible'),()=>geste('selection',{versionId:it.version_id}),{interdit:!it.version||!it.recipe,classe:'btn small'});b.dataset.versionId=it.version_id;b.dataset.actionCuisine='selection';b.classList.toggle('active',it.version_id===projection.active_version_id);b.setAttribute('aria-pressed',String(it.version_id===projection.active_version_id));onglets.append(b);}
   if(items.length>1)onglets.append(el('button',{type:'button',class:'btn small','aria-pressed':String(planOuvert),onClick:()=>{planOuvert=!planOuvert;dessiner();}},t('Plan commun')));
   for(const it of items.filter(x=>x.recipe&&x.version)){

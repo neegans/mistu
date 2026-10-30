@@ -277,12 +277,15 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const langueLecture = segmented(langues, state.lang, (valeur) => {
     state.lang = valeur;state.translationId=null;
     // Le corps se redessine, mais ce contrôle reste monté dans le volet : son état doit suivre la lecture.
-    for(const[i,bouton]of[...langueLecture.children].entries()){bouton.classList.toggle('active',langues[i].value===valeur);bouton.setAttribute('aria-pressed',String(langues[i].value===valeur));}
+    langueLecture.selectionner(valeur);
     drawBody();
-  });
-  langueLecture.dataset.role='langue-recette';langueLecture.setAttribute('role','group');langueLecture.setAttribute('aria-label',t('Langue de lecture'));[...langueLecture.children].forEach((b,i)=>b.setAttribute('aria-pressed',String(langues[i].value===state.lang)));
+  }, {nom:t('Langue de lecture')});
+  langueLecture.dataset.role='langue-recette';
   const choixLangue=el('div',{class:'lecture-langue stack'},el('span',{class:'muted'},t('Langue de lecture')),langueLecture);
   etat.insertBefore(choixLangue,etat.querySelector('.resume-reperes'));
+  const unitesLecture = segmented([{value:'original',label:t('Original')},{value:'metric',label:t('Métrique')},{value:'us',label:'US'}], state.units, v => {
+    state.units=v;unitesLecture.selectionner(v);drawBody();
+  }, {nom:t('Unités')});
   const autresGestes = el('details', { class: 'autres-gestes', open: false, dataset: { role: 'autres-gestes' } },
     el('summary', null, t('Portions, versions et autres gestes')),
     el('div', { class: 'stack' },
@@ -301,7 +304,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
           el('button', { class: 'btn small', onClick: () => setServings((state.servings || 1) - 1) }, '−'),
           el('strong', { id: 'servings-val' }, state.servings ?? t('inconnues')),
           el('button', { class: 'btn small', onClick: () => setServings((state.servings || 0) + 1) }, '+'))),
-        el('label', { class: 'field' }, el('span', null, t('Unités')), segmented([{ value: 'original', label: t('Original') }, { value: 'metric', label: t('Métrique') }, { value: 'us', label: 'US' }], state.units, (v) => { state.units = v; drawBody(); }))),
+        field(t('Unités'), unitesLecture)),
       // N-5 : une création IA s'adapte par l'assistant (version enfant, original intact) ; les puces V1 s'effacent devant ce geste réel.
       lectureSeule ? null : estUneCreation
         ? el('div', { class: 'row' }, el('a', { class: 'btn small', href: `#/recipes/creer${buildQuery({ adapter: version.id })}`, dataset: { role: 'adapter-ia' } }, t('Adapter avec l’IA')))
@@ -429,10 +432,9 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     });
     const preparation = sectionPlain(t('Préparation'), estThermomix(version) ? el('small', { class: 'muted' }, t('Durée proposée par l’assistant, à vérifier pendant la cuisson.')) : null, (version.steps || []).length ? steps : el('p', { class: 'muted' }, t('Étapes non numérisées.')), projection.notes.texte ? segmentLectureEl(projection.notes) : null, projection.rendement.texte ? segmentLectureEl(projection.rendement) : null);
     preparation.dataset.role = 'section-preparation';
-    const onglets = segmented([{ value: 'ingredients', label: t('Ingrédients') }, { value: 'preparation', label: t('Préparation') }], state.onglet, (v) => { state.onglet = v; appliquerCorps(); });
+    const onglets = segmented([{ value: 'ingredients', label: t('Ingrédients') }, { value: 'preparation', label: t('Préparation') }], state.onglet, (v) => { state.onglet = v; appliquerCorps(); }, {nom:t('Contenu de la recette')});
     onglets.dataset.role = 'onglets-corps';
     onglets.classList.add('onglets');
-    onglets.querySelectorAll('button').forEach((b, i) => { b.dataset.value = ['ingredients', 'preparation'][i]; }); // segmented() ne pose pas la valeur : le segment actif se retrouve par elle
     body.append(onglets, el('div', { class: 'two-col', dataset: { role: 'colonnes-corps' } }, ingredients, preparation));
     appliquerCorps();
     if (lc?.conseils.length) body.append(section(t('Conseils'), el('ul', { dataset: { role: 'conseils-ia' } }, ...lc.conseils.map((c) => el('li', null, t('Selon l’assistant : {texte}', { texte: c }))))));
@@ -446,7 +448,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     if (!onglets) return;
     const etroit = !large();
     onglets.hidden = !etroit;
-    for (const b of onglets.querySelectorAll('button')) b.classList.toggle('active', b.dataset.value === state.onglet);
+    onglets.selectionner(state.onglet);
     body.querySelector('[data-role="section-ingredients"]').hidden = etroit && state.onglet !== 'ingredients';
     body.querySelector('[data-role="section-preparation"]').hidden = etroit && state.onglet !== 'preparation';
   }
