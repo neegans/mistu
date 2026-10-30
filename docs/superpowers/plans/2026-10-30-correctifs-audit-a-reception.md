@@ -35,3 +35,9 @@ Les tests rouges reproduisent la perte de l’instantané des recettes/éditions
 La protection transactionnelle couvre les réceptions, les envois ordinaires, les commandes de cycle, les lots de sources et les créations non adoptées. Une suppression de conflit après accusé est conditionnée ; si le conflit change, le rangement local reprend au plus trois fois, sans nouvel envoi et avec le propriétaire d’origine. Les contre-épreuves ont aussi reproduit puis fermé la course de changement de compte pendant cette reprise.
 
 Nouveau module **43/43**, contre-épreuves indépendantes **20/20** (9 rouges avant correction), régressions corbeille58/58 et reprise46/46. Suite complète **11848/11848**, soit+43 ; zéro erreur JavaScript/requête extérieure. Preuves `t3-*.log` et `revue-t3.apres.json`. Syntaxe, diff et générateur conformes. Livraison locale **0.32.1-3**,209 fichiers /3 645 099 octets, SHA256 `8dc3e8f0b945384bbf455afc4a83c6e71c3e97f12a92e5b29141f1f836f64983`. Tâches4–5 restantes, aucune publication.
+
+## Tâche 4 — minutes après les heures
+
+Neuf échecs causaux avant correction, dont « 1 h 30 à 180 °C » réduit à3600 secondes. Le parseur accepte maintenant les minutes abrégées devant une préposition, avec une borne de0 à59. Les unités explicites de quantité/température et les plages de durées restent indépendantes. La lecture explicite de60/99 minutes est conservée ; une abréviation sans unité au-delà de59 n’est plus assimilée à des minutes.
+
+**31 assertions ajoutées**, ciblé cuisine143/143 et contre-épreuves indépendantes26/26. Suite complète **11879/11879**, zéro erreur JavaScript/requête extérieure. Preuves `t4-rouge.log`, `t4-vert.log`, `t4-suite.log`, `revue-t4.resultat.json`. Syntaxe, diff et générateur conformes. Livraison locale **0.32.1-4**,209 fichiers /3 645 498 octets, SHA256 `9ef27076ae60fb75e2d2180bfd5ba3b0c38738d63755072b34cbadd30a3e94d8`. Reste la tâche5 ; aucune publication.

@@ -58,6 +58,26 @@ export async function runL0CuisineTests({ eq, ok }) {
     ['Repos 1 h 30', [5400]], ['Repos 1 h 30.', [5400]], ['Wait 1 hr 30 mins', [5400]], ['Rest 4–6 hrs', [14400]],
   ]) eq((detectTimers(texte).timers || []).map(tm => tm.seconds), attendu, 'L0 durée : unités explicites respectées — ' + texte);
 
+  for (const [texte, attendu] of [
+    ['Cuire 1 h 30 à 180 °C', [5400]], ['Laisser 2 h 15 au four', [8100]],
+    ['Mijoter 1 h 15 dans le bouillon', [4500]], ['Cuire 1 h 30 - puis servir', [5400]],
+    ['Cuire 1h30 à 180°C', [5400]], ['Bake 1 hr 30 at 350 °F', [5400]],
+    ['Repos 1 h 30 g', [3600]], ['Repos 1 h 30 kg', [3600]], ['Repos 1 h 30 mg', [3600]],
+    ['Repos 1 h 30 ml', [3600]], ['Repos 1 h 30 cl', [3600]], ['Repos 1 h 30 dl', [3600]],
+    ['Repos 1 h 30 l', [3600]], ['Repos 1 h 30 oz', [3600]], ['Repos 1 h 30 grammes', [3600]],
+    ['Repos 1 h 30°C', [3600]], ['Repos 1 h 30 °F', [3600]], ['Repos 1 h 30 degrés', [3600]],
+    ['Repos 1h30secondes', [3600, 30]], ['Repos 1 h 30 s', [3600, 30]],
+    ['Repos 1 h 00 au frais', [3600]], ['Repos 1 h 59 au frais', [7140]],
+    ['Repos 1 h 60', [3600]], ['Repos 1 h 99', [3600]],
+    ['Repos 1 h 60 min', [7200]], ['Repos 1 h 99 min', [9540]],
+    ['Repos 1 h 100 min', [3600, 6000]], ['Repos 1 h 30,5 minutes', [3600, 1830]],
+  ]) eq((detectTimers(texte).timers || []).map(tm => tm.seconds), attendu, 'audit durée en contexte : ' + texte);
+  for (const [texte, attendu] of [
+    ['Repos 1 h 30 à 45 min', [[3600, null], [1800, 2700]]],
+    ['Repos 1 h 5 à 10 secondes', [[3600, null], [5, 10]]],
+    ['Rest 1 h 2 to 3 hours', [[3600, null], [7200, 10800]]],
+  ]) eq((detectTimers(texte).timers || []).map(tm => [tm.seconds, tm.seconds_max ?? null]), attendu, 'audit durée : plage distincte après heures — ' + texte);
+
   await run('choix partagé', async () => {
     const calls = [];
     const root = timerBlock(30, { seconds_max: 90, onRequest: (...args) => calls.push(args) });

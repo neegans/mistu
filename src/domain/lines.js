@@ -100,10 +100,12 @@ export function detectTimers(text) {
   const heure = '(?:heures?|hours?|hrs?|h)(?![a-z])';
   const minute = '(?:minutes?|mins?)(?![a-z])';
   const courte = `(?:${minute}|(?:secondes?|seconds?|secs?|s)(?![a-z]))`;
-  // Un nombre après les heures est une minute seulement si l'unité est explicite, ou si l'abréviation s'arrête
-  // ici (fin, ponctuation ou liaison de clauses). « 1 h 30 secondes » et « 1 h 30 g » ne valent jamais 90 minutes.
-  const finAbregee = '(?=\\s*(?:$|[.,;:!?)\n]|(?:puis|then|et|and)\\b))';
-  const minutesApresHeure = `(?:(\\d{1,2})(?!\\d|[.,]\\d)(?:\\s*${minute}|${finAbregee}))?`;
+  // L'abréviation reste valable devant « à 180 °C », « au four », etc. Une unité explicite étrangère ou
+  // une plage de durée qui suit reste indépendante : ni « 30 g », ni « 30 à 45 min » ne sont absorbés.
+  const quantite = '(?:mg|g|gr|kg|grammes?|grams?|kilogrammes?|kilograms?|ml|cl|dl|l|millilitres?|milliliters?|centilitres?|decilitres?|litres?|liters?|oz|lbs?|livres?)(?![a-z])';
+  const finAbregee = `(?![a-z])(?!\\s*(?:${quantite}|°|degr[eé]s?\\b|${heure}|${courte}|(?:à|-|–|to)\\s*${nombre}\\s*(?:${heure}|${courte})))`;
+  // Minutes abrégées de 0 à 59 ; l'unité « min » conserve sa lecture explicite historique (ex. 60 min).
+  const minutesApresHeure = `(?:(?=\\d{1,2}\\s*${minute}|[0-5]?\\d(?!\\d))(\\d{1,2})(?!\\d|[.,]\\d)(?:\\s*${minute}|${finAbregee}))?`;
   // Les plages sont reconnues EN PREMIER pour ne pas extraire seulement « 6 heures » de « 4–6 heures ».
   const re = new RegExp(`(${nombre})\\s*(?:à|-|–|to)\\s*(${nombre})\\s*(${heure}|${courte})|(${nombre})\\s*${heure}\\s*${minutesApresHeure}|(${nombre})\\s*(${courte})`, 'gi');
   const valeur = s => parseFloat(s.replace(',', '.'));

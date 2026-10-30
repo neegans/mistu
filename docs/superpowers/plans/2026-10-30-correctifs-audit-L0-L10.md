@@ -89,10 +89,10 @@
 - Modifier : `src/domain/lines.js:106-107` (`finAbregee`, `minutesApresHeure`)
 - Modifier : `tests/l0-cuisine.js:56-58` (table des cas)
 
-- [ ] **Étape 1 : cas rouges ajoutés à la table** : `['Cuire 1 h 30 à 180 °C', [5400]]`, `['Laisser 2 h 15 au four', [8100]]`, `['Mijoter 1 h 15 dans le bouillon', [4500]]`, `['Cuire 1 h 30 - puis servir', [5400]]` ; cas CONSERVÉS tels quels : `['Attendre 1 h 30 secondes', [3600, 30]]`, `['Repos 1 h 30 g de beurre', [3600]]`, `['Repos 1 h 30.', [5400]]`.
-- [ ] **Étape 2 : rouge constaté** (`preuves/lines-1h30.txt` : 3600 et 7200).
-- [ ] **Étape 3 : implémenter** : un nombre de 1 à 59 après l'unité d'heure vaut des minutes sauf s'il est suivi d'une unité explicite autre que minute (`g|kg|ml|cl|l|secondes?|seconds?|secs?|s`, insensible à la casse, frontière de mot) ou d'un chiffre/décimale : remplacer `finAbregee` par un « lookahead » négatif sur ces unités ; borne `(?:[0-5]?\d)` ; garder la branche `\s*${minute}`.
-- [ ] **Étape 4 : suite verte, commit** `fix(minuteries): lire les minutes apres les heures devant une preposition (audit 3.1)`.
+- [x] **Étape 1 : cas rouges ajoutés à la table** : `['Cuire 1 h 30 à 180 °C', [5400]]`, `['Laisser 2 h 15 au four', [8100]]`, `['Mijoter 1 h 15 dans le bouillon', [4500]]`, `['Cuire 1 h 30 - puis servir', [5400]]` ; cas CONSERVÉS tels quels : `['Attendre 1 h 30 secondes', [3600, 30]]`, `['Repos 1 h 30 g de beurre', [3600]]`, `['Repos 1 h 30.', [5400]]`.
+- [x] **Étape 2 : rouge constaté** (`preuves/lines-1h30.txt` : 3600 et 7200).
+- [x] **Étape 3 : implémenter** : un nombre de 1 à 59 après l'unité d'heure vaut des minutes sauf s'il est suivi d'une unité explicite autre que minute (`g|kg|ml|cl|l|secondes?|seconds?|secs?|s`, insensible à la casse, frontière de mot) ou d'un chiffre/décimale : remplacer `finAbregee` par un « lookahead » négatif sur ces unités ; borne `(?:[0-5]?\d)` ; garder la branche `\s*${minute}`.
+- [x] **Étape 4 : suite verte, commit** `fix(minuteries): lire les minutes apres les heures devant une preposition (audit 3.1)`.
 
 ### Tâche 5 : Retour des avertissements « Avant de commencer » en cuisine
 
