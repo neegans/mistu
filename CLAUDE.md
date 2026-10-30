@@ -3753,3 +3753,10 @@ Concurrence35 contrôles avec deux connexions ; deux moteurs42 contrôles/15RPC,
 Chrome : inventaire11 mesures/33 gestes et repas8/28, deux onglets, rechargements réellement hors ligne,14 modules en cache unique. Captures relues ; les défauts de navigation globale à texte200% sont consignés pour L9.
 Les courses gardent leur arbitrage par ligne entre appareils ; la fusion de cases prouvée ici concerne deux onglets partageant la même base. Aucun calcul automatique de quantité, consommation ou durée de conservation.
 Aucun compte privé/appel assistant réel ni essai physique iPhone/Safari/TM7. Publication autorisée par les demandes de poursuite/déploiement. **L9–L10 et E1 restent à terminer.**
+
+
+**L8 publié et reçu le 30 octobre.** SQL0013 appliqué une seule fois à **06:11:45UTC (02 h11 HAE)** sous transaction gardée ; SHA256 `02f0390bed59a9297e3c2138679512a26c64e8acebd7b961128ca454eaa6be3b`.
+Catalogue distant :32 fonctions/corps et droits clients exacts,6 triggers conformes,2 tables privées inchangées. Les32 écarts service_role sont les droits par défaut du rôle serveur privilégié, sans héritage anon/authenticated vérifié à distance. Capacité inventory_changes1 confirmée sous authenticated en lecture seule ; aucune donnée métier serveur consultée.
+Code **9bb96ac** poussé par avance rapide dans main ; Pages construit à **06:12:40UTC (02 h12 HAE)**. **76 fichiers** publics exacts et **11083/11083** tests publics, zéro erreur JavaScript/requête extérieure.
+Parcours publics inventaire **11 mesures/33 gestes**, repas/courses **8/28** ; deux onglets, rechargements réellement hors ligne, quantités/notes/cases/conventions conservées,14 modules en cache unique0.30.0-1. Captures publiques relues. Le harnais courses attend désormais le montage réel après reload avant de compter les cases ; aucun correctif produit nécessaire pour ce défaut de temporisation du harnais.
+**0.30.0 en ligne**, DB6/archive7/SQL0013. Aucun essai physique iPhone/Safari/TM7 ni appel assistant réel. **L9–L10 et E1 restent à terminer.**
