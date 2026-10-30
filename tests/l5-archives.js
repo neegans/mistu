@@ -26,7 +26,7 @@ async function transformer(archive,fn) {
 export async function runL5ArchivesTests({eq,ok}) {
   let archive,source;
   await withDatabase(async db=>{source=await fixture(db);archive=await createArchive(db);});
-  eq(archive.manifest.format_version,5,'L5 / L6 archive : format5 annonce aussi les groupes et traductions aux anciens lecteurs');
+  eq(archive.manifest.format_version,6,'L5 / L7 archive : format6 conserve les sources, groupes et traductions');
   const inspection=await inspectArchive(await archive.blob.arrayBuffer());
   ok(inspection.ok,'L5 archive : chaîne source et fichier complet sont inspectés');
   for(const mode of ['merge','replace'])await withDatabase(async db=>{

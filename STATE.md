@@ -1,12 +1,16 @@
-# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L7 EN CONSTRUCTION, 0.28.0 EN LIGNE
+# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L7 REÇU LOCALEMENT, 0.28.0 EN LIGNE
 
-**L7 — cuisine et minuteries : contrat technique fermé, code à venir.**
-[Spec](docs/superpowers/specs/2026-10-29-l7-cuisine-minuteurs-design.md), [protocole](docs/superpowers/specs/2026-10-30-l7-protocole-cuisine.md), [plan](docs/superpowers/plans/2026-10-29-l7-cuisine-minuteurs.md).
-Branche `l7-cuisine-minuteurs`, base publique L6 code87855c4/reçu c5b6c08. Revue A/C puis intégration ; aucune relecture personnelle attribuée à Neegan.
-Deux régions ingrédients/étape, échéances conservées et progression qualifiée par version ; demandes système explicites et écran allumé révocable.
-Cible0.29.0, DB6/archive6, SQL0012 additive/cooking_persistence1 ; aucun code ni test L7 à cette entrée. La version en ligne reste0.28.0.
-La poursuite et publication sont autorisées par les demandes « deploy avant », « et enchaine sur le restant des lots », puis « continu ».
-L7–L10 et E1 restent à terminer.
+**L7 — cuisine et minuteries : réception locale terminée, publication en préparation.**
+[Spec](docs/superpowers/specs/2026-10-29-l7-cuisine-minuteurs-design.md), [protocole](docs/superpowers/specs/2026-10-30-l7-protocole-cuisine.md), [rapport](docs/superpowers/plans/2026-10-29-l7-cuisine-minuteurs.md).
+Branche `l7-cuisine-minuteurs`, base publique L6 code87855c4/reçu c5b6c08. Revues techniques A/B/C/root ; aucune relecture personnelle attribuée à Neegan.
+Deux régions ingrédients/étape, bonne version active, progrès qualifié et bilan atomique local ; suivis persistants, comparaison/récupération et demandes système explicites.
+Cible0.29.0/cache0.29.0-1, DB6/archive6, migration0012 additive/cooking_persistence1. Aucun déploiement L7 à cette entrée ; public0.28.0.
+**10653/10653** navigateur (épingle10652, +492 depuis L6, aucun scénario retiré), zéro erreur JavaScript/requête extérieure. Node232/232 et générateur0.
+PostgreSQL neuf0001→0012, gardes/ACL et27 contrôles de concurrence réels ; deux moteurs31 contrôles/14RPC, archive et reprise sans écho.
+Parcours Chrome8 mesures/36 gestes, deux onglets, rechargement réellement hors ligne avec note/photo et11 modules en cache unique.
+Voix/Wake Lock simulés ; aucun essai physique iPhone/Safari/TM7, aucune alarme système revendiquée ni appel assistant réel.
+La poursuite et publication sont autorisées par « deploy avant », « et enchaine sur le restant des lots », puis « continu ».
+**L8–L10 et E1 restent à terminer.**
 
 **L6 — Groupes d’ingrédients et recette en français : publié et vérifié.**
 [Spec](docs/superpowers/specs/2026-10-29-l6-ingredients-groupes-traductions-design.md),

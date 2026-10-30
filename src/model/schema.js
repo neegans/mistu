@@ -3,11 +3,11 @@
 
 export const DB_NAME = 'cuisine-os';
 export const DB_VERSION = 6;
-export const APP_VERSION = '0.28.0';
+export const APP_VERSION = '0.29.0';
 
 export const ARCHIVE_FORMAT = 'cuisine-os-archive';
-export const ARCHIVE_FORMAT_VERSION = 5;
-export const SUPPORTED_ARCHIVE_VERSIONS = [1, 2, 3, 4, 5];
+export const ARCHIVE_FORMAT_VERSION = 6;
+export const SUPPORTED_ARCHIVE_VERSIONS = [1, 2, 3, 4, 5, 6];
 
 export const STORES = {
   books:               { keyPath: 'id', indexes: [] },

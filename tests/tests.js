@@ -1,3 +1,32 @@
+import {runL7CuisineVolumesTests} from './l7-cuisine-volumes.js';
+import {runL7SyncFinTests} from './l7-sync.js';
+import {runL7ArchivesTests} from './l7-archives.js';
+import {runL7ComparaisonCuisineEcranTests} from './l7-comparaison-cuisine-ecran.js';
+import {runL7ComparaisonCuisineTests} from './l7-comparaison-cuisine.js';
+import {runL7CuisineProjectionTests} from './l7-cuisine-persistance.js';
+import {runL7CuisineFinTests} from './l7-cuisine-persistance.js';
+import {runL7CuisineHistoriqueCASTests} from './l7-cuisine-persistance.js';
+import {runL7CuisineSourcesTests} from './l7-cuisine-persistance.js';
+import {runL7CuisineSnapshotTests} from './l7-cuisine-persistance.js';
+import {runL7CuisinePorteeTests} from './l7-cuisine-persistance.js';
+import {runL7CuisineAncienPutTests} from './l7-cuisine-persistance.js';
+import {runL7SyncTests} from './l7-sync.js';
+import {runL7SyncCouvertureTests} from './l7-sync.js';
+import {runL7SyncReceptionTests} from './l7-sync.js';
+import {runL7SyncAccuseTests} from './l7-sync.js';
+import {runL7CuisineArchiveTests} from './l7-cuisine-archive.js';
+import {runL7CuisineDepartTests} from './l7-cuisine-depart.js';
+import {runL7CuisineEcranTests} from './l7-cuisine-ecran.js';
+import {runL7CuisineFormatTests} from './l7-cuisine-format.js';
+import {runL7CuisinePersistanceTests} from './l7-cuisine-persistance.js';
+import {runL7CuisineConcurrenceTests} from './l7-cuisine-persistance.js';
+import {runL7CuissonFinTests} from './l7-cuisson-fin.js';
+import {runL7EcranAllumeTests} from './l7-ecran-allume.js';
+import {runL7MinuteursCommandesTests} from './l7-minuteurs-commandes.js';
+import {runL7MinuteursDepotEcranTests} from './l7-minuteurs-depot-ecran.js';
+import {runL7MinuteursEcranTests} from './l7-minuteurs-ecran.js';
+import {runL7VoixTests} from './l7-voix.js';
+import {runL7ObservationsBaseTests} from './l7-observations-base.js';
 import { runL6DepotGardesTests } from './l6-depot-gardes.js';
 import { runL6ReglagesSynchronisationTests } from './l6-reglages-synchronisation.js';
 import { runL6ArchivesTests } from './l6-archives.js';
@@ -488,7 +517,37 @@ for (const suite of [runL5ComplementsRecetteTests, runL5ComplementsRecetteUiTest
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 10160,'compte d’assertions : une assertion qui disparait est un rouge');
+try { await runL7ArchivesTests({eq,ok}); } catch (e) { ok(false, 'runL7ArchivesTests : ' + (e.stack || e)); }
+try { await runL7ComparaisonCuisineEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7ComparaisonCuisineEcranTests : ' + (e.stack || e)); }
+try { await runL7ComparaisonCuisineTests({eq,ok}); } catch (e) { ok(false, 'runL7ComparaisonCuisineTests : ' + (e.stack || e)); }
+try { await runL7CuisineProjectionTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineProjectionTests : ' + (e.stack || e)); }
+try { await runL7CuisineFinTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineFinTests : ' + (e.stack || e)); }
+try { await runL7CuisineHistoriqueCASTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineHistoriqueCASTests : ' + (e.stack || e)); }
+try { await runL7CuisineSourcesTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineSourcesTests : ' + (e.stack || e)); }
+try { await runL7CuisineSnapshotTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineSnapshotTests : ' + (e.stack || e)); }
+try { await runL7CuisinePorteeTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisinePorteeTests : ' + (e.stack || e)); }
+try { await runL7CuisineAncienPutTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineAncienPutTests : ' + (e.stack || e)); }
+try { await runL7SyncTests({eq,ok}); } catch (e) { ok(false, 'runL7SyncTests : ' + (e.stack || e)); }
+try { await runL7SyncCouvertureTests({eq,ok}); } catch (e) { ok(false, 'runL7SyncCouvertureTests : ' + (e.stack || e)); }
+try { await runL7SyncReceptionTests({eq,ok}); } catch (e) { ok(false, 'runL7SyncReceptionTests : ' + (e.stack || e)); }
+try { await runL7SyncAccuseTests({eq,ok}); } catch (e) { ok(false, 'runL7SyncAccuseTests : ' + (e.stack || e)); }
+try { await runL7CuisineVolumesTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineVolumesTests : ' + (e.stack || e)); }
+try { await runL7SyncFinTests({eq,ok}); } catch (e) { ok(false, 'runL7SyncFinTests : ' + (e.stack || e)); }
+try { await runL7ObservationsBaseTests({eq,ok}); } catch (e) { ok(false, 'runL7ObservationsBaseTests : ' + (e.stack || e)); }
+
+try { await runL7CuisineArchiveTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineArchiveTests : ' + (e.stack || e)); }
+try { await runL7CuisineDepartTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineDepartTests : ' + (e.stack || e)); }
+try { await runL7CuisineEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineEcranTests : ' + (e.stack || e)); }
+try { await runL7CuisineFormatTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineFormatTests : ' + (e.stack || e)); }
+try { await runL7CuisinePersistanceTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisinePersistanceTests : ' + (e.stack || e)); }
+try { await runL7CuisineConcurrenceTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineConcurrenceTests : ' + (e.stack || e)); }
+try { await runL7CuissonFinTests({eq,ok}); } catch (e) { ok(false, 'runL7CuissonFinTests : ' + (e.stack || e)); }
+try { await runL7EcranAllumeTests({eq,ok}); } catch (e) { ok(false, 'runL7EcranAllumeTests : ' + (e.stack || e)); }
+try { await runL7MinuteursCommandesTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursCommandesTests : ' + (e.stack || e)); }
+try { await runL7MinuteursDepotEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursDepotEcranTests : ' + (e.stack || e)); }
+try { await runL7MinuteursEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursEcranTests : ' + (e.stack || e)); }
+try { await runL7VoixTests({eq,ok}); } catch (e) { ok(false, 'runL7VoixTests : ' + (e.stack || e)); }
+eq(results.length, 10652,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

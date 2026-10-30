@@ -68,7 +68,7 @@ export async function runVisuelIntegrationTests({ eq, ok }) {
     try {
       const step = root.querySelector('[data-role=texte-etape]'), ingredients = root.querySelector('details[data-role=ingredients-cuisine]');
       ok(!!ingredients && !ingredients.open, 'Visuel : ingrédients repliés au début de cuisine');
-      ok(!!step && !!ingredients && !!(step.compareDocumentPosition(ingredients) & Node.DOCUMENT_POSITION_FOLLOWING), 'Visuel : étape avant ingrédients dans le DOM');
+      ok(!!step && !!ingredients && ingredients.parentElement===step.closest('.cuisine-etape')?.parentElement && !!(ingredients.compareDocumentPosition(step) & Node.DOCUMENT_POSITION_FOLLOWING), 'L7 visuel : ingrédients repliables puis étape dans deux régions distinctes');
       ok(!!root.querySelector('[data-role=photo-cuisine]'), 'Visuel : photo accessible sans quitter la cuisine');
       ok(!!root.querySelector('.navigation-cuisine'), 'Visuel : navigation de cuisine distincte du contenu long');
     } finally { root.dispose?.(); root.remove(); }

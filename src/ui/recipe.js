@@ -453,9 +453,10 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   }
 
   async function startCooking() {
-    if (!gardeThermomix(version, state.servings).ok) { dire(t(BLOCAGE_THERMOMIX)); return; }
-    const session = { id: repo.newId('cs'), recipe_id: recipe.id, meal_id: null, selected_version_ids: [version.id], servings: state.servings, progress: { current_step_id: version.steps?.[0]?.id || null, done_step_ids: [], total_steps: (version.steps || []).length }, started_at: repo.nowIso(), active_device_id: deviceId(), status: 'active', units: state.units, lang: state.lang };
-    try { const contexte = await capturerRecette(gestesLecture.repo, recipe, {ctx}); await enregistrerSessionCuisine(session, { repo: gestesLecture.repo, recettes:[contexte] }); naviguer(`/cook/${session.id}`); }
+    const source = structuredClone(version);
+    if (!gardeThermomix(source, state.servings).ok) { dire(t(BLOCAGE_THERMOMIX)); return; }
+    const session = { id: gestesLecture.repo.newId('cs'), recipe_id: recipe.id, meal_id: null, selected_version_ids: [source.id], active_version_id: source.id, servings: state.servings, progress: { current_step_id: source.steps?.[0]?.id || null, done_step_ids: [], total_steps: (source.steps || []).length }, started_at: gestesLecture.repo.nowIso(), active_device_id: deviceId(), status: 'active', units: state.units, lang: state.lang };
+    try { const contexte = await capturerRecette(gestesLecture.repo, recipe, {ctx}); await enregistrerSessionCuisine(session, { repo: gestesLecture.repo, recettes:[contexte], versionsAffichees:[source] }); naviguer(`/cook/${session.id}`); }
     catch { dire(t(TEXTE_NOUVEL_USAGE_REFUSE)); }
   }
 

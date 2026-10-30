@@ -11,6 +11,7 @@ import { idCycle, porteCycle, fusionCycle, CLE_CYCLE_CONFIRME, gardeCompteCycle 
 import { fusionEdition, CLE_EDITION_CONFIRMEE } from './cycle-edition.js';
 import { estCommandeSources, ciblesCommandeSources, CLE_SOURCE_CONFIRMEE } from './commandes-sources.js';
 import {estCommandeProtegee,ciblesCommandeProtegee,estLectureTraductionSignee,estPhaseJournalTraduction} from './commandes-traduction.js';
+import {estLigneCuisine,validerMinuteurCuisine,validerSessionCuisine} from '../domain/cuisine-format.js';
 
 // R-L3-12 : les versions AVANT les recettes. Le pointeur d'une recette reçue désigne presque toujours une version
 // créée par le même geste, sur l'autre appareil : lue après la recette, elle serait encore inconnue ici et chaque
@@ -170,15 +171,22 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       const locale = await db.get(table, ligne.id);
       const commandes=fileSources.filter(e=>(estPhaseJournalTraduction(e)?[{store:e.store,id:e.id}]:ciblesCommandeProtegee(e.payload)).some(r=>r.store===table&&r.id===ligne.id));
       const cleSource=CLE_SOURCE_CONFIRMEE(table,ligne.id),confirmationSource=await db.get('sync_state',cleSource);
-      const geree=row=>!!row&&(row.source_state!==undefined||row.source_revision!==undefined||row.source_copy!==undefined||row.index_storage!==undefined||row.index_decision_revision!==undefined||row.index_application_receipts!==undefined||row.index_resolved_occurrences!==undefined||estLectureTraductionSignee(table,row));
+      const geree=row=>!!row&&(row.source_state!==undefined||row.source_revision!==undefined||row.source_copy!==undefined||row.index_storage!==undefined||row.index_decision_revision!==undefined||row.index_application_receipts!==undefined||row.index_resolved_occurrences!==undefined||estLectureTraductionSignee(table,row)||estLigneCuisine(table,row));
       if(commandes.length||confirmationSource||geree(locale)||geree(ligne.data)){
         confirmations.set(cleSource,{key:cleSource,fusion:row=>{if(JSON.stringify(stable(row??null))!==JSON.stringify(stable(confirmationSource??null)))throw Object.assign(new Error('Confirmation source modifiée pendant la réception'),{code:'SYNC_CONFIRMATION_CHANGED'});return null;}});
         if(confirmationSource?.value?.user_id===owner&&Number.isFinite(confirmationSource.value.server_seq)&&confirmationSource.value.server_seq>ligne.server_seq)continue;
-        const confirme={user_id:owner,data:ligne.deleted_at?null:{...ligne.data,updated_at:ligne.updated_at},server_seq:ligne.server_seq,updated_at:ligne.updated_at,deleted_at:ligne.deleted_at??null};
+        const cuisine=estLigneCuisine(table,locale)||estLigneCuisine(table,ligne.data);
+        if(cuisine&&!ligne.deleted_at&&!(table==='timer_launches'?validerMinuteurCuisine(ligne.data):validerSessionCuisine(ligne.data)).ok)return{erreur:{type:'forme'}};
+        const confirme={user_id:owner,data:ligne.deleted_at?null:cuisine?ligne.data:{...ligne.data,updated_at:ligne.updated_at},server_seq:ligne.server_seq,updated_at:ligne.updated_at,deleted_at:ligne.deleted_at??null};
         (puts.sync_state||=[]).push({key:cleSource,value:confirme});
         // L'intention locale garde toutes ses lignes, même bloquée ou face à une tombale.
         // Seul son accusé exact ou une comparaison explicite pourra la résoudre.
         if(commandes.length){fusions.set(ligne.id,{key:ligne.id,fusion:courante=>courante??null});recues+=1;continue;}
+        if(cuisine){
+          if(ligne.deleted_at){(deletes[table]||=[]).push(ligne.id);supprimees+=1;}
+          else{fusions.set(ligne.id,{key:ligne.id,fusion:courante=>{if(!identiques(courante,locale,table))throw Object.assign(new Error('Cuisine modifiée pendant réception'),{code:'SYNC_SOURCE_CHANGED'});return ligne.data;}});recues+=1;}
+          continue;
+        }
       }
       if (table === 'imports' && (importConcerne(locale) || importConcerne(ligne.data))) {
         fusions.set(ligne.id, { key: ligne.id, fusion: gardeImportRelu(locale) });

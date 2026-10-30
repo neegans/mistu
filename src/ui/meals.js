@@ -78,6 +78,7 @@ export async function renderMeal(params, query, ctx, deps = {}) {
   const ctxF = await contexteFichiers(ctx);
   const meal = ctx.meals.find((m) => m.id === params.id);
   if (!meal) return el('div', { class: 'card' }, t('Repas introuvable.'));
+  const mealAffiche = structuredClone(meal);
   meal.items = meal.items || [];
   meal.constraints_snapshot = meal.constraints_snapshot || { diets: [] };
   const items = meal.items.map((it) => ({ ...it, recipe: ctx.recipesById.get(it.recipe_id), version: it.recipe_version_id ? ctx.versionsById.get(it.recipe_version_id) : null })).filter((it) => it.recipe);
@@ -192,15 +193,15 @@ export async function renderMeal(params, query, ctx, deps = {}) {
   }
   async function startCooking() {
     const R = deps.repo ?? repo;
+    const affiche = structuredClone(mealAffiche), sources = structuredClone(items);
     try {
       const recettes = await contextesActifs();
-      const actuelle = await R.get('meals', meal.id);
-      if (!actuelle) return;
-      const withV = (await Promise.all((actuelle.items || []).map(async it => ({ ...it, version: it.recipe_version_id ? await R.get('recipe_versions', it.recipe_version_id) : null })))).filter(it => it.version);
+      if (sources.some(it => it.recipe_version_id && !it.version) || sources.length !== (affiche.items || []).length) throw new Error('version_absente');
+      const withV = sources.filter(it => it.version);
       if (!withV.length) return;
-      if (withV.some(it => !gardeThermomix(it.version, portionsRepas(it, actuelle)).ok)) { (deps.toast ?? toast)(t(BLOCAGE_THERMOMIX)); return; }
-      const session = { id: R.newId('cs'), recipe_id: withV[0].recipe_id, meal_id: meal.id, selected_version_ids: withV.map(it => it.version.id), servings_by_version: Object.fromEntries(withV.map(it => [it.version.id, portionsRepas(it, actuelle)])), servings: actuelle.servings, progress: { done_step_ids: [], by_version: {}, total_steps: withV.reduce((n, it) => n + (it.version.steps || []).length, 0) }, started_at: R.nowIso(), active_device_id: deviceId(), status: 'active', units: ctx.settings.units };
-      await enregistrerSessionCuisine(session, { repo: R, recettes });
+      if (withV.some(it => !gardeThermomix(it.version, portionsRepas(it, affiche)).ok)) { (deps.toast ?? toast)(t(BLOCAGE_THERMOMIX)); return; }
+      const session = { id: R.newId('cs'), recipe_id: withV[0].recipe_id, meal_id: affiche.id, selected_version_ids: withV.map(it => it.version.id), active_version_id: withV[0].version.id, servings_by_version: Object.fromEntries(withV.map(it => [it.version.id, portionsRepas(it, affiche)])), servings: affiche.servings ?? null, progress: { done_step_ids: [], by_version: {}, total_steps: withV.reduce((n, it) => n + (it.version.steps || []).length, 0) }, started_at: R.nowIso(), active_device_id: deviceId(), status: 'active', units: ctx.settings?.units || 'original', lang: ctx.settings?.reading_locale || 'original' };
+      await enregistrerSessionCuisine(session, { repo: R, recettes, versionsAffichees:withV.map(it => it.version), repasAffiche:affiche });
       (deps.navigate ?? navigate)(`/cook/${session.id}`);
     } catch { (deps.toast ?? toast)(t(TEXTE_NOUVEL_USAGE_REFUSE)); }
   }

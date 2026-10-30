@@ -714,3 +714,31 @@ dialog::backdrop { background: var(--backdrop); }
   .editeur-sections .btn { flex: 1 1 8rem; }
   .brouillon-resume .row .btn { flex: 1 1 10rem; }
 }
+
+/* L7 : la largeur utile du mode cuisine décide des colonnes, indépendamment du menu latéral. */
+.mode-cuisine { container-name: cuisine; container-type: inline-size; max-width: 1100px; min-width: 0; margin-inline: auto; overflow-wrap: anywhere; }
+.cuisine-entete { display: flex; align-items: start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.cuisine-entete h1 { flex: 1 1 16rem; min-width: 0; margin-block: 0 .75rem; }
+.cuisine-recettes, .cuisine-outils { margin-block: .75rem; gap: .6rem; }
+.cuisine-contenu { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.2rem; align-items: start; margin-block: 1rem; }
+.cuisine-contenu > *, .cuisine-ingredients-corps, .cuisine-etape > *, .minuteur-ligne > * { min-width: 0; max-width: 100%; }
+.cuisine-etape { scroll-margin-block: 1.5rem; }
+.cuisine-etape .step-big { padding: 1.2rem; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); white-space: pre-wrap; }
+.cuisine-ingredients .ingredients { margin-block: .6rem; }
+.cuisine-ingredients .ingredients > li { padding-block: .45rem; border-bottom: 1px dashed var(--line); }
+.cuisine-ingredients .ingredients > li.ingredient-heading { border-bottom: 0; padding-top: .9rem; }
+.mode-cuisine button, .mode-cuisine .btn.small, .mode-cuisine a.btn, .mode-cuisine summary, .mode-cuisine select { min-height: 44px; min-width: 44px; }
+.mode-cuisine .navigation-cuisine { max-width: none; }
+.cuisine-ecran-allume { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; }
+.cuisine-ecran-allume > [role="status"] { flex: 1 1 14rem; }
+.cuisine-minuteurs { margin-block: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.cuisine-minuteurs > h2 { margin-block: 0 .8rem; }
+.minuteur-ligne { padding: 1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); overflow-wrap: anywhere; }
+.minuteur-ligne h3 { font-family: var(--serif); font-size: 1.25rem; margin-block: 0 .5rem; }
+.minuteur-compteur { font-size: 1.25rem; font-variant-numeric: tabular-nums; color: var(--action); }
+.minuteur-commandes { padding-block: .4rem; }
+.minuteur-actions { align-items: start; gap: .5rem; }
+@container cuisine (min-width: 900px) {
+  .cuisine-contenu { grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr); gap: 1.5rem; }
+  .cuisine-minuteurs .minuteurs-liste { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+}

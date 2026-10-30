@@ -23,11 +23,12 @@ export async function runI3IntegrationTests({ eq, ok }) {
     const { renderCook } = await import('../src/ui/cook.js');
     const session = { id: 'cs-i3', recipe_id: recipe.id, selected_version_ids: [invalide.id], servings: 2, status: 'active', progress: {} };
     const ctx = { cook_sessions: [session], recipesById: new Map([[recipe.id, recipe]]), versionsById: new Map([[invalide.id, invalide]]), ingredientsById: new Map(), conventionFor: () => null };
+    await repo.db.mutate({origin:'remote',puts:{recipes:[recipe],recipe_versions:[invalide],cook_sessions:[session]}});
     const root = await renderCook({ id: session.id }, {}, ctx, { repo });
     try {
       ok(root.matches('[data-role=thermomix-bloque]') || !!root.querySelector('[data-role=thermomix-bloque]'), 'I3 : session restaurée invalide bloquée avant rendu des commandes');
       eq(root.querySelectorAll('[data-role=texte-etape]').length, 0, 'I3 : aucun réglage invalide en cuisine');
-    } finally { root.remove(); }
+    } finally { root.dispose?.(); root.remove(); }
   }));
   await run('route saisie', async () => {
     const { estRouteDeSaisie } = await import('../src/ui/state.js');
@@ -112,14 +113,21 @@ export async function runI3IntegrationTests({ eq, ok }) {
       lancer.click(); await attendre(() => messages.length);
       eq((await repo.all('cook_sessions')).length, 0, 'I3 : repas refuse portions divergentes');
       await repo.save('meals', { ...meal, items: [{ ...meal.items[0], servings: 4, servings_custom: true }] });
-      lancer.click(); await attendre(() => routes.length);
+      // Le départ porte la copie affichée : une modification distante exige une relecture explicite.
+      const relu = await renderMeal({ id: meal.id }, {}, await getData(true), {repo,toast:x=>messages.push(x),navigate:x=>routes.push(x)});
+      document.body.append(relu);
+      [...relu.querySelectorAll('button')].find(b=>b.textContent==='Commencer la préparation').click();
+      await attendre(() => routes.length); relu.dispose?.(); relu.remove();
       const session = (await repo.all('cook_sessions'))[0];
-      eq(session.servings_by_version[f.version.id], 4, 'I3 : lancement relit le repas avant sa garde');
+      eq(session.servings_by_version[f.version.id], 4, 'I3 : lancement utilise le repas explicitement relu avec ses quantités affichées');
       const { renderCook } = await import('../src/ui/cook.js');
       await repo.save('cook_sessions', { ...session, servings_by_version: { [f.version.id]: 8 } });
       const reprise = await renderCook({ id: session.id }, {}, await getData(true));
-      ok(reprise.matches('[data-role=thermomix-bloque]'), 'I3 : session modifiée reçue refusée à la reprise');
-    } finally { root.remove(); }
+      ok(reprise.matches('[data-role=thermomix-bloque]') || !!reprise.querySelector('[data-role=thermomix-bloque]'), 'I3 : session modifiée reçue refusée à la reprise');
+      eq(reprise.querySelectorAll('[data-role=commandes-minuteur]').length,0,'I3 : reprise incompatible sans nouvelle commande de durée');
+      ok(!!reprise.querySelector('[data-role=panneau-minuteurs]'),'I3 : anciens suivis consultables malgré incompatibilité');
+      reprise.dispose?.(); reprise.remove();
+    } finally { root.dispose?.(); root.remove(); }
   }));
   await run('exports et marquage testé', async () => {
     const f = await fixture();

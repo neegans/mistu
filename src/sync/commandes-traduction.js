@@ -2,9 +2,10 @@
 import {validerCommandeTraduction,validerLigneTraductionV2,ErreurTraduction} from '../domain/traductions-format.js';
 import {canoniqueSources,octetsJsonbSources} from '../domain/sources-format.js';
 import {estCommandeSources,ciblesCommandeSources,preparerCommandesSources} from './commandes-sources.js';
+import {estCommandeCuisine,ciblesCommandeCuisine} from './commandes-cuisine.js';
 export const estCommandeTraduction=x=>x?.op==='translation_apply';
-export const estCommandeProtegee=x=>estCommandeSources(x)||estCommandeTraduction(x);
-export const ciblesCommandeProtegee=c=>estCommandeTraduction(c)?ciblesCommandeTraduction(c):ciblesCommandeSources(c);
+export const estCommandeProtegee=x=>estCommandeSources(x)||estCommandeTraduction(x)||estCommandeCuisine(x);
+export const ciblesCommandeProtegee=c=>estCommandeCuisine(c)?ciblesCommandeCuisine(c):estCommandeTraduction(c)?ciblesCommandeTraduction(c):ciblesCommandeSources(c);
 export const estLectureTraductionSignee=(store,row)=>store==='imports'&&!!row&&(row.translation_capture!==undefined||row.translation_call!==undefined)||store==='recipe_translations'&&row?.alignment_format===2||store==='recipe_versions'&&Object.hasOwn(row||{},'ingredient_structure');
 export const estPhaseJournalTraduction=e=>e?.op==='put'&&e.store==='imports'&&e.snapshot?.kind==='traduction';
 export function idsVersionsSourcesTraduction(stores={},entrees=[]){

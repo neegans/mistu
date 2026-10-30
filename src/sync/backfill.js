@@ -2,6 +2,9 @@ import {estLectureSourceSignee} from './lots.js';
 import {preparerPremiereLiaisonTransfert} from '../domain/transfert-premiere-liaison.js';
 import {preparerSourcesArchive} from '../domain/transferts-source.js';
 import {preparerTraductionsArchive} from '../domain/traductions-archive.js';
+import {preparerCuisineArchive} from '../domain/cuisine-archive.js';
+import {estCommandeCuisine} from './commandes-cuisine.js';
+import {estLigneCuisine} from '../domain/cuisine-format.js';
 import {estCommandeProtegee,ciblesCommandeProtegee} from './commandes-traduction.js';
 import {estCommandeSources,ciblesCommandeSources,CLE_SOURCE_CONFIRMEE} from './commandes-sources.js';
 // Envoi initial (spec § 5.2) : tout ce qui existait AVANT la connexion est mis en file, table par table, commandé
@@ -104,6 +107,20 @@ export async function envoiInitial({ db, getUserId, isActivitySynced = () => fal
       snapshot=await db.getSnapshot();file=(snapshot.outbox||[]).filter(e=>estDeCeCompte(e,user_id));
     }
   }
+  if(tables.length){
+    const couverts=new Set(file.filter(estCommandeCuisine).map(e=>e.store+':'+e.id));
+    const confirme=(store,id)=>(snapshot.sync_state||[]).some(r=>r.key===CLE_SOURCE_CONFIRMEE(store,id)&&r.value?.user_id===user_id&&r.value.data);
+    const batch=Object.fromEntries(['cook_sessions','timer_launches'].map(store=>[store,(snapshot[store]||[]).filter(row=>estLigneCuisine(store,row)&&!couverts.has(store+':'+row.id)&&!confirme(store,row.id))]));
+    if(batch.cook_sessions.length||batch.timer_launches.length){
+      const cle=new Set(Object.entries(batch).flatMap(([store,rows])=>rows.map(row=>store+':'+row.id)));
+      const base={...snapshot,...Object.fromEntries(['cook_sessions','timer_launches'].map(store=>[store,(snapshot[store]||[]).filter(row=>!cle.has(store+':'+row.id))]))};
+      const preparee=await preparerCuisineArchive({batch,snapshot:base,owner_id:user_id,purpose:'bootstrap'}),anciens=file.filter(e=>e.op==='put'&&cle.has(e.store+':'+e.id));
+      const egaux=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null),conditions={sync_state:[gardeCompteCycle(user_id,getUserId)],outbox:[{toutes:true,verifier:rows=>{if(!egaux(rows.filter(e=>estDeCeCompte(e,user_id)),file))throw Error('File de cuisine modifiée');}}]};
+      for(const store of ['cook_sessions','timer_launches','recipes','recipe_versions','book_editions'])conditions[store]=[{toutes:true,verifier:rows=>{if(!egaux(rows,snapshot[store]||[]))throw Error('Cuisine initiale modifiée');}}];
+      await db.mutate({origin:'device',puts:{...preparee.batch,outbox:preparee.cooking_commands.map(c=>({user_id,store:c.store,id:c.id,op:c.op,payload:c,tries:0}))},deletes:{outbox:anciens.map(e=>e.seq)},conditions});
+      snapshot=await db.getSnapshot();file=(snapshot.outbox||[]).filter(e=>estDeCeCompte(e,user_id));
+    }
+  }
   // Une intention déjà capturée garde son contenu et sa base, même incomplète : jamais de second put rebasé.
   const captures = new Set(file.flatMap(e => [`${e.store}:${e.id}`, ...(e.op === 'source_batch' ? (e.payload?.rows || []).map(r => `${r.store}:${r.id}`) : estCommandeProtegee(e)?ciblesCommandeProtegee(e.payload).map(r=>`${r.store}:${r.id}`):[])]));
   const capture = capturerContextesInitiaux(snapshot, { owner_id: user_id });
@@ -158,7 +175,7 @@ export async function envoiInitial({ db, getUserId, isActivitySynced = () => fal
       const puts = { outbox: morceau.map(r => {
         const contexte = contexteInitialPour(capture, table, keyOf(table, r));
         return { user_id, store: table, id: keyOf(table, r), op: 'put', updated_at: r.updated_at || null, tries: 0,
-          ...contexte, ...(contexte.edition_contexts||table==='recipe_versions'||estLectureSourceSignee(table,r) ? { snapshot: structuredClone(r) } : {}) };
+          ...contexte, ...(contexte.edition_contexts||['recipe_versions','cook_history'].includes(table)||estLectureSourceSignee(table,r) ? { snapshot: structuredClone(r) } : {}) };
       }) };
       if (!puts.outbox.length) delete puts.outbox;
       if (dernier) puts.sync_state = [{ key: MARQUEUR(table), value: 'fait' }];

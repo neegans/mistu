@@ -1,305 +1,193 @@
 import {preparerLectureRecette,projeterLectureRecette} from '../domain/lecture-recette.js';
-import { lireCycleRecette } from '../domain/cycle-recette.js';
-import { capturerRecette } from './recette-garde.js';
-import { mentionCycleRecette } from './corbeille.js';
-// Mode cuisine (spec §17, §33) : ingrédients et étape visibles ensemble, grandes commandes, progression conservée,
-// minuterie confiée au système avec états honnêtes, note après cuisson (« À refaire ? »).
-import { el, toast, confirmDialog } from '../core/dom.js';
-import { t } from '../core/i18n.js';
-import { navigate, refresh } from '../core/router.js';
+import {projectionCandidateTraduction} from '../domain/traductions-format.js';
+import {canoniqueSources} from '../domain/sources-format.js';
+import {creerServiceCuisine} from '../domain/cuisine-persistance.js';
+import {el} from '../core/dom.js';
+import {t} from '../core/i18n.js';
+import {navigate,refresh} from '../core/router.js';
 import * as repo from '../model/repo.js';
-import { scaleVersion } from '../domain/scaling.js';
-import { createTimerLaunch, describeDuration, TIMER_STATE_HELP } from '../domain/timers.js';
-import { label } from '../core/i18n.js';
-import { qtyEl, section, field, select, segmented, ingredientLectureEl, segmentLectureEl, etiquetteIA, estExtractionNonRelue, contexteFichiers, empreintesPhotos, fichierPhoto, timerBlock } from './components.js';
-import { estCreationIA, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
-import { deviceId } from './import.js';
-import { estThermomix } from '../domain/thermomix.js';
-import { portionsSession } from '../domain/thermomix-session.js';
-import { panneauGardeThermomix, rappelThermomix } from './thermomix-garde.js';
-import { photosPersonnellesParRecette, photoPrincipale } from '../domain/cuisine-personnelle.js';
-import { photoVisible } from './photos-visibles.js';
-import { ouvrirCuissons, noteEnCuisine } from './cuisson.js';
-import { getSyncGeneration } from './state.js';
+import {scaleVersion} from '../domain/scaling.js';
+import {describeDuration} from '../domain/timers.js';
+import {section,field,select,segmented,ingredientLectureEl,segmentLectureEl,etiquetteIA,estExtractionNonRelue,contexteFichiers,empreintesPhotos,fichierPhoto} from './components.js';
+import {estCreationIA,AVERTISSEMENT_CREATION_IA} from '../domain/creation-ia.js';
+import {panneauGardeThermomix,rappelThermomix} from './thermomix-garde.js';
+import {mentionCycleRecette} from './corbeille.js';
+import {photosPersonnellesParRecette,photoPrincipale} from '../domain/cuisine-personnelle.js';
+import {photoVisible} from './photos-visibles.js';
+import {ouvrirCuissons,noteEnCuisine} from './cuisson.js';
+import {getSyncGeneration} from './state.js';
+import {creerPanneauMinuteurs,commandesMinuteurEtape} from './minuteurs-session.js';
+import {creerControleurEcran,creerCommandeEcranAllume} from './ecran-allume.js';
+import {creerControleurVoix,texteEtatVoix} from './voix-cuisine.js';
+import {creerPanneauComparaisonCuisine} from './comparaison-cuisine.js';
 
-export async function renderCook(params, query, ctx, deps = {}) {
-  const depot = deps.repo ?? repo;
-  const generation = getSyncGeneration();
-  const session = ctx.cook_sessions.find((s) => s.id === params.id);
-  if (!session) return el('div', { class: 'card' }, t('Session introuvable.'));
-  const items = session.selected_version_ids.map((vid) => {
-    const version = ctx.versionsById.get(vid);
-    const recipe = version ? ctx.recipesById.get(version.recipe_id) : null;
-    const servings = version ? portionsSession(session, version) : null;
-    return version && recipe ? { version, recipe, servings, scaled: scaleVersion(version, servings), convention_id: ctx.conventionFor(recipe) } : null;
-  }).filter(Boolean);
-  if (!items.length) return el('div', { class: 'card' }, t('Version introuvable.'));
-  if (items.some(it => lireCycleRecette(it.recipe).etat === 'invalide')) {
-    return el('div', {class:'stack'}, ...items.map(it => el('section', {class:'card stack'},
-      el('h2', null, it.recipe.display_title || it.recipe.original_title), mentionCycleRecette(it.recipe, ctx?.editionsById?.get(it.recipe.edition_id)), noteEnCuisine(it.recipe),
-      el('ol', null, ...(it.version.steps || []).map(s => el('li', null, s.text))),
-      el('a', {class:'btn', href:`#/recipes/${encodeURIComponent(it.recipe.id)}?v=${encodeURIComponent(it.version.id)}`}, t('Fiche')))));
-  }
-  const blocageThermomix = panneauGardeThermomix(items);
-  if (blocageThermomix) return blocageThermomix;
-  await Promise.all(items.map(async it=>{it.lecture=await preparerLectureRecette({recipe:it.recipe,version:it.version,traductions:ctx.recipe_translations||[]});}));
-  let langueLecture=session.lang||ctx.settings?.reading_locale||'original',langueConfirmee=langueLecture,languesEnVol=Promise.resolve(),numeroLangue=0;
-  const speech=deps.speechSynthesis??globalThis.speechSynthesis,Utterance=deps.SpeechSynthesisUtterance??globalThis.SpeechSynthesisUtterance;
-  const arreterVoix=()=>{try{speech?.cancel();}catch{}};
-  const traductionsChoisies=new Map();
-  const lectureDe=it=>projeterLectureRecette(it.lecture,{locale:langueLecture,servings:it.servings,system:session.units||'original',convention_id:it.convention_id,ingredientsById:ctx.ingredientsById,translationId:traductionsChoisies.get(it.version.id)||null});
-  let activeIdx = Math.max(0, items.findIndex((it) => it.version.id === (session.active_version_id || session.selected_version_ids[0])));
-  let selectionConfirmee = activeIdx, selectionNumero = 0, selections = Promise.resolve(), dispose = false;
-  let progress = session.progress || {};
-  progress.done_step_ids = progress.done_step_ids || [];
-  progress.by_version = progress.by_version || {};
-  const root = el('div', { class: 'mode-cuisine' });
-  root.append(...items.map(it=>mentionCycleRecette(it.recipe, ctx?.editionsById?.get(it.recipe.edition_id))).filter(Boolean));
-  const contextesHistoriques = await Promise.all([...new Map(items.map(it => [it.recipe.id,it.recipe])).values()].map(r => capturerRecette(depot, r, {ctx, historique:true})));
-  const ctxF = await contexteFichiers(ctx);
-  const photos = photosPersonnellesParRecette(ctx.cook_history);
-  const fichiers = await (deps.repo ?? repo).getFiles(empreintesPhotos(items.map(it => it.recipe), photos));
-  const nettoyages = [];
-  const nettoyer = () => { for (const photo of area.querySelectorAll('[data-role="photo-visible"]')) photo.dispose?.(); for (const fn of nettoyages.splice(0)) fn(); };
-  root.dispose = () => { dispose = true; arreterVoix(); nettoyer(); };
-  const title = items.length === 1 ? (items[0].recipe.display_title || items[0].recipe.original_title) : t('Repas — {n} recettes', { n: items.length });
-  const titre = el('h1', null, title);
-  const fiche = el('a', { class: 'btn' }, t('Fiche'));
-  const etatSelection = el('div', { role: 'status', class: 'status warn', hidden: true });
-  root.append(el('div', { class: 'row between', style: { marginBottom: '.6rem' } },
-    titre,
-    el('div', { class: 'row' },
-      el('span', { class: 'muted', style: { fontSize: '.85rem' } }, t('Progression conservée sur cet appareil')),
-      el('button', { class: 'btn', onClick: finish }, t('Terminer')),
-      fiche)), etatSelection);
-  const langues=[{value:'original',label:t('Original')},{value:'fr',label:t('Français')},...((items.some(it=>it.recipe.original_language?.startsWith('en'))||(ctx.recipe_translations||[]).some(x=>x.locale==='en'))?[{value:'en',label:t('Anglais')}]:[])];
-  const langueChoix=segmented(langues,langueLecture,valeur=>{
-    const it=items[activeIdx],numero=++numeroLangue;langueLecture=valeur;arreterVoix();draw();
-    languesEnVol=languesEnVol.then(async()=>{const attendue=langueConfirmee;await modifierSession(it,courant=>{if((courant.lang||ctx.settings?.reading_locale||'original')!==attendue)throw Error('langue_changee');return{...courant,lang:valeur};});langueConfirmee=valeur;}).catch(()=>{if(!dispose&&numero===numeroLangue){langueLecture=langueConfirmee;draw();etatSelection.textContent=t('La langue de lecture n’a pas pu être enregistrée. Réessaie.');etatSelection.hidden=false;}});
-  });langueChoix.dataset.role='langue-cuisine';langueChoix.setAttribute('role','group');langueChoix.setAttribute('aria-label',t('Langue de lecture'));root.append(langueChoix);
-  // C-2 / R-CRE-10 : toute fiche origine 'ia' (et toute création) dit sa lignée EN TÊTE, sous la rangée du titre (cook.js n'a pas de
-  // pageHeader — P16) — une correction dit « Corrigée par toi — d’après une création IA » ; dans un repas, chacune est nommée par son
-  // titre. L'avertissement C-9 (« n'a pas cuisiné cette recette ») reste réservé aux versions estCreationIA.
-  const lignees = items.map((it) => ({ it, etiquette: etiquetteIA(it.version, it.recipe) })).filter((x) => x.etiquette);
-  if (lignees.length) root.append(el('div', { class: 'stack', style: { marginBottom: '.6rem' }, dataset: { role: 'cuisine-ia' } },
-    el('div', { class: 'row' }, ...lignees.map(({ it, etiquette }) => (items.length > 1 ? el('span', null, `${it.recipe.display_title || it.recipe.original_title} · `, etiquette) : etiquette))),
-    items.some((it) => estCreationIA(it.version)) ? el('div', { class: 'status warn' }, t(AVERTISSEMENT_CREATION_IA)) : null));
-  for (const it of items) { const rappel = rappelThermomix(it.version); if (rappel) root.append(rappel); }
-  // D-3 (import ciblé) : tant qu'une version est une extraction de l'assistant non relue, le mode cuisine le dit en tête (les quantités et les
-  // étapes viennent d'une lecture à vérifier) ; dans un repas, la recette concernée est nommée.
-  const nonRelues = items.filter((it) => estExtractionNonRelue(it.version));
-  if (nonRelues.length) root.append(el('div', { class: 'status warn', style: { marginBottom: '.6rem' }, dataset: { role: 'bandeau-non-relue' } },
-    ...nonRelues.map((it, i) => el('span', null, `${i ? ' · ' : ''}${items.length > 1 ? `${it.recipe.display_title || it.recipe.original_title} · ` : ''}${t('Lue par l’assistant, non relue')}`))));
+// Les contrôleurs restent montés ; les seuls champs confirmés par le service deviennent la vue courante.
+export async function renderCook(params,query,ctx,deps={}){
+ const depot=deps.repo??repo,base=depot.db,generation=getSyncGeneration();
+ let dispose=false,lecture=null,affiche=null,projection=null,items=[],occupe=false,bilanOuvert=false,planOuvert=false,numeroLecture=0,lectureEnCours=null,relireEnsuite=false,vueConfirmee=null,selectionEnAttente=null;
+ const root=el('div',{class:'mode-cuisine'}),estCourante=()=>!dispose&&getSyncGeneration()===generation&&(!base||depot.db===base);
+ const service=deps.service??creerServiceCuisine({repo:depot,getGeneration:getSyncGeneration,maintenant:deps.maintenant??(()=>new Date().toISOString()),newId:depot.newId});
+ const ouvertures=new Map(),traductionsChoisies=new Map(),traductionsPerimees=new Map();
+ const nettoyages=[],permanents=[];
+ const nettoyer=()=>{for(const fn of nettoyages.splice(0))fn();};
+ let panneau=null,comparaisons=null,commandeEcran=null,voix=null,ecran=null;
+ root.dispose=()=>{if(dispose)return;dispose=true;numeroLecture++;nettoyer();permanents.splice(0).forEach(fn=>fn());panneau?.dispose?.();comparaisons?.dispose?.();commandeEcran?.dispose?.();ecran?.detruire();voix?.detruire();};
+ root.actualiserCuisine=actualiser;
+ const capture=await service.capturerPortee({owner_id:ctx.proprietaireDonnees??null,estCourante});
+ if(capture.issue!=='ok'||!estCourante()){root.append(el('p',{class:'status warn'},t('La bibliothèque a changé. Rouvre la séance de cuisine.')));return root;}
+ const portee=capture.portee;
+ const titre=el('h1',null,t('Cuisine')),fiche=el('a',{class:'btn',dataset:{role:'fiche-cuisine'}},t('Fiche'));
+ const etat=el('p',{class:'status warn',role:'status',hidden:true,dataset:{role:'etat-cuisine'}});
+ const terminer=el('button',{class:'btn',type:'button',onClick:()=>finir([])},t('Terminer'));
+ const langues=[{value:'original',label:t('Original')},{value:'fr',label:t('Français')},{value:'en',label:t('Anglais')}];
+ const langueChoix=segmented(langues,'original',lang=>geste('langue',{lang}));langueChoix.dataset.role='langue-cuisine';langueChoix.setAttribute('role','group');langueChoix.setAttribute('aria-label',t('Langue de lecture'));
+ const entete=el('div',{class:'cuisine-entete'},titre,el('div',{class:'row'},terminer,fiche));
+ const avertissements=el('div',{class:'stack',dataset:{role:'avertissements-cuisine'}}),onglets=el('div',{class:'row cuisine-recettes',role:'group','aria-label':t('Recette active')});
+ const outils=el('div',{class:'row cuisine-outils'},langueChoix),contenu=el('div',{class:'cuisine-contenu'}),navigation=el('div',{class:'controls cuisine-navigation navigation-cuisine'}),photoHote=el('div');
+ panneau=(deps.creerPanneauMinuteurs??creerPanneauMinuteurs)({sessionId:params.id,ctx,service,portee,estCourante});panneau.classList.add('cuisine-minuteurs');
+ comparaisons=creerPanneauComparaisonCuisine({sessionId:params.id,ctx,repo:depot,getGeneration:getSyncGeneration,estCourante,onConserve:actualiser});
+ ecran=(deps.creerControleurEcran??creerControleurEcran)({document:deps.document??document,wakeLock:deps.wakeLock??globalThis.navigator?.wakeLock,estCourante});
+ commandeEcran=(deps.creerCommandeEcranAllume??creerCommandeEcranAllume)({controleur:ecran});outils.append(commandeEcran);
+ voix=(deps.creerControleurVoix??creerControleurVoix)({speechSynthesis:deps.speechSynthesis??globalThis.speechSynthesis,SpeechSynthesisUtterance:deps.SpeechSynthesisUtterance??globalThis.SpeechSynthesisUtterance,estCourante});
+ root.append(entete,onglets,outils,etat,avertissements,contenu,navigation,panneau,comparaisons,photoHote);
+ const ctxF=await contexteFichiers(ctx),photos=photosPersonnellesParRecette(ctx.cook_history||[]);let fichiers=new Map();
+ const initiale=await service.lireSession({portee,sessionId:params.id});
+ if(initiale.issue!=='ok'||!estCourante()){signaler(initiale);terminer.disabled=true;fiche.hidden=true;return root;}
+ await recevoir(initiale);await panneau.actualiser?.();
+ const revenir=()=>actualiser();for(const event of ['focus','pageshow']){window.addEventListener(event,revenir);permanents.push(()=>window.removeEventListener(event,revenir));}
+ const visible=()=>{if(document.visibilityState==='visible')actualiser();};document.addEventListener('visibilitychange',visible);permanents.push(()=>document.removeEventListener('visibilitychange',visible));
+ return root;
 
-  // Avant de commencer : attentes longues ou préparations préalables
-  const warnings = [];
-  for (const it of items) for (const s of it.version.steps || []) {
-    const long = (s.timers || []).find((tm) => tm.seconds >= 3600);
-    if (long) warnings.push(`${it.recipe.original_title} — ${t('étape')} ${s.position} : ${long.label}`);
-    if (/la veille|overnight|toute une nuit|\b(\d+)\s*h(eures)?\s+de\s+(repos|marinade)|réfrigérer\s+\d+\s*h/i.test(s.text)) warnings.push(`${it.recipe.original_title} — ${t('étape')} ${s.position} : ${t('préparation ou repos long')}`);
+ function signaler(resultat,type){etat.hidden=false;etat.textContent=resultat?.raison==='session_terminee'?t('Cette séance est terminée. Les suivis de durée restent consultables.'):!estCourante()?t('La bibliothèque a changé. Rouvre la séance de cuisine.'):type==='langue'?t('La langue de lecture n’a pas pu être enregistrée. Réessaie.'):type==='selection'?t('La sélection n’a pas été enregistrée. La session ou la recette a changé ; réessaie après rechargement.'):type==='progression'?t('La progression n’a pas été enregistrée. La session ou la recette a changé ; réessaie après rechargement.'):t('Le changement n’a pas été conservé. Ta séance reste disponible ; relis son état avant de réessayer.');}
+ async function recevoir(resultat){
+  const n=++numeroLecture;if(!resultat.affiche||!resultat.projection)return false;
+  const nouvelles=resultat.affiche,proj=resultat.projection;
+  for(const [key,choix]of traductionsChoisies){if(!choix.id)continue;const row=nouvelles.traductions.find(r=>r.id===choix.id);if((row?cleRendu(projectionCandidateTraduction(row)):null)!==choix.exact){traductionsPerimees.set(key,choix.id);traductionsChoisies.delete(key);}}
+  const sansDates=row=>{if(!row)return null;const copie=structuredClone(row);delete copie.created_at;delete copie.updated_at;return copie;};
+  const signature=cleRendu({projection:proj,units:nouvelles.session.units??null,versions:nouvelles.versions.map(r=>({version_id:r.version_id,version:sansDates(r.version),recipe:sansDates(r.recipe),edition:sansDates(r.edition)})),traductions:nouvelles.traductions.map(projectionCandidateTraduction)});
+  if(signature===vueConfirmee){lecture=resultat.lecture;affiche=nouvelles;projection=proj;return true;}
+  const prochains=await Promise.all(nouvelles.versions.map(async entree=>{
+   const p=proj.versions.find(v=>v.version_id===entree.version_id),version=entree.version,recipe=entree.recipe;
+   if(!version||!recipe)return{...entree,projection:p};
+   const bloquees=new Set(traductionsPerimees.values()),traductions=nouvelles.traductions.filter(tr=>!bloquees.has(tr.id));
+   const preparee=await preparerLectureRecette({recipe,version,traductions});
+   return{...entree,projection:p,servings:p?.servings??null,scaled:scaleVersion(version,p?.servings??null),convention_id:ctx.conventionFor?.(recipe)??null,lecture:preparee};
+  }));
+  const images=empreintesPhotos(prochains.filter(x=>x.recipe).map(x=>x.recipe),photos);
+  let lus=new Map();try{lus=images.length?await depot.getFiles(images):new Map();}catch{}
+  if(!estCourante()||n!==numeroLecture)return false;
+  voix.arreter();lecture=resultat.lecture;affiche=nouvelles;projection=proj;items=prochains;fichiers=lus;vueConfirmee=signature;dessiner();return true;
+ }
+ async function actualiser(){
+  if(!estCourante()){voix?.arreter();if(lecture)signaler({});return false;}
+  if(occupe||bilanOuvert){relireEnsuite=true;return false;}
+  if(lectureEnCours){relireEnsuite=true;return lectureEnCours;}
+  lectureEnCours=(async()=>{const r=await service.lireSession({portee,sessionId:params.id});if(!estCourante())return false;await Promise.all([panneau.actualiser?.(),comparaisons.actualiser?.()]);if(r.issue!=='ok'){signaler(r);terminer.disabled=true;return false;}return recevoir(r);})().catch(()=>{if(estCourante())signaler({});return false;}).finally(()=>{lectureEnCours=null;if(relireEnsuite&&estCourante()&&!occupe&&!bilanOuvert){relireEnsuite=false;actualiser();}});
+  return lectureEnCours;
+ }
+ async function geste(type,valeurs,{focus=false}={}){
+  if(type==='selection'&&occupe&&!bilanOuvert&&estCourante()){selectionEnAttente={...valeurs};return;}
+  if(occupe||bilanOuvert||!estCourante()||projection?.etat!=='active')return;
+  const avant=lecture,versionCapturee=projection.active_version_id;occupe=true;etat.hidden=true;verrouiller();voix.arreter();
+  try{
+   const methode=type==='selection'?'preparerSelection':type==='langue'?'preparerLangue':'preparerProgression';
+   const preparation=await service[methode]({portee,lecture:avant,...valeurs});
+   if(preparation.issue!=='ok'){signaler(preparation,type);return;}
+   const resultat=await service.appliquerSession({intention:preparation.intention});
+   if(!estCourante())return;
+   if(!['conserve','deja_conserve'].includes(resultat.issue)){signaler(resultat,type);return;}
+   if(type==='selection')planOuvert=false;
+   await recevoir(resultat);
+   if(focus&&(type==='selection'||projection.active_version_id===versionCapturee))contenu.querySelector('[data-role=titre-etape]')?.focus({preventScroll:true});
+  }catch{if(estCourante())signaler({},type);}
+  finally{occupe=false;if(estCourante()){verrouiller();if(selectionEnAttente){const suivante=selectionEnAttente;selectionEnAttente=null;geste('selection',suivante,{focus:true});}else if(relireEnsuite){relireEnsuite=false;actualiser();}}}
+ }
+ function verrouiller(){const ferme=bilanOuvert||!estCourante()||projection?.etat!=='active',bloque=occupe||ferme;for(const b of root.querySelectorAll('[data-mutation-cuisine]'))b.disabled=(b.dataset.actionCuisine==='selection'?ferme:bloque)||b.dataset.interdit==='true';terminer.disabled=bloque||items.some(it=>!it.version||!it.recipe||!it.projection?.execution_autorisee);for(const b of langueChoix.querySelectorAll('button'))b.disabled=bloque;}
+ // Clé d’affichage seulement : les valeurs héritées undefined ne sont jamais réécrites.
+ function cleRendu(value){return canoniqueSources(JSON.parse(JSON.stringify(value)));}
+ function cleTraduction(vid){return vid+':'+projection.lang;}
+ function lectureDe(it){const choix=traductionsChoisies.get(cleTraduction(it.version.id));return projeterLectureRecette(it.lecture,{locale:projection.lang,servings:it.servings,system:affiche.session.units||'original',convention_id:it.convention_id,ingredientsById:ctx.ingredientsById,translationId:choix?.id??(choix?'__original__':null)});}
+ function mutation(label,fn,{interdit=false,classe='btn',role=null}={}){return el('button',{class:classe,type:'button',disabled:interdit,dataset:{mutationCuisine:'',interdit:String(interdit),...(role?{role}:{})},onClick:fn},label);}
+ function dessiner(){
+  nettoyer();voix.arreter();contenu.replaceChildren();navigation.replaceChildren();photoHote.replaceChildren();avertissements.replaceChildren();onglets.replaceChildren();
+  const active=items.find(it=>it.version_id===projection.active_version_id),session=affiche.session;
+  const pr=active?.lecture?lectureDe(active):null;
+  if(pr?.traductionId){const row=affiche.traductions.find(r=>r.id===pr.traductionId);if(row)traductionsChoisies.set(cleTraduction(active.version.id),{id:row.id,exact:cleRendu(projectionCandidateTraduction(row))});}
+  titre.textContent=items.length>1?t('Repas — {n} recettes',{n:items.length})+(pr?' · '+pr.titre.texte:''):pr?.titre.texte||t('Cuisine');
+  fiche.hidden=!active?.recipe||!active?.version;if(!fiche.hidden)fiche.href=`#/recipes/${encodeURIComponent(active.recipe.id)}?v=${encodeURIComponent(active.version.id)}`;
+  for(const [i,b]of [...langueChoix.children].entries()){b.classList.toggle('active',langues[i].value===projection.lang);b.setAttribute('aria-pressed',String(langues[i].value===projection.lang));}
+  for(const it of items){const b=mutation(it.recipe?.display_title||it.recipe?.original_title||t('Version indisponible'),()=>geste('selection',{versionId:it.version_id}),{interdit:!it.version||!it.recipe,classe:'btn small'});b.dataset.versionId=it.version_id;b.dataset.actionCuisine='selection';b.classList.toggle('active',it.version_id===projection.active_version_id);b.setAttribute('aria-pressed',String(it.version_id===projection.active_version_id));onglets.append(b);}
+  if(items.length>1)onglets.append(el('button',{type:'button',class:'btn small','aria-pressed':String(planOuvert),onClick:()=>{planOuvert=!planOuvert;dessiner();}},t('Plan commun')));
+  for(const it of items.filter(x=>x.recipe&&x.version)){
+   const mention=mentionCycleRecette(it.recipe,it.edition);if(mention)avertissements.append(mention);
+   const nom=items.length>1?(it.recipe.display_title||it.recipe.original_title)+' · ':'';
+   const etiquette=etiquetteIA(it.version,it.recipe);if(etiquette)avertissements.append(el('div',{dataset:{role:'cuisine-ia'}},el('span',null,nom,etiquette),...(estCreationIA(it.version)?[el('p',{class:'status warn',dataset:{role:'avertissement-ia'}},t(AVERTISSEMENT_CREATION_IA))]:[])));
+   if(estExtractionNonRelue(it.version))avertissements.append(el('p',{class:'status warn',dataset:{role:'bandeau-non-relue'}},nom,t('Lue par l’assistant, non relue')));
+   const rappel=rappelThermomix(it.version);if(rappel)avertissements.append(rappel);
   }
-  if (warnings.length && !progress.done_step_ids.length) root.append(el('div', { class: 'card warn' }, el('strong', null, t('Avant de commencer')), el('ul', null, ...warnings.map((w) => el('li', null, w)))));
-
-  const boutonsRecettes = items.map((it, i) => el('button', { class: 'btn small', type: 'button', onClick: () => choisirRecette(i) }, it.recipe.display_title || it.recipe.original_title));
-  const boutonPlan = el('button', { class: 'btn small', type: 'button', onClick: () => { planOpen = !planOpen; draw(); } }, t('Plan commun'));
-  const tabs = items.length > 1 ? el('div', { class: 'row', style: { marginBottom: '.6rem' } }, ...boutonsRecettes, boutonPlan) : null;
-  let planOpen = false;
-  if (tabs) root.append(tabs);
-  const area = el('div', null);
-  let bilanOuvert = false;
-  root.append(area);
-  draw();
-  return root;
-
-  function stepsOf(it) { return lectureDe(it).etapes.map(s=>({...s,text:s.texte})); }
-  function modifierSession(it, fusion) {
-    const refuser = () => { throw new Error('Recette de la session devenue indisponible'); };
-    const contexteValide = () => { if (getSyncGeneration() !== generation) refuser(); };
-    return depot.saveBatch({}, { recettes: contextesHistoriques, conditions: {
-      recipes: [{ key: it.recipe.id, fusion: courant => { contexteValide(); if (!courant) refuser(); return null; } }],
-      recipe_versions: [{ key: it.version.id, fusion: courant => { contexteValide(); if (!courant || courant.recipe_id !== it.recipe.id) refuser(); return null; } }],
-      cook_sessions: [{ key: session.id, fusion: courant => {
-        contexteValide();
-        if (!courant || courant.status !== 'active' || !Array.isArray(courant.selected_version_ids) || !courant.selected_version_ids.includes(it.version.id)) refuser();
-        return fusion(courant);
-      } }],
-    } });
+  if(projection.etat==='terminee')avertissements.append(el('p',{class:'status'},t('Cette séance est terminée. Les suivis de durée restent consultables.')));
+  if(projection.absents.length)avertissements.append(el('p',{class:'status warn'},t('Une version de cette séance est indisponible. Les autres contenus et les suivis restent conservés.')));
+  if(projection.ambigus.length)avertissements.append(el('p',{class:'status warn'},t('Certaines étapes anciennes ne peuvent pas être attribuées à une seule recette. Leur historique est conservé.')));
+  if(planOuvert){contenu.append(planCommun());verrouiller();return;}
+  if(!active?.version||!active?.recipe||!pr){const garde=panneauGardeThermomix(items.filter(it=>it.version&&it.recipe));contenu.append(garde||el('p',{class:'status warn'},t('La version active est indisponible. Choisis une autre recette de cette séance.')));verrouiller();return;}
+  const gardeActive=panneauGardeThermomix([active]);if(gardeActive){contenu.append(gardeActive);verrouiller();return;}
+  const ingredients=el('details',{class:'cuisine-ingredients ingredients-cuisine',role:'region','aria-label':t('Ingrédients de la recette'),dataset:{role:'ingredients-cuisine',versionId:active.version.id}},el('summary',null,t('Ingrédients de la recette')));
+  const ingCorps=el('div',{class:'cuisine-ingredients-corps'},el('p',{class:'muted'},active.servings===null?t('Portions inconnues'):t('{n} portions',{n:active.servings})),el('ul',{class:'ingredients list plain'},...pr.blocs.map(l=>l.kind==='heading'?el('li',{class:'ingredient-heading',dataset:{role:'ingredient-heading'}},segmentLectureEl(l)):ingredientLectureEl(l))),...active.scaled.notes.map(n=>el('p',{class:'muted'},n)));
+  const region=el('section',{class:'cuisine-etape stack',role:'region','aria-label':t('Étape de la recette'),tabindex:'-1',dataset:{role:'cuisine-etape',versionId:active.version.id}});
+  const steps=pr.etapes,idx=steps.findIndex(s=>s.id===active.projection.display_step_id),step=idx>=0?steps[idx]:null;
+  const titreEtape=el('h2',{tabindex:'-1',dataset:{role:'titre-etape'}},step?t('Étape {n} sur {total}',{n:idx+1,total:steps.length}):t('Préparation'));
+  ingCorps.append(el('button',{class:'btn small cuisine-retour-etape',type:'button',onClick:()=>{titreEtape.focus({preventScroll:true});titreEtape.scrollIntoView?.({block:'nearest'});}},t('Revenir à l’étape')));ingredients.append(ingCorps);
+  let large=false,largeurObservee=null,rafLargeur=null,regionDetruite=false;
+  const programmerLargeur=()=>{if(regionDetruite||dispose||rafLargeur!==null)return;rafLargeur=requestAnimationFrame(()=>{rafLargeur=null;if(regionDetruite||dispose)return;large=largeurObservee>=900;const ouvrir=large||!!ouvertures.get(active.version.id);if(ingredients.open!==ouvrir)ingredients.open=ouvrir;});};
+  // Observer la largeur seulement : ouvrir details modifie sa hauteur et ne doit
+  // jamais produire une seconde écriture géométrique dans ResizeObserver.
+  const mesurerLargeur=()=>{if(regionDetruite||dispose)return;const largeur=root.getBoundingClientRect().width;if(largeur===largeurObservee)return;largeurObservee=largeur;programmerLargeur();};
+  const basculer=()=>{if(regionDetruite||dispose)return;if(!large)ouvertures.set(active.version.id,ingredients.open);else if(!ingredients.open)programmerLargeur();};
+  ingredients.open=!!ouvertures.get(active.version.id);ingredients.addEventListener('toggle',basculer);
+  nettoyages.push(()=>{regionDetruite=true;if(rafLargeur!==null)cancelAnimationFrame(rafLargeur);ingredients.removeEventListener('toggle',basculer);});
+  if(globalThis.ResizeObserver){const obs=new ResizeObserver(mesurerLargeur);obs.observe(root);nettoyages.push(()=>obs.disconnect());}else{window.addEventListener('resize',mesurerLargeur);nettoyages.push(()=>window.removeEventListener('resize',mesurerLargeur));}
+  mesurerLargeur();
+  const cle=cleTraduction(active.version.id);
+  if(traductionsPerimees.has(cle))region.append(el('p',{class:'status warn'},t('La traduction choisie a changé. L’original reste affiché jusqu’à ta relecture.')),el('button',{class:'btn',type:'button',onClick:async()=>{traductionsPerimees.delete(cle);vueConfirmee=null;await recevoir({lecture,affiche,projection});}},t('Relire la traduction mise à jour')));
+  if(pr.candidates.length>1){const choix=select([{value:'',label:t('Original')},...pr.candidates.map((x,i)=>({value:x.id,label:t('Traduction {n}',{n:i+1})}))],traductionsChoisies.get(cle)?.id||'',id=>{const row=affiche.traductions.find(r=>r.id===id);traductionsChoisies.set(cle,row?{id,exact:cleRendu(projectionCandidateTraduction(row))}:{id:null});dessiner();});choix.dataset.role='choix-traduction';region.append(field(t('Plusieurs traductions existent. Choisis celle à lire.'),choix));}
+  const note=noteEnCuisine(active.recipe);if(note)region.append(note);
+  const n=active.projection.done_step_ids.length,total=active.projection.total_steps;region.append(el('p',{class:'muted',dataset:{role:'progression-cuisine'}},total===null?t('Progression partielle'):t('{d}/{n} étapes',{d:n,n:total})),titreEtape);
+  const garde=panneauGardeThermomix([active]);if(garde)region.append(garde);
+  if(step)region.append(el('div',{class:'step-big'},segmentLectureEl(step,{role:'texte-etape'})));
+  else region.append(el('p',{class:'status warn'},steps.length?t('L’étape conservée est indisponible. Choisis une étape de cette version.'):t('Aucune étape numérisée pour cette version.')));
+  if(!step&&steps.length&&active.projection.execution_autorisee)region.append(select([{value:'',label:t('Choisir une étape')},...steps.map((s,i)=>({value:s.id,label:t('Étape {n}',{n:i+1})}))],'',id=>{if(id)geste('progression',{versionId:active.version.id,currentStepId:id,doneAdd:[]},{focus:true});}));
+  if(step&&active.projection.execution_autorisee&&projection.etat==='active')for(let ordinal=0;ordinal<(step.timers||[]).length;ordinal++){
+   const commande=(deps.commandesMinuteurEtape??commandesMinuteurEtape)({service,portee,lecture,version:active.version,recipe:active.recipe,step,ordinal,recipeTitle:pr.titre.texte,estCourante,onConserve:()=>{panneau.actualiser?.();relireEnsuite=true;if(!occupe&&!bilanOuvert)actualiser();},locale:ctx.settings?.ui_locale||'fr',deps});region.append(commande);nettoyages.push(()=>commande.dispose?.());
   }
-  function choisirRecette(index) {
-    activeIdx = index;
-    const it = items[index], numero = ++selectionNumero;
-    session.active_version_id = it.version.id;
-    planOpen = false; etatSelection.hidden = true; draw();
-    // Sérialiser les gestes, mais ne fusionner que le choix : la progression d'un autre onglet reste intacte.
-    selections = selections.then(async () => {
-      await modifierSession(it, courant => ({ ...courant, active_version_id: it.version.id }));
-      selectionConfirmee = index;
-    }).catch(() => {
-      if (dispose || numero !== selectionNumero) return;
-      activeIdx = selectionConfirmee;
-      session.active_version_id = items[activeIdx].version.id;
-      etatSelection.textContent = t('La sélection n’a pas été enregistrée. La session ou la recette a changé ; réessaie après rechargement.');
-      etatSelection.hidden = false;
-      draw();
-    });
-    return selections;
-  }
-  function currentStepIndex(it) {
-    const st = progress.by_version[it.version.id] || {};
-    const steps = stepsOf(it);
-    const idx = steps.findIndex((s) => s.id === st.current_step_id);
-    return idx >= 0 ? idx : 0;
-  }
-  async function persist(it, newIdx, doneStep) {
-    let ecrite;
-    await modifierSession(it, courant => {
-      const avant = courant.progress || {};
-      ecrite = {
-        ...avant,
-        total_steps: items.filter(item => courant.selected_version_ids.includes(item.version.id)).reduce((n, item) => n + stepsOf(item).length, 0),
-        by_version: { ...(avant.by_version || {}), [it.version.id]: { ...(avant.by_version?.[it.version.id] || {}), current_step_id: stepsOf(it)[newIdx]?.id || null } },
-        done_step_ids: [...new Set([...(Array.isArray(avant.done_step_ids) ? avant.done_step_ids : []), ...(doneStep ? [doneStep.id] : [])])],
-      };
-      return { ...courant, progress: ecrite, active_version_id: it.version.id };
-    });
-    // L'état visible n'avance qu'après l'écriture ; une transaction refusée conserve l'étape affichée.
-    progress = ecrite;
-    session.progress = progress;
-  }
-
-  function draw() {
-    arreterVoix();
-    const courant = items[activeIdx];
-    fiche.setAttribute('href', `#/recipes/${courant.recipe.id}?v=${courant.version.id}`);
-    const projection=lectureDe(courant);
-    titre.textContent=items.length===1?projection.titre.texte:`${title} · ${projection.titre.texte}`;
-    [...langueChoix.children].forEach((b,i)=>{b.classList.toggle('active',langues[i].value===langueLecture);b.setAttribute('aria-pressed',String(langues[i].value===langueLecture));});
-    boutonsRecettes.forEach((bouton, i) => { bouton.classList.toggle('active', i === activeIdx); bouton.setAttribute('aria-pressed', String(i === activeIdx)); });
-    boutonPlan.classList.toggle('active', planOpen); boutonPlan.setAttribute('aria-pressed', String(planOpen));
-    nettoyer();
-    area.replaceChildren();
-    if (planOpen) { area.append(commonPlan()); return; }
-    const it = items[activeIdx];
-    const steps = stepsOf(it);
-    const idx = currentStepIndex(it);
-    const step = steps[idx];
-    const ingUl = el('ul', { class: 'ingredients list plain' });
-
-    for(const ligne of projection.blocs)ingUl.append(ligne.kind==='heading'?el('li',{class:'ingredient-heading',dataset:{role:'ingredient-heading'}},segmentLectureEl(ligne)):ingredientLectureEl(ligne));
-    const ingredients = el('details', { class: 'ingredients-cuisine', dataset: { role: 'ingredients-cuisine' } },
-      el('summary', null, t('Ingrédients de la recette')),
-      el('div', { class: 'muted' }, it.servings ? t('{n} portions', { n: it.servings }) : ''), ingUl,
-      ...it.scaled.notes.map(n => el('small', { class: 'muted' }, n)));
-    const right = el('div', { class: 'stack' });
-    if(projection.candidates.length>1){const choix=select([{value:'',label:t('Original')},...projection.candidates.map((x,i)=>({value:x.id,label:t('Traduction {n}',{n:i+1})}))],traductionsChoisies.get(it.version.id)||'',id=>{traductionsChoisies.set(it.version.id,id);arreterVoix();draw();});choix.dataset.role='choix-traduction';right.append(field(t('Plusieurs traductions existent. Choisis celle à lire.'),choix));}
-    const personnelle = noteEnCuisine(it.recipe);
-    if (personnelle) right.append(personnelle);
-    right.append(el('div', { class: 'progress' }, el('div', { style: { width: steps.length ? `${Math.round(progress.done_step_ids.filter((id) => steps.some((s) => s.id === id)).length / steps.length * 100)}%` : '0%' } })));
-    if (!step) right.append(el('div', { class: 'step-big' }, t('Aucune étape numérisée pour cette version.')));
-    else {
-      right.append(el('div', { class: 'step-big' }, el('div', { class: 'muted', style: { fontSize: '.9rem', marginBottom: '.4rem' } }, `${t('Étape')} ${idx + 1} / ${steps.length}`), segmentLectureEl(step,{role:'texte-etape'}), // m10 : étape entière, sauts de ligne gardés
-        null));
-      for (const tm of step.timers || []) right.append(timerCard(tm, it, step));
-    }
-    const etatVoix=el('span',{class:'muted',role:'status',dataset:{role:'etat-voix'}});
-    const speak=speech&&Utterance&&step?el('button',{class:'btn',onClick:()=>{
-      arreterVoix();if(!step.langReelle){etatVoix.textContent=t('Langue du texte inconnue : aucune voix choisie automatiquement.');return;}
-      const langues=step.langReelle.toLowerCase(),voices=speech.getVoices?.()||[],voice=voices.find(v=>v.lang?.toLowerCase()===langues)||voices.find(v=>v.lang?.toLowerCase().split('-')[0]===langues.split('-')[0]);
-      if(!voice){etatVoix.textContent=t('Aucune voix disponible pour la langue de ce texte.');return;}
-      try{const u=new Utterance(step.text);u.lang=voice.lang;u.voice=voice;u.onstart=()=>{if(!dispose&&etatVoix.isConnected)etatVoix.textContent=t('Lecture en cours');};u.onend=()=>{if(!dispose&&etatVoix.isConnected)etatVoix.textContent='';};u.onerror=()=>{if(!dispose&&etatVoix.isConnected)etatVoix.textContent=t('La lecture vocale n’a pas démarré. Réessaie.');};speech.speak(u);}catch{etatVoix.textContent=t('La lecture vocale n’a pas démarré. Réessaie.');}
-    }},t('Lire à voix haute')):null;
-    const navigation = el('div', { class: 'controls navigation-cuisine' },
-      el('button', { class: 'btn', disabled: idx === 0, onClick: () => go(it, idx - 1) }, `← ${t('Précédent')}`),
-      idx < steps.length - 1 ? el('button', { class: 'btn primary', onClick: () => go(it, idx + 1, step) }, `${t('Suivant')} →`) : el('button', { class: 'btn primary', onClick: () => { if (step) markDone(step); finish(); } }, t('Terminer')));
-    right.append(ingredients, ...(projection.manque?[el('p',{class:'status warn'},t('Les passages non traduits restent dans leur langue d’origine.'))]:[]), el('div', { class: 'row' }, speak, etatVoix, el('small', { class: 'muted' }, t('Commandes vocales : à venir après validation sur iOS. Pour une minuterie, parle à Siri directement.'))));
-    const sha = photoPrincipale(it.recipe, photos)?.sha256;
-    const photo = el('details', { class: 'photo-cuisine', dataset: { role: 'photo-cuisine' } }, el('summary', null, t('Voir la photo du plat')));
-    photo.append(photoVisible(sha, { fichier: fichierPhoto(it.recipe, photos, fichiers), ctxF, classe: 'photo-cuisine-image', personnelle: !!photos.get(it.recipe.id) }) || el('p', { class: 'muted' }, t('Aucune photo pour cette recette.')));
-    right.append(photo);
-    area.append(el('div', { class: 'cook' }, right), navigation);
-  }
-
-  function markDone(step) { if (!progress.done_step_ids.includes(step.id)) progress.done_step_ids.push(step.id); }
-  function go(it, newIdx, doneStep = null) {
-    if (it.version.id !== items[activeIdx].version.id) return Promise.resolve();
-    const numero = ++selectionNumero;
-    etatSelection.hidden = true;
-    // Même file et même garde que les onglets : une progression tardive ne réactive pas une version retirée.
-    selections = selections.then(async () => {
-      await persist(it, newIdx, doneStep);
-      if (!dispose) draw();
-    }).catch(() => {
-      if (dispose || numero !== selectionNumero) return;
-      etatSelection.textContent = t('La progression n’a pas été enregistrée. La session ou la recette a changé ; réessaie après rechargement.');
-      etatSelection.hidden = false;
-    });
-    return selections;
-  }
-
-  // Bloc minuterie avec états : requested → opening → unconfirmed | failed. Compte à rebours miroir indicatif.
-  function timerCard(tm, it, step) {
-    let launch = null;
-    const stateEl = el('div', { class: 'muted', style: { fontSize: '.9rem' } });
-    const mirror = el('div', { class: 'mirror', style: { display: 'none' } });
-    let mirrorTimer = null, handoffTimeout = null, carteActive = true;
-    nettoyages.push(() => { carteActive = false; clearInterval(mirrorTimer); clearTimeout(handoffTimeout); });
-    const setState = async (state) => { if (!launch) return; launch.handoff_state = state; launch = await depot.save('timer_launches', launch, {recettes:contextesHistoriques}); stateEl.textContent = `${label('timer_state', state)} — ${TIMER_STATE_HELP[state]}`; };
-    const request = async (channel, seconds) => {
-      launch = createTimerLaunch({ cook_session_id: session.id, recipe_version_id: it.version.id, step_id: step.id, device_id: deviceId(), duration_seconds: seconds, channel });
-      launch = await depot.save('timer_launches', launch, {recettes:contextesHistoriques});
-      if (!carteActive) return;
-      if (channel === 'shortcut') {
-        await setState('opening');
-        if (!carteActive) return;
-        handoffTimeout = setTimeout(() => { if (launch.handoff_state === 'opening') setState('unconfirmed').catch(() => {}); }, 2500);
-      }
-      else stateEl.textContent = `${label('timer_state', 'siri')} — ${TIMER_STATE_HELP.siri}`;
-      if (carteActive) startMirror(seconds);
-    };
-    const startMirror = (seconds) => {
-      const end = Date.now() + seconds * 1000;
-      mirror.style.display = 'block';
-      clearInterval(mirrorTimer);
-      mirrorTimer = setInterval(() => {
-        const left = Math.max(0, Math.round((end - Date.now()) / 1000));
-        mirror.textContent = `${t('Indicatif')} : ${describeDuration(left)}`;
-        if (left <= 0) { clearInterval(mirrorTimer); mirror.textContent = t('Indicatif : temps écoulé — fie-toi à l’alarme d’Horloge.'); }
-      }, 500);
-    };
-    return el('div', { class: 'card flat stack' },
-      timerBlock(tm.seconds, { seconds_max: tm.seconds_max, locale: ctx.settings?.ui_locale || 'fr', onRequest: request, compact: true }),
-      estThermomix(it.version) ? el('small', { class: 'muted' }, t('Durée proposée par l’assistant, à vérifier pendant la cuisson.')) : null,
-      stateEl, mirror,
-      el('div', { class: 'row' },
-        el('button', { class: 'btn small', onClick: () => { if (launch) setState('failed').catch(() => { stateEl.textContent = t('La demande de minuterie n’a pas été enregistrée. Réessaie.'); }); } }, t('Ça n’a pas démarré')),
-        el('small', { class: 'muted' }, t('Le compte à rebours ci-dessus n’est pas une alarme : l’alarme vit dans Horloge et continue quand l’app est fermée.'))));
-  }
-
-  // Plan commun simple : étapes de toutes les recettes avec durées ; les attentes longues indiquent ce qui peut se chevaucher.
-  function commonPlan() {
-    const rows = [];
-    for (const it of items) for (const s of stepsOf(it)) {
-      const wait = (s.timers || []).reduce((m, tm) => Math.max(m, tm.seconds), 0);
-      rows.push({ it, s, wait, done: progress.done_step_ids.includes(s.id) });
-    }
-    return section(t('Plan commun'),
-      el('p', { class: 'muted' }, t('Vue par recette conservée. Les étapes avec attente longue libèrent du temps pour l’autre recette ; rien n’est parallélisé automatiquement.')),
-      el('ul', { class: 'list' }, ...rows.map((r) => el('li', { class: 'row between' },
-        el('div', null, el('span', { class: 'badge' }, r.it.recipe.display_title || r.it.recipe.original_title), ' ', el('span', { style: { textDecoration: r.done ? 'line-through' : 'none' } }, `${r.s.position}. ${r.s.text.slice(0, 140)}${r.s.text.length > 140 ? '…' : ''}`)),
-        r.wait >= 600 ? el('span', { class: 'chip' }, `${t('attente')} ${describeDuration(r.wait)} — ${t('pendant ce temps : autre recette')}`) : null))),
-      el('button', { class: 'btn', onClick: () => { planOpen = false; draw(); } }, t('Retour aux étapes')));
-  }
-
-  // Un formulaire PAR recette ; la fermeture et toutes les cuissons partagent une transaction.
-  async function finish() {
-    if (bilanOuvert) return;
-    bilanOuvert = true;
-    const it = items[activeIdx];
-    try {
-      const ok = await ouvrirCuissons(items, { ...deps, repo: deps.repo ?? repo, session, recettes: contextesHistoriques });
-      if (ok) (deps.navigate ?? navigate)(session.meal_id ? `/meals/${encodeURIComponent(session.meal_id)}` : `/recipes/${encodeURIComponent(it.recipe.id)}`);
-    } finally { bilanOuvert = false; }
-  }
+  if(pr.manque)region.append(el('p',{class:'status warn',dataset:{role:'traduction-manquante'}},t('Les passages non traduits restent dans leur langue d’origine.')));
+  const etatVoix=el('span',{class:'muted',role:'status',dataset:{role:'etat-voix'}});const stop=voix.souscrire(e=>{etatVoix.textContent=texteEtatVoix(e);});nettoyages.push(stop);
+  if(step)region.append(el('div',{class:'row'},el('button',{class:'btn',type:'button',onClick:()=>voix.lire({texte:step.texte,langReelle:step.langReelle})},t('Lire à voix haute')),etatVoix));
+  const avancer=delta=>{if(!step)return;const cible=steps[idx+delta];if(!cible)return;return geste('progression',{versionId:active.version.id,currentStepId:cible.id,doneAdd:delta>0?[step.id]:[]},{focus:true});};
+  const bloque=!active.projection.execution_autorisee||projection.etat!=='active';
+  navigation.append(mutation('← '+t('Précédent'),()=>avancer(-1),{interdit:bloque||idx<=0,role:'precedent-cuisine'}),idx>=0&&idx<steps.length-1?mutation(t('Suivant')+' →',()=>avancer(1),{interdit:bloque,classe:'btn primary',role:'suivant-cuisine'}):mutation(t('Terminer'),()=>finir(step?[{version_id:active.version.id,step_ids:[step.id]}]:[]),{interdit:bloque,classe:'btn primary',role:'terminer-cuisine'}));
+  region.addEventListener('keydown',event=>{if(event.defaultPrevented||event.repeat||event.isComposing||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||document.querySelector('dialog[open]')||event.target.closest('button,a,input,textarea,select,summary,[contenteditable]:not([contenteditable="false"])'))return;if(!['ArrowLeft','ArrowRight'].includes(event.key)||bloque)return;event.preventDefault();avancer(event.key==='ArrowRight'?1:-1);});
+  contenu.append(ingredients,region);const sha=photoPrincipale(active.recipe,photos)?.sha256;const photo=el('details',{class:'photo-cuisine',dataset:{role:'photo-cuisine'}},el('summary',null,t('Voir la photo du plat')));const image=photoVisible(sha,{fichier:fichierPhoto(active.recipe,photos,fichiers),ctxF,classe:'photo-cuisine-image',personnelle:!!photos.get(active.recipe.id)});photo.append(image||el('p',{class:'muted'},t('Aucune photo pour cette recette.')));if(image)nettoyages.push(()=>image.dispose?.());photoHote.append(photo);verrouiller();
+ }
+ function planCommun(){
+  const lignes=items.flatMap(it=>{
+   if(!it.lecture)return[el('li',null,t('Version indisponible'))];
+   return lectureDe(it).etapes.map(step=>el('li',null,
+    el('strong',null,it.recipe.display_title||it.recipe.original_title),' · ',
+    el('span',{style:{textDecoration:it.projection.done_step_ids.includes(step.id)?'line-through':'none'}},step.texte),
+    ...(step.timers||[]).map(tm=>el('span',{class:'chip'},t('Durée indiquée : {d}',{d:describeDuration(tm.seconds,ctx.settings?.ui_locale||'fr')+(tm.seconds_max!=null&&tm.seconds_max!==tm.seconds?' – '+describeDuration(tm.seconds_max,ctx.settings?.ui_locale||'fr'):'')})))));
+  });
+  return section(t('Plan commun'),
+   el('p',{class:'muted'},t('Durées indiquées dans chaque recette. Vérifie leur déroulement avant de les combiner.')),
+   el('ul',{class:'list'},...lignes),
+   el('button',{class:'btn',type:'button',onClick:()=>{planOuvert=false;dessiner();}},t('Retour aux étapes')));
+ }
+ async function finir(doneAdd){
+  if(occupe||bilanOuvert||!estCourante()||terminer.disabled)return;bilanOuvert=true;verrouiller();voix.arreter();
+  const lectureBilan=lecture,sessionBilan=structuredClone(affiche.session),active=items.find(it=>it.version_id===projection.active_version_id);
+  try{const minuteurs=await service.lireMinuteurs({portee,sessionId:params.id});if(!estCourante())return;if(minuteurs.issue!=='ok'){signaler(minuteurs);return;}
+   const confirmer=deps.ouvrirCuissons??ouvrirCuissons;const ok=await confirmer(items.map(it=>({recipe:it.recipe,version:it.version,servings:it.servings,scaled:it.scaled})),{...deps,ctx,repo:depot,session:sessionBilan,cuisine:{service,portee,lecture:lectureBilan,doneAdd},suivisActifs:minuteurs.actifs.length});
+   if(ok&&estCourante())(deps.navigate??navigate)(sessionBilan.meal_id?`/meals/${encodeURIComponent(sessionBilan.meal_id)}`:`/recipes/${encodeURIComponent(active.recipe.id)}`);
+  }catch{if(estCourante())signaler({});}finally{bilanOuvert=false;if(estCourante()){verrouiller();if(relireEnsuite){relireEnsuite=false;actualiser();}}}
+ }
 }
-
-export { refresh };
+export {refresh};

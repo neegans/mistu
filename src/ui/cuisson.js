@@ -31,8 +31,12 @@ export function messageErreurCuisson(e) {
 }
 
 // `id` est stable pour toute la vie du formulaire ; une répétition ne crée ni n'écrase une cuisson.
-export async function enregistrerCuissons(items, { repo = repoModule, session = null, maintenant = maintenantParDefaut, recettes = null, ctx = null } = {}) {
-  const instant = maintenant(), jour = aujourdHui(instant);
+export async function enregistrerCuissons(items, { repo = repoModule, session = null, maintenant = maintenantParDefaut, recettes = null, ctx = null, cuisine = null, memoire = null } = {}) {
+  if(session && !cuisine && (session.cooking_state || session.progress?.format === 2)) erreur('contexte_change');
+  const signature=JSON.stringify(items?.map?.(item=>({id:item.id,recipe_id:item.recipe?.id,version_id:item.version?.id,form:item.form})));
+  const identique=memoire?.signature===signature;
+  const instant=identique?memoire.instant:maintenant(),jour=aujourdHui(instant);
+  if(memoire&&!identique){memoire.signature=signature;memoire.instant=instant;memoire.intention=null;}
   if (!Array.isArray(items) || !items.length || items.length > 100) erreur('reference');
   recettes ??= await Promise.all([...new Map(items.map(item => [item.recipe?.id,item.recipe])).values()].map(recipe => capturerRecette(repo, recipe, {ctx, historique:!!session})));
   const ids = new Set();
@@ -45,7 +49,7 @@ export async function enregistrerCuissons(items, { repo = repoModule, session = 
     return {
       id: item.id, recipe_id: item.recipe.id, recipe_version_id: item.version.id, ...f,
       appliance_ids: [], cook_session_id: session?.id || null, meal_id: session?.meal_id || null,
-      quantities_snapshot: session ? (item.scaled?.ingredients || []).map(ri => ({ source_text: ri.source_text, quantity: ri.quantity, unit_id: ri.unit_id, ingredient_id: ri.ingredient_id })) : [],
+      quantities_snapshot: session ? (item.scaled?.ingredients || []).map(ri => Object.fromEntries(Object.entries({ source_text: ri.source_text, quantity: ri.quantity, unit_id: ri.unit_id, ingredient_id: ri.ingredient_id }).filter(([,valeur]) => valeur !== undefined))) : [],
       convention_snapshot: session ? item.version.provenance?.convention_snapshot || null : null,
     };
   });
@@ -65,6 +69,17 @@ export async function enregistrerCuissons(items, { repo = repoModule, session = 
   };
   const photos = [...new Set(rows.flatMap(r => r.photos))].filter(sha => !fichiers.some(f => f.sha256 === sha));
   if (photos.length) conditions.files = photos.map(sha => gardeExistence(sha, () => true));
+  if(session && cuisine){
+    let intention=memoire?.intention;
+    if(!intention){
+      const preparation=await cuisine.service.preparerFin({portee:cuisine.portee,lecture:cuisine.lecture,doneAdd:cuisine.doneAdd||[],cuissons:rows,endedAt:instant});
+      if(preparation.issue!=='ok')erreur(preparation.raison||'session');
+      intention=preparation.intention;if(memoire)memoire.intention=intention;
+    }
+    const resultat=await cuisine.service.terminerSession({intention,metier:{puts:{},conditions,recettes},fichiers});
+    if(!['conserve','deja_conserve'].includes(resultat.issue))erreur(resultat.raison||'session');
+    return{deja:resultat.issue==='deja_conserve',rows:resultat.rows||rows};
+  }
   if (session) conditions.cook_sessions = [{ key: session.id, fusion: c => {
     if (!c) erreur('session');
     if (c.status === 'done') erreur('deja');
@@ -196,9 +211,10 @@ export function ouvrirCuissons(items, options = {}) {
   const capture = options.recettes ? Promise.resolve({recettes:options.recettes}) : Promise.all([...new Map(items.map(item => [item.recipe?.id,item.recipe])).values()].map(recipe => capturerRecette(repo, recipe, {ctx:options.ctx, historique:!!options.session}))).then(recettes => ({recettes}), erreur => ({erreur}));
   const stables = items.map(item => ({ ...item, id: item.id || repo.newId('ch') }));
   const forms = stables.map(item => creerFormulaireCuisson(item, { ...options, repo, maintenant }));
+  const memoire={};
   const message = el('p', { role: 'alert', class: 'status warn', hidden: true });
   const dlg = el('dialog', { dataset: { role: 'dialogue-cuissons' }, style: { maxWidth: 'min(42rem, calc(100vw - 2rem))' } },
-    el('h2', null, options.session ? t('Cuisson terminée — à refaire ?') : t('J’ai cuisiné ce plat')), ...forms.map(f => f.root), message);
+    el('h2', null, options.session ? t('Cuisson terminée — à refaire ?') : t('J’ai cuisiné ce plat')), ...(options.suivisActifs>0?[el('p',{class:'status warn'},t('{n} suivis de durée sont encore en cours. Terminer la séance ne les arrête pas.',{n:options.suivisActifs}))]:[]), ...forms.map(f => f.root), message);
   const liberer = protegerSaisie(dlg);
   return new Promise(resolve => {
     let enCours = false, fini = false;
@@ -211,9 +227,10 @@ export function ouvrirCuissons(items, options = {}) {
       forms.forEach(f => f.verrouiller(true));
       try {
         const contexte = await capture; if (contexte.erreur) throw contexte.erreur;
-        const result = await enregistrerCuissons(stables.map((item, i) => ({ ...item, form: forms[i].lire(), fichiers: forms[i].fichiers })), { ...options, repo, maintenant, recettes:contexte.recettes });
+        const result = await enregistrerCuissons(stables.map((item, i) => ({ ...item, form: forms[i].lire(), fichiers: forms[i].fichiers })), { ...options, repo, maintenant, recettes:contexte.recettes, memoire });
         (options.toast ?? toastDom)(result.deja ? t('Cette cuisson est déjà enregistrée.') : t('Cuisson enregistrée'));
         fermer(true);
+        if(result.rows.length&&typeof options.onEnregistre==='function')Promise.resolve().then(()=>options.onEnregistre(result)).catch(()=>{});
       } catch (e) {
         message.hidden = false; message.textContent = messageErreurCuisson(e);
         const n = stables.findIndex(item => item.id === e?.cuisson_id); if (n >= 0) forms[n].signaler(e);

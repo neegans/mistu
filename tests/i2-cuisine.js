@@ -123,6 +123,7 @@ export async function runI2CuisineTests({ eq, ok }) {
       ok(cook.querySelector('[data-role=notes-personnelles-cuisine]')?.textContent.includes(recipe.personal_notes), 'I2 note personnelle visible à côté des étapes');
       [...cook.querySelectorAll('button')].find(b => b.textContent === 'Terminer').click();
       [...cook.querySelectorAll('button')].find(b => b.textContent === 'Terminer').click();
+      await attendre(() => document.querySelector('[data-role=dialogue-cuissons]'));
       eq(document.querySelectorAll('[data-role=dialogue-cuissons]').length, 1, 'I2 double tape Terminer n’ouvre qu’un bilan');
       const dlg = document.querySelector('[data-role=dialogue-cuissons]');
       eq(dlg.querySelectorAll('[data-role=formulaire-cuisson]').length, 2, 'I2 un formulaire par recette du repas');
@@ -132,7 +133,7 @@ export async function runI2CuisineTests({ eq, ok }) {
       eq((await repo.all('cook_history')).filter(row => row.cook_session_id === session.id).map(row => row.notes).sort(), ['La soupe', 'Le pain'], 'I2 parcours DOM conserve les observations par recette');
       await attendre(() => sorties.length === 1);
       eq(document.querySelector('[data-role=dialogue-cuissons]'), null, 'I2 bilan fermé après écriture réelle');
-    } finally { scene.remove(); for (const dlg of document.querySelectorAll('[data-role=dialogue-cuissons], [data-role=dialogue-note]')) dlg.remove(); reinitialiserPhotoPlat(); }
+    } finally { for (const cuisine of scene.querySelectorAll('.mode-cuisine')) cuisine.dispose?.(); scene.remove(); for (const dlg of document.querySelectorAll('[data-role=dialogue-cuissons], [data-role=dialogue-note]')) dlg.remove(); reinitialiserPhotoPlat(); }
   }));
   await run('saisie conservée, confirmation et échec atomique', () => withRepo(async repo => {
     const { ouvrirTextePersonnel, creerFormulaireCuisson, enregistrerCuissons } = await import('../src/ui/cuisson.js');

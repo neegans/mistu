@@ -1,3 +1,4 @@
+import {preparerCommandesCuisine,estCommandeCuisine} from './commandes-cuisine.js';
 import {estLectureSourceSignee} from './lots.js';
 import {preparerCommandesSources} from './commandes-sources.js';
 import {preparerCommandesTraduction,estCommandeTraduction,estPhaseJournalTraduction} from './commandes-traduction.js';
@@ -22,7 +23,7 @@ function payloadFor(payloads, store, key) {
 }
 
 export function installCapture(db, { getUserId = () => null, isActivitySynced = () => false, configSuitLeCompte = () => false } = {}) {
-  db.onMutate = ({ puts = {}, deletes = {}, origin = 'local', payloads = {}, recettes = [], editions = [], lifecycle = null, archive_import = false, source_batch = null, source_commands = [], translation_commands=[] }) => {
+  db.onMutate = ({ puts = {}, deletes = {}, origin = 'local', payloads = {}, recettes = [], editions = [], lifecycle = null, archive_import = false, source_batch = null, source_commands = [], translation_commands=[], cooking_commands=[], lecture }) => {
     // Réception, ajustement du serveur et vidage d'appareil ne repartent jamais vers le serveur.
     if (origin !== 'local') return null;
     const rows = [];
@@ -30,9 +31,11 @@ export function installCapture(db, { getUserId = () => null, isActivitySynced = 
     const source = preparerLotSources({ puts, recettes, editions, source_batch });
     const groupes = preparerCommandesSources({puts,commandes:source_commands});
     for(const k of preparerCommandesTraduction({puts,commandes:translation_commands,source_commands}))groupes.add(k);
+    for(const k of preparerCommandesCuisine({puts,commandes:cooking_commands,lecture}))groupes.add(k);
     for(const r of source?.rows||[])groupes.add(`${r.store}:${r.id}`);
     for(const c of source_commands)rows.push({user_id,store:c.store,id:c.id,op:c.op,payload:structuredClone(c),tries:0});
     for(const c of translation_commands)rows.push({user_id,store:c.store,id:c.id,op:c.op,payload:structuredClone(c),tries:0});
+    for(const c of cooking_commands)rows.push({user_id,store:c.store,id:c.id,op:c.op,payload:structuredClone(c),tries:0});
     if (source) rows.push({ user_id, store: 'scan_sessions', id: source.id, op: 'source_batch', payload: source, recipe_id: source.recipe_id, tries: 0 });
     const contexte = (store,id) => {
       const cs=recettes.filter(c => (store==='recipes'&&c.recipe_id===id)||c.records?.some(r=>r.store===store&&r.id===id));
@@ -51,7 +54,7 @@ export function installCapture(db, { getUserId = () => null, isActivitySynced = 
         if (groupes.has(`${store}:${id}`)) continue;
         if (lifecycle && store===cible.store && id===cible.id) continue;
         const ctx=contexte(store,id);
-        rows.push({ user_id, store, id, op: 'put', updated_at: r.updated_at || null, tries: 0,...ctx,...((ctx.edition_contexts||['recipe_versions','source_pages','source_documents','scan_sessions'].includes(store)||estLectureSourceSignee(store,r))?{snapshot:structuredClone(r)}:{}),...(archive_import?{archive_import:true}:{}) });
+        rows.push({ user_id, store, id, op: 'put', updated_at: r.updated_at || null, tries: 0,...ctx,...((ctx.edition_contexts||['recipe_versions','source_pages','source_documents','scan_sessions','cook_sessions','timer_launches','cook_history'].includes(store)||estLectureSourceSignee(store,r))?{snapshot:structuredClone(r)}:{}),...(archive_import?{archive_import:true}:{}) });
       }
     }
     for (const [store, keys] of Object.entries(deletes)) {
@@ -105,7 +108,7 @@ export async function reprendreEnvoi(db, entree) {
 // pas au serveur. Une écriture ultérieure de cette fiche la remettra en file, comme n'importe quelle écriture.
 export async function retirerEnvoi(db, seq) {
   const e=await db.get('outbox',seq);
-  if(estCommandeTraduction(e)||estPhaseJournalTraduction(e))return false;
+  if(estCommandeTraduction(e)||estPhaseJournalTraduction(e)||estCommandeCuisine(e))return false;
   if (estLotSources(e)) {
     const owner = (await db.get('sync_state', 'user_id'))?.value ?? null;
     if (!estDeCeCompte(e, owner)) return false;

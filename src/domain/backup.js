@@ -16,6 +16,7 @@ import { canoniqueSources, empreinteSources, validerRevisionSource, validerCopie
 import { validerStockageIndex } from './index-stockage.js';
 import { preparerSourcesArchive } from './transferts-source.js';
 import { contientTraductionsExactes, estLigneTraductionReservee, validerFormesTraductionsArchive, verifierPreuvesTraductionsArchive, verifierIdentitesTraductionsArchive, preparerTraductionsArchive } from './traductions-archive.js';
+import { contientCuisineExacte, estLigneCuisineReservee, validerFormesCuisineArchive, verifierIdentitesCuisineArchive, preparerCuisineArchive } from './cuisine-archive.js';
 
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf', 'application/epub+zip': 'epub', 'text/plain': 'txt' };
 export const extFor = (mime) => MIME_EXT[mime] || 'bin';
@@ -45,7 +46,7 @@ const porteSourcesL5 = row => record(row) && champsSourcesL5.some(k=>own(row,k))
 const exigeArchive4 = (stores,version) => version<4 && ['source_pages','source_documents','scan_sessions','imports'].some(s=>(stores[s]||[]).some(porteSourcesL5));
 const contientSourcesExactes = stores => ['source_pages','source_documents','scan_sessions'].some(s=>(stores[s]||[]).some(porteSourcesL5));
 const restaurationsSources = new WeakMap();
-const MAGASINS_CAPTURE_SOURCES = ['source_documents','source_pages','scan_sessions','imports','book_editions','recipes','recipe_versions','recipe_translations'];
+const MAGASINS_CAPTURE_SOURCES = ['source_documents','source_pages','scan_sessions','imports','book_editions','recipes','recipe_versions','recipe_translations','cook_sessions','timer_launches'];
 async function verifierPreuvesSources(stores) {
   await verifierPreuvesTraductionsArchive(stores);
   await validerStockageIndex(stores.imports||[]);
@@ -138,6 +139,8 @@ function validateRows(stores) {
   }
   try { validerFormesTraductionsArchive(stores); }
   catch (e) { errors.push('Structure ou traduction invalide : ' + (e.code || 'forme_invalide')); }
+  try { validerFormesCuisineArchive(stores); }
+  catch (e) { errors.push('Séance ou minuteur invalide : ' + (e.code || 'forme_invalide')); }
   return errors;
 }
 
@@ -320,6 +323,7 @@ export async function inspectArchive(arrayBuffer) {
     errors.push(...validateRows(payload.stores));
     if(exigeArchive4(payload.stores,manifest.format_version))errors.push('Les révisions de source et lectures exactes exigent le format 4.');
     if(manifest.format_version<5&&contientTraductionsExactes(payload.stores))errors.push('Les groupes d’ingrédients et traductions exactes exigent le format 5.');
+    if(manifest.format_version<6&&contientCuisineExacte(payload.stores))errors.push('Les séances et minuteurs persistants exigent le format 6.');
     if (manifest.format_version === 1 && (payload.stores.recipes || []).some(r => lireCycleRecette(r).id !== null)) errors.push('Une archive de format 1 ne porte pas de cycle de corbeille.');
     if (manifest.format_version < 3 && ((payload.stores.book_editions || []).some(e => lireCycleEdition(e).id !== null) || (payload.stores.recipes || []).some(r => r.restored_from_edition != null))) errors.push('Le cycle des livres exige le format 3.');
     const hashes = new Set();
@@ -373,6 +377,7 @@ function requireInspection(inspection, mode) {
   const errors = validateRows(payload.stores);
   if(exigeArchive4(payload.stores,inspection.manifest?.format_version))errors.push('Les révisions de source et lectures exactes exigent le format 4.');
   if(inspection.manifest?.format_version<5&&contientTraductionsExactes(payload.stores))errors.push('Les groupes d’ingrédients et traductions exactes exigent le format 5.');
+  if(inspection.manifest?.format_version<6&&contientCuisineExacte(payload.stores))errors.push('Les séances et minuteurs persistants exigent le format 6.');
   if (inspection.manifest?.format_version === 1 && (payload.stores.recipes || []).some(r => lireCycleRecette(r).id !== null)) errors.push('Une archive de format 1 ne porte pas de cycle de corbeille.');
   if (inspection.manifest?.format_version < 3 && ((payload.stores.book_editions || []).some(e => lireCycleEdition(e).id !== null) || (payload.stores.recipes || []).some(r => r.restored_from_edition != null))) errors.push('Le cycle des livres exige le format 3.');
   const hashes = new Set();
@@ -420,8 +425,9 @@ export function compterFichesSynchronisees(inspection) {
 // `applyArchive` écrit par `db.putBatch` sans passer par `repo` — une archive d'avant cette vague ramenait donc des
 // fiches sales, et la fiche locale (sale) différait de la copie du serveur (que `lots.js` nettoie à l'envoi) à
 // instants ÉGAUX : le conflit perpétuel revenait par la porte de l'archive. Un `Blob` traverse intact.
-const ficheRestauree = (name, row, {sourcesExactes=false,traductionsExactes=false}={}) => {
-  if((traductionsExactes&&name==='recipe_versions')||estLigneTraductionReservee(name,row))return structuredClone(row);
+const ficheRestauree = (name, row, {sourcesExactes=false,traductionsExactes=false,cuisineExacte=false}={}) => {
+  if(estLigneCuisineReservee(name,row))return structuredClone(row);
+  if(((traductionsExactes||cuisineExacte)&&name==='recipe_versions')||(cuisineExacte&&name==='cook_history')||estLigneTraductionReservee(name,row))return structuredClone(row);
   if((sourcesExactes&&['source_pages','source_documents','scan_sessions'].includes(name))||(name==='imports'&&porteSourcesL5(row)))return structuredClone(row);
   return SYNC_STORES.includes(name)&&record(row)?nettoyerChaines(row):row;
 };
@@ -437,17 +443,17 @@ const ficheRestauree = (name, row, {sourcesExactes=false,traductionsExactes=fals
 //     un neuf — en fusion comme en remplacement. Sans cela le serveur garderait sa version (I7 : updated_at
 //     strictement supérieur gagne) et la restauration ne se verrait sur aucun autre appareil. Un remplacement ne
 //     supprime rien chez le fournisseur pour autant : ce qui n'est pas dans l'archive y reste (dit par Réglages).
-const normaliserFiche = (name, row, { horodater, sourcesExactes=false, traductionsExactes=false }) => {
-  const fiche = ficheRestauree(name, row, {sourcesExactes,traductionsExactes});
+const normaliserFiche = (name, row, { horodater, sourcesExactes=false, traductionsExactes=false, cuisineExacte=false }) => {
+  const fiche = ficheRestauree(name, row, {sourcesExactes,traductionsExactes,cuisineExacte});
   if (typeof horodater === 'function') fiche.updated_at = horodater();
   else if (!fiche.updated_at) fiche.updated_at = syncNow();
   return fiche;
 };
-function normaliserFiches(batch, { horodater, sourcesExactes=false, traductionsExactes=false }) {
+function normaliserFiches(batch, { horodater, sourcesExactes=false, traductionsExactes=false, cuisineExacte=false }) {
   for (const name of SYNC_STORES) {
     const rows = batch[name];
     if (!Array.isArray(rows)) continue;
-    for (const [i, row] of rows.entries()) if (record(row)) rows[i] = normaliserFiche(name, row, { horodater, sourcesExactes, traductionsExactes });
+    for (const [i, row] of rows.entries()) if (record(row)) rows[i] = normaliserFiche(name, row, { horodater, sourcesExactes, traductionsExactes, cuisineExacte });
   }
 }
 
@@ -564,11 +570,13 @@ export async function applyArchive(db, inspection, { mode = 'merge', horodater =
   const sourcesAvant=await db.getSnapshot(MAGASINS_CAPTURE_SOURCES);
   verifierIdentitesSources(inspection.payload.stores,sourcesAvant);
   verifierIdentitesTraductionsArchive(inspection.payload.stores,sourcesAvant);
+  verifierIdentitesCuisineArchive(inspection.payload.stores,sourcesAvant);
   let batch = structuredClone(restoredStores(inspection));
-  normaliserFiches(batch, { horodater, sourcesExactes:contientSourcesExactes(batch), traductionsExactes:contientTraductionsExactes(batch) });
+  normaliserFiches(batch, { horodater, sourcesExactes:contientSourcesExactes(batch), traductionsExactes:contientTraductionsExactes(batch), cuisineExacte:contientCuisineExacte(batch) });
   const transfert=await preparerSourcesArchive({batch,snapshot:sourcesAvant,owner_id:owner});
   const traductions=await preparerTraductionsArchive({batch:transfert.batch,snapshot:sourcesAvant,owner_id:owner});
-  batch=traductions.batch;
+  const cuisine=await preparerCuisineArchive({batch:traductions.batch,snapshot:sourcesAvant,owner_id:owner});
+  batch=cuisine.batch;
   const fusion = mode === 'merge';
   const maintenant = new Date().toISOString();
   for (const file of inspection.payload.files) {
@@ -603,13 +611,18 @@ export async function applyArchive(db, inspection, { mode = 'merge', horodater =
   } };
   const { recettes: contextes, editions } = capturerContextesInitiaux(batch, { owner_id: owner });
   const epoqueEditeur=mode==='replace'?ligneEpoqueEditeur():null;
-  await db.mutate({ puts: {...batch,...(epoqueEditeur?{sync_state:[epoqueEditeur]}:{})}, origin: 'local', archive_import: true, source_commands:[...transfert.source_commands,...traductions.source_commands], translation_commands:traductions.translation_commands, recettes: contextes, editions, conditions: { ...(conditions.length ? { files: conditions } : {}), ...liensGardes, recipes: [cycleGarde],
+  await db.mutate({ puts: {...batch,...(epoqueEditeur?{sync_state:[epoqueEditeur]}:{})}, origin: 'local', archive_import: true, source_commands:[...transfert.source_commands,...traductions.source_commands], translation_commands:traductions.translation_commands, cooking_commands:cuisine.cooking_commands, recettes: contextes, editions, conditions: { ...(conditions.length ? { files: conditions } : {}), ...liensGardes, recipes: [cycleGarde],
     sync_state: [{ key: 'user_id', fusion: courant => { if ((courant?.value ?? null) !== owner) throw new Error('Le compte a changé pendant la restauration.'); return null; } }] },
     clearStores: mode === 'replace' ? Object.keys(STORES).filter((s) => !SYNC_INTERNAL_STORES.includes(s) && s !== 'assistant_config') : [] });
   const normalisationsSources=(batch.scan_sessions||[]).filter(s=>s.source_state).map(s=>({id:s.id,source_state:structuredClone(s.source_state),source_receipts:structuredClone(s.source_receipts||[])}));
   const normalisationsTraductions=(batch.recipe_translations||[]).filter(t=>t.alignment_format===2).map(t=>({id:t.id,revision:t.revision,publication_receipts:structuredClone(t.publication_receipts),publication_receipt_floor:t.publication_receipt_floor}));
-  restaurationsSources.set(inspection,{db,normalisationsSources,normalisationsTraductions});
-  return { ...Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length])), files: conditions.length, originauxConserves, normalisationsSources, normalisationsTraductions };
+  // Seuls les jetons et reçus dérivés sont normalisés. Ne pas mémoriser toute la progression :
+  // sa comparaison doit encore détecter une étape cochée ou une ancre modifiée après le commit.
+  const normalisationsCuisine=['cook_sessions','timer_launches'].flatMap(store=>(batch[store]||[]).filter(row=>estLigneCuisineReservee(store,row)).map(row=>store==='timer_launches'
+    ?{store,id:row.id,cooking_incarnation:row.cooking_incarnation,cooking_revision:row.cooking_revision,cooking_receipts:structuredClone(row.cooking_receipts),cooking_receipt_floor:row.cooking_receipt_floor}
+    :{store,id:row.id,cooking_state:structuredClone(row.cooking_state),progress_revisions:Object.fromEntries(Object.entries(row.progress.by_version).map(([id,p])=>[id,p.revision]))}));
+  restaurationsSources.set(inspection,{db,normalisationsSources,normalisationsTraductions,normalisationsCuisine});
+  return { ...Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length])), files: conditions.length, originauxConserves, normalisationsSources, normalisationsTraductions, normalisationsCuisine };
 }
 
 // Comparaison JSON indépendante de l’ordre des propriétés, sensible à l’ordre des tableaux.
@@ -631,7 +644,7 @@ function canonicalSansHeure(value) {
 // `horodate` : la restauration a réhorodaté les magasins synchronisés (compte connecté, cf. applyArchive).
 // La SEULE différence tolérée est alors l’heure de modification, et seulement sur un magasin synchronisé — sans
 // cette tolérance, chaque restauration d’un compte connecté serait annoncée comme une restauration en écart.
-export async function verifyRestored(db, inspection, { mode = 'merge', horodate = false, normalisationsSources = null, normalisationsTraductions = null } = {}) {
+export async function verifyRestored(db, inspection, { mode = 'merge', horodate = false, normalisationsSources = null, normalisationsTraductions = null, normalisationsCuisine = null } = {}) {
   requireInspection(inspection, mode);
   const synchronises = new Set(SYNC_STORES);
   const diffs = [];
@@ -639,9 +652,11 @@ export async function verifyRestored(db, inspection, { mode = 'merge', horodate 
   const expected = restoredStores(inspection);
   const sourcesExactes=contientSourcesExactes(expected);
   const traductionsExactes=contientTraductionsExactes(expected);
+  const cuisineExacte=contientCuisineExacte(expected);
   const preuve=restaurationsSources.get(inspection);
   const normalisations=normalisationsSources||(preuve?.db===db?preuve.normalisationsSources:[]);
   const traductions=normalisationsTraductions||(preuve?.db===db?preuve.normalisationsTraductions:[])||[];
+  const cuisine=normalisationsCuisine||(preuve?.db===db?preuve.normalisationsCuisine:[])||[];
   const currentStores = Object.fromEntries(DATA_STORES.map((name) => [name, snapshot[name]]));
   diffs.push(...validateRows(currentStores));
   for (const name of DATA_STORES) {
@@ -653,7 +668,15 @@ export async function verifyRestored(db, inspection, { mode = 'merge', horodate 
       // R61 : la fiche attendue est celle que la restauration a PROMIS d'écrire — nettoyée pour un magasin
       // synchronisé. Comparer la fiche brute de l'archive annoncerait un écart pour chaque caractère de contrôle
       // délibérément retiré, et toute restauration d'une vieille archive finirait en rouge.
-      const row = ficheRestauree(name, brute, {sourcesExactes,traductionsExactes});
+      const row = ficheRestauree(name, brute, {sourcesExactes,traductionsExactes,cuisineExacte});
+      if(estLigneCuisineReservee(name,row)){
+        const n=cuisine.find(x=>x.store===name&&x.id===row.id);
+        if(n&&name==='timer_launches')for(const k of ['cooking_incarnation','cooking_revision','cooking_receipts','cooking_receipt_floor'])row[k]=structuredClone(n[k]);
+        if(n&&name==='cook_sessions'){
+          row.cooking_state=structuredClone(n.cooking_state);
+          for(const [id,revision]of Object.entries(n.progress_revisions))if(row.progress.by_version[id])row.progress.by_version[id].revision=revision;
+        }
+      }
       if(name==='recipe_translations'&&row.alignment_format===2){const n=traductions.find(t=>t.id===row.id);if(n){row.revision=n.revision;row.publication_receipts=structuredClone(n.publication_receipts);row.publication_receipt_floor=n.publication_receipt_floor;}}
       if(name==='scan_sessions'&&row.source_state) {
         const normalisation=normalisations.find(s=>s.id===row.id);

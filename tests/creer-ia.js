@@ -8,7 +8,7 @@ import { EN } from '../src/i18n/en.js';
 export async function runCreerIaTests({ eq, ok }) {
   const C = await import('../src/domain/creation-ia.js');
   buildIngredientIndex(INGREDIENTS); // l'index des lignes est global (lines.js:6) : la suite le pose elle-même (F10)
-  eq(APP_VERSION, '0.28.0', 'T1 : APP_VERSION 0.28.0 (lot UI-1)');
+  eq(APP_VERSION, '0.29.0', 'T1 : APP_VERSION 0.29.0 (lot UI-1)');
 
   // --- estCreationIA (C-2, F6)
   const synth = { kind: 'synthesis', provenance: { generated_by: 'ai', creation: { demande: 'x' } } };
@@ -393,7 +393,7 @@ export async function runCreerIaTests({ eq, ok }) {
     const { assessVersion, assessMeal } = await import('../src/domain/diet.js');
     const { buildShoppingList } = await import('../src/domain/grocery.js');
     const { ingredientLineEl } = await import('../src/ui/components.js');
-    const { renderCook } = await import('../src/ui/cook.js');
+    const { renderCookFixture: renderCook } = await import('./cuisine-fixture.js');
     const { parseQuery, buildDocs, searchDocs } = await import('../src/domain/search.js');
     const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
     const ING_BY_ID = new Map(INGREDIENTS.map((i) => [i.id, i]));
@@ -1258,7 +1258,7 @@ export async function runCreerIaTests({ eq, ok }) {
     const K = await import('../src/ui/components.js');
     const { libelleSource } = await import('../src/core/lien.js');
     const { renderRecipe } = await import('../src/ui/recipe.js');
-    const { renderCook } = await import('../src/ui/cook.js');
+    const { renderCookFixture: renderCook } = await import('./cuisine-fixture.js');
     const { renderMeal } = await import('../src/ui/meals.js');
     const { renderLibrary } = await import('../src/ui/library.js');
     const X = await import('../src/domain/exporters.js');
@@ -1406,14 +1406,14 @@ export async function runCreerIaTests({ eq, ok }) {
       const cuisine = await renderCook({ id: `cs_${creation.id}` }, {}, ctxCuisine([session(creation.id, fiche.id)], [fiche], [creation]));
       const tete = cuisine.querySelector('[data-role="cuisine-ia"]');
       eq([texte(tete?.querySelector('[data-role="etiquette-ia"]')), texte(tete?.querySelector('.status'))], ['Créée avec l’IA · non testée', AVERT], 'cuisine : l’étiquette C-2 et l’avertissement C-9 en tête');
-      ok(apres(cuisine.querySelector('h1'), tete) && apres(tete, cuisine.querySelector('.cook')), 'cuisine : après la rangée du titre, avant l’étape (P16 : cook.js n’a pas de pageHeader)');
+      ok(apres(cuisine.querySelector('h1'), tete) && apres(tete, cuisine.querySelector('.cuisine-contenu')), 'cuisine : après la rangée du titre, avant l’étape (P16 : cook.js n’a pas de pageHeader)');
       const cuisineL = await renderCook({ id: `cs_${extractionIA.id}` }, {}, ctxCuisine([session(extractionIA.id, ficheLivre.id)], [ficheLivre], [extractionIA]));
       eq([cuisineL.querySelector('[data-role="cuisine-ia"]') === null, cuisineL.textContent.includes('IA')], [true, false], 'cuisine : une extraction IA de livre n’a ni étiquette ni avertissement');
       const cuisineC = await renderCook({ id: `cs_${correction.id}` }, {}, ctxCuisine([session(correction.id, fiche.id)], [ficheCorrigee], [correction]));
       eq([textes(cuisineC, '[data-role="cuisine-ia"] [data-role="etiquette-ia"]'), cuisineC.querySelector('[data-role="cuisine-ia"] .status') === null, cuisineC.textContent.includes(AVERT)], [['Corrigée par toi — d’après une création IA'], true, false], 'cuisine (R-CRE-10) : une correction d’une fiche IA dit sa lignée en tête, sans l’avertissement C-9 (réservé à estCreationIA)');
       const duo = { ...session(creation.id, fiche.id), id: 'cs_t6_duo', selected_version_ids: [extractionIA.id, creation.id] };
       const cuisineDuo = await renderCook({ id: 'cs_t6_duo' }, {}, ctxCuisine([duo], [fiche, ficheLivre], [creation, extractionIA]));
-      eq([texte(cuisineDuo.querySelector('[data-role="cuisine-ia"] .row')), textes(cuisineDuo, '[data-role="cuisine-ia"] .status').length], ['Saumon au fenouil · Créée avec l’IA · non testée', 1], 'cuisine, repas de deux recettes : seule la création est étiquetée, nommée par son titre ; un seul avertissement');
+      eq([texte(cuisineDuo.querySelector('[data-role="cuisine-ia"] > span')), textes(cuisineDuo, '[data-role="cuisine-ia"] .status').length], ['Saumon au fenouil · Créée avec l’IA · non testée', 1], 'cuisine, repas de deux recettes : seule la création est étiquetée, nommée par son titre ; un seul avertissement');
 
       // --- M3 : rendu ANGLAIS de la fiche et du mode cuisine — chaque texte C-2 / C-9 / § 3.3 passe par t() au rendu
       setUiLocale('en');

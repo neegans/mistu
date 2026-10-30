@@ -30,7 +30,7 @@ async function transformer(archive,changer){
 }
 export async function runL6ArchivesTests({eq,ok}) {
  let archive,source;await withDatabase(async db=>{source=await fixture(db);archive=await createArchive(db);});
- eq(archive.manifest.format_version,5,'L6 archive : format5 protège les champs réservés');
+ eq(archive.manifest.format_version,6,'L6 / L7 archive : format6 protège les champs réservés');
  const inspection=await inspectArchive(await archive.blob.arrayBuffer());ok(inspection.ok,'L6 archive : historique de langue et titre accepté sans réinterprétation');
  eq(inspection.payload.stores.recipe_translations[0],source.translation,'L6 archive : texte, empreintes et reçus historiques exacts');
  ok(!Object.hasOwn(inspection.payload.stores,'sync_state'),'L6 archive : réponses brutes et brouillons internes absents');

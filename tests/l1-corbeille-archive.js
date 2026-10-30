@@ -10,7 +10,7 @@ export async function runL1CorbeilleArchiveTests({ eq, ok }) {
   await withDatabase(async db => {
     await db.putBatch({ recipes: [recette('trash-1', '2026-10-29T12:00:00.000Z')], recipe_versions: [version] });
     archive = await createArchive(db);
-    eq(archive.manifest.format_version, 5, 'L1 archive : format courant protège aussi les cycles des livres');
+    eq(archive.manifest.format_version, 6, 'L1 archive : format courant protège aussi les cycles des livres');
     await db.putBatch({ recipes: [recette()] }); ancienne = await createArchive(db);
   });
   const inspection = await inspectArchive(await archive.blob.arrayBuffer());

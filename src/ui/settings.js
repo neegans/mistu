@@ -9,6 +9,7 @@ import * as repo from '../model/repo.js';
 import { logError } from '../core/log.js';
 import { reprendreEnvoi, retirerEnvoi, fileDe } from '../sync/outbox.js';
 import { estCommandeTraduction, estPhaseJournalTraduction } from '../sync/commandes-traduction.js';
+import { estCommandeCuisine } from '../sync/commandes-cuisine.js';
 import { garderIci, garderAilleurs, ignorerRenvoye, abandonnerConflitCycle } from '../sync/conflits.js';
 import { retirerMarqueur } from '../sync/backfill.js';
 import { referencesFichiers, nomFichier, lireErreursFichiers, MAGASINS_FICHIERS } from '../sync/fichiers.js';
@@ -62,7 +63,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
   // plus bas : ce qu'elles protègent, c'est tout ce qui attend encore sur cet appareil, à qui qu'il appartienne.
   const file = await fileDe(repo.db, sync.user?.id || null);
   const quarantaine = file.filter((e) => e.quarantined_at);
-  const conflits = await repo.db.getAll('sync_conflicts');
+  const conflits = (await repo.db.getAll('sync_conflicts')).filter(c=>c.kind!=='cooking'||c.user_id===(ctx.proprietaireDonnees??null)&&(!c.resolution||c.recovery));
   // Le moteur est posé par le démarrage (L3, tâche 9) : tant qu'il n'est pas là, rien de L3 n'est affiché.
   const moteur = getSyncState().moteur || null;
   suivreMoteurDeLaPage(moteur);
@@ -74,7 +75,8 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
   // Vague finale (chef d'orchestre, I-G8) : une ligne files en quarantaine ou en conflit est nommée comme une erreur de fichier (nomFichier), jamais
   // par son empreinte — le snapshot est donc lu aussi dans ces deux cas, rares.
   const ligneFiles = (e) => e?.store === 'files';
-  const snapshotFichiers = fichiersErreurs.length || quarantaine.some(ligneFiles) || conflits.some(ligneFiles) ? await repo.db.getSnapshot(MAGASINS_FICHIERS) : null;
+  let snapshotFichiers = fichiersErreurs.length || quarantaine.some(ligneFiles) || conflits.some(ligneFiles) ? await repo.db.getSnapshot(MAGASINS_FICHIERS) : null;
+  if(conflits.some(c=>c.kind==='cooking')||quarantaine.some(estCommandeCuisine))snapshotFichiers={...(snapshotFichiers||{}),timer_launches:await repo.db.getAll('timer_launches')};
   root.append(syncSection({
     available: !!auth?.available,
     reason: auth ? auth.reason : 'config',
@@ -829,16 +831,21 @@ export function syncSectionL3(model, gestes = {}) {
       noeuds.push(el('div', { class: 'status warn', dataset: { quarantaine: String(q.seq) } },
         el('p', null, `${q.libelle} — ${q.motif}`),
         rangee(bouton('reessayer', t('Réessayer'), q.seq), q.protegee ? null : bouton('abandonner', t('Abandonner cet envoi'), q.seq, 'btn danger')),
-        ...(q.protegee ? [el('p',null,t('Cet envoi reste conservé. Consulte la recette pour reprendre les changements.')),q.recipeId ? el('a',{class:'btn',href:`#/recipes/${encodeURIComponent(q.recipeId)}`},t('Consulter la recette')) : null] : [])));
+        ...(q.protegee ? [el('p',null,q.cuisine?t('Cet envoi de cuisine reste conservé. Revois les copies depuis la séance.'):t('Cet envoi reste conservé. Consulte la recette pour reprendre les changements.')),q.cuisine&&q.sessionId?el('a',{class:'btn',href:`#/cook/${encodeURIComponent(q.sessionId)}`},t('Comparer les copies de cuisine')):q.recipeId ? el('a',{class:'btn',href:`#/recipes/${encodeURIComponent(q.recipeId)}`},t('Consulter la recette')) : null] : [])));
     }
   }
   const conflits = model.conflits || [];
   if (conflits.length) {
-    if (conflits.some(c => !['import_cloture','translation','source'].includes(c.kind))) noeuds.push(el('h3', null, t('Conflits à trancher')),
+    if (conflits.some(c => !['import_cloture','translation','source','cooking'].includes(c.kind))) noeuds.push(el('h3', null, t('Conflits à trancher')),
       el('p', { class: 'muted' }, t('Choisis celle qui compte ; rien n’est fusionné.')));
     if (conflits.some(c => c.kind === 'import_cloture')) noeuds.push(el('h3', null, t('Réponses conservées après clôture')));
-    if (conflits.some(c => ['translation','source'].includes(c.kind))) noeuds.push(el('h3',null,t('Copies à consulter')));
+    if (conflits.some(c => ['translation','source','cooking'].includes(c.kind))) noeuds.push(el('h3',null,t('Copies à consulter')));
     for (const c of conflits) {
+      if(c.kind==='cooking'){
+        noeuds.push(el('div',{class:'status warn stack',dataset:{conflit:String(c.id)}},el('p',null,c.resolue?t('La copie locale de cuisine reste récupérable sur cet appareil.'):t('Une modification de cette séance n’a pas été acceptée. Revois les copies avant de continuer.')),
+          el('details',null,el('summary',null,t('Consulter la copie conservée')),el('pre',{style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'22rem',overflow:'auto'}},c.copieLocale)),
+          c.sessionId?el('a',{class:'btn',href:`#/cook/${encodeURIComponent(c.sessionId)}`},t('Comparer les copies de cuisine')):null));continue;
+      }
       if (['translation','source'].includes(c.kind)) {
         noeuds.push(el('div',{class:'status warn stack',dataset:{conflit:String(c.id)}},
           el('p',null,t('Cette modification n’a pas été acceptée. Ta copie reste consultable ici. Reprends les changements depuis le contenu concerné.')),
@@ -1108,6 +1115,7 @@ export function syncSectionModel({ available = false, reason = null, user = null
       libelle: e.store === 'files' && snapshot ? tronquer(nomFichier(e.id, snapshot), NOM_MAX) : `${e.store} · ${tronquer(e.id, CLE_MAX)}`,
       motif: motifEnvoi(e.last_error),
       ...(estCommandeTraduction(e)||estPhaseJournalTraduction(e) ? {protegee:true,recipeId:e.payload?.recipe_id||e.snapshot?.recipe_id||null} : {}),
+      ...(estCommandeCuisine(e)?{protegee:true,cuisine:true,sessionId:e.store==='cook_sessions'?e.id:e.payload?.change?.timer?.cook_session_id||e.payload?.change?.target?.cook_session_id||snapshot?.timer_launches?.find(r=>r.id===e.id)?.cook_session_id||null}:{}),
     })),
     conflits: aTrancher.map((c) => {
       const nom = c.local?.title || c.local?.name || null;
@@ -1117,6 +1125,7 @@ export function syncSectionModel({ available = false, reason = null, user = null
         dateIci: formatDate(c.local?.updated_at || c.at, { withTime: true }),
         dateAilleurs: formatDate(c.server?.updated_at || c.at, { withTime: true }),
         kind: c.kind,
+        ...(c.kind==='cooking'?{copieLocale:JSON.stringify(c.recovery??c.local??{},null,2),resolue:!!c.resolution,sessionId:c.recovery?.session_id||(c.store==='cook_sessions'?c.record_id:c.local?.change?.timer?.cook_session_id||c.local?.change?.target?.cook_session_id||snapshot?.timer_launches?.find(r=>r.id===c.record_id)?.cook_session_id||c.server?.data?.cook_session_id||null)}:{}),
         ...(['translation','source'].includes(c.kind) ? {copieLocale:JSON.stringify(c.local??{},null,2),recipeId:c.local?.recipe_id||c.local?.target?.recipe_id||null,editionId:c.local?.edition_id||c.local?.target?.edition_id||null,sessionId:c.kind==='source'?(c.store==='scan_sessions'?c.local?.id||c.record_id:c.local?.scan_session_id||c.local?.target?.scan_session_id||null):null} : {}),
         ...(c.kind === 'cycle' ? {copieLocale:JSON.stringify(c.local ?? {},null,2),peutAbandonnerCycle:['recipes','book_editions'].includes(c.store),recipeId:c.store === 'recipes' ? c.record_id : c.local?.recipe_id || null,editionId:c.store === 'book_editions'?c.record_id:c.edition_id||c.local?.edition_id||null} : {}),
         ...(c.kind === 'import_cloture' ? { copieLocale: JSON.stringify(c.server?.data ?? {}, null, 2), recipeId: c.local?.recipe_id || null } : {}),

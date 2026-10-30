@@ -451,34 +451,51 @@ export function ingredientLectureEl(ligne) {
 }
 
 // Bloc minuterie (spec §33) : Siri par l'utilisateur, ou raccourci installé. Aucun compteur JS n'est présenté comme alarme.
-export function timerBlock(seconds, { seconds_max = null, onRequest = null, locale = 'fr', compact = false } = {}) {
-  const apple = isAppleTouchDevice();
+export function timerBlock(seconds, { seconds_max = null, onRequest = null, onOpen = null, onChoice = null, locale = 'fr', compact = false, apple = isAppleTouchDevice(), estCourante = () => true } = {}) {
   const min = normaliserDuree(seconds), max = seconds_max == null ? null : normaliserDuree(seconds_max);
   if (min === null || (seconds_max != null && (max === null || max < min))) return el('div', { class: 'card flat', role: 'status' }, t('Durée de minuterie invalide.'));
   const plage = max !== null && max > min;
-  let choisie = plage ? null : min, pending = false;
+  let choisie = plage ? null : min, pending = false, detruit = false, preparee = null, utilisee = false;
   const titre = el('strong');
   const phrase = el('span');
   const erreur = el('div', { role: 'status', class: 'status warn', hidden: true });
   const demander = async (channel, event) => {
-    if (choisie === null || pending) { event?.preventDefault(); return; }
+    event?.preventDefault();
+    if (choisie === null || pending || detruit || !estCourante()) return;
     const duration = choisie;
+    if (channel === 'shortcut') preparee = null;
     pending = true; erreur.hidden = true; actualiser();
-    try { await onRequest?.(channel, duration); }
-    catch { erreur.textContent = t('La demande de minuterie n’a pas été enregistrée. Réessaie.'); erreur.hidden = false; }
-    finally { pending = false; actualiser(); }
+    try {
+      if (typeof onRequest !== 'function') throw Error('conservation absente');
+      const resultat = await onRequest(channel, duration);
+      if (resultat?.issue === 'refuse' || resultat?.issue === 'echec') throw Error('conservation refusée');
+      if (detruit || !estCourante()) return;
+      if (channel === 'shortcut') { preparee = { resultat, duration }; utilisee = false; }
+    }
+    catch { if (!detruit && estCourante()) { erreur.textContent = t('La demande de minuterie n’a pas été enregistrée. Réessaie.'); erreur.hidden = false; } }
+    finally { pending = false; if (!detruit && estCourante()) actualiser(); }
   };
-  const raccourci = apple ? el('a', { class: 'btn primary', onClick: event => demander('shortcut', event) }, t('Lancer la minuterie système')) : null;
+  const preparer = apple ? el('button', { class: 'btn primary', type: 'button', onClick: event => demander('shortcut', event) }, t('Préparer Raccourcis')) : null;
+  const raccourci = apple ? el('a', { class: 'btn', hidden: true, onClick: event => {
+    if (!preparee || utilisee || pending || detruit || !estCourante()) { event.preventDefault(); return; }
+    const conservee = preparee.resultat; utilisee = true;
+    // Laisser ce vrai clic ouvrir le schéma natif. Le signalement n'est pas une preuve d'ouverture système.
+    try { Promise.resolve(onOpen?.(conservee)).catch(() => { if (!detruit && estCourante()) { erreur.textContent = t('Le clic sur Raccourcis n’a pas pu être conservé. Vérifie dans Horloge.'); erreur.hidden = false; } }); }
+    catch { erreur.textContent = t('Le clic sur Raccourcis n’a pas pu être conservé. Vérifie dans Horloge.'); erreur.hidden = false; }
+    // Retirer le lien après l'action native, jamais le relancer à la suite d'une promesse.
+    setTimeout(() => { if (!detruit) actualiser(); }, 0);
+  } }, t('Ouvrir Raccourcis')) : null;
   const siri = el('button', { class: 'btn small', type: 'button', onClick: event => demander('siri', event) }, t('J’ai demandé à Siri'));
   const choix = plage ? el('select', { 'aria-label': t('Durée à demander'), onChange: event => {
     const v = Number(event.target.value);
     choisie = event.target.value !== '' && [min, max].includes(v) ? v : null;
+    preparee = null; utilisee = false; erreur.hidden = true; onChoice?.(choisie);
     actualiser();
   } }, el('option', { value: '' }, t('Choisir une durée')),
   el('option', { value: String(min) }, t('Minimum : {d}', { d: describeDuration(min, locale) })),
   el('option', { value: String(max) }, t('Maximum : {d}', { d: describeDuration(max, locale) }))) : null;
   const box = el('div', { class: 'card flat stack', dataset: { role: 'timer-block' } },
-    el('div', { class: 'row between' }, titre, raccourci),
+    el('div', { class: 'row between' }, titre, preparer, raccourci),
     choix ? el('label', { class: 'stack' }, t('Durée à demander'), choix) : null,
     el('div', { class: 'muted', style: { fontSize: '.9rem' } }, phrase, ' ', siri), erreur,
     apple ? null : el('div', { class: 'muted', style: { fontSize: '.85rem' } }, t('Sur Mac, utilise Horloge ou Siri directement ; le raccourci s’exécute sur iPhone et iPad.')),
@@ -488,13 +505,16 @@ export function timerBlock(seconds, { seconds_max = null, onRequest = null, loca
     phrase.textContent = choisie === null ? t('Choisis la durée avant de demander la minuterie.') : `${t('Ou dis à Siri')} : « ${siriPhrase(choisie, locale)} »`;
     siri.disabled = choisie === null || pending;
     if (choix) choix.disabled = pending;
+    if (preparer) { preparer.disabled = choisie === null || pending; preparer.textContent = preparee ? t('Préparer une autre demande') : t('Préparer Raccourcis'); }
     if (raccourci) {
-      if (choisie !== null) raccourci.setAttribute('href', shortcutUrl(choisie));
+      const prete = preparee && !utilisee && preparee.duration === choisie && !pending;
+      if (prete) raccourci.setAttribute('href', shortcutUrl(preparee.duration));
       else raccourci.removeAttribute('href');
-      raccourci.setAttribute('aria-disabled', String(choisie === null || pending));
+      raccourci.hidden = !prete; raccourci.setAttribute('aria-disabled', String(!prete));
     }
   }
   actualiser();
+  box.dispose = () => { detruit = true; raccourci?.removeAttribute('href'); };
   return box;
 }
 

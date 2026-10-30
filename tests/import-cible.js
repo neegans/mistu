@@ -1571,7 +1571,7 @@ export async function runImportCibleTests({ eq, ok }) {
     const K = await import('../src/ui/components.js');
     const D = await import('../src/domain/import-cible.js');
     const { renderRecipe } = await import('../src/ui/recipe.js');
-    const { renderCook } = await import('../src/ui/cook.js');
+    const { renderCookFixture: renderCook } = await import('./cuisine-fixture.js');
     const { renderShoppingList } = await import('../src/ui/grocery.js');
     const L = await import('../src/domain/llm.js');
     const { renderRecipeEdit } = await import('../src/ui/recipe-edit.js');
@@ -1722,9 +1722,9 @@ export async function runImportCibleTests({ eq, ok }) {
         const ctxCuisine = async (sessions) => ({ ...(await ctxDe()), cook_sessions: sessions });
         const cuisine = await renderCook({ id: 'cs_e' }, {}, await ctxCuisine([session('cs_e', [extraction.id])])); scene.append(cuisine);
         const b = cuisine.querySelector('[data-role="bandeau-non-relue"]');
-        eq([texte(b), b?.classList.contains('status'), !!b && b.compareDocumentPosition(cuisine.querySelector('.cook')) === Node.DOCUMENT_POSITION_FOLLOWING], ['Lue par l’assistant, non relue', true, true], 'cuisine (D-3) : bandeau « Lue par l’assistant, non relue » pour une extraction à vérifier, avant l’étape');
+        eq([texte(b), b?.classList.contains('status'), !!b && b.compareDocumentPosition(cuisine.querySelector('.cuisine-contenu')) === Node.DOCUMENT_POSITION_FOLLOWING], ['Lue par l’assistant, non relue', true, true], 'cuisine (D-3) : bandeau « Lue par l’assistant, non relue » pour une extraction à vérifier, avant l’étape');
         const et = cuisine.querySelector('.step-big [data-role="texte-etape"]');
-        eq([et?.textContent, et?.style.whiteSpace], ['Peler les pommes.\nLes couper en quartiers.', 'pre-wrap'], 'cuisine : l’étape « a\\nb » est rendue entière (pre-wrap)');
+        eq([et?.textContent, et ? getComputedStyle(et).whiteSpace : null], ['Peler les pommes.\nLes couper en quartiers.', 'pre-wrap'], 'cuisine : l’étape « a\\nb » est rendue entière (pre-wrap)');
         const cuisineC = await renderCook({ id: 'cs_c' }, {}, await ctxCuisine([session('cs_c', ['rv_corr'])]));
         const cuisineV = await renderCook({ id: 'cs_v' }, {}, await ctxCuisine([session('cs_v', ['rv_verif'])]));
         eq([cuisineC.querySelector('[data-role="bandeau-non-relue"]'), cuisineV.querySelector('[data-role="bandeau-non-relue"]')], [null, null], 'cuisine (D-3) : bandeau absent pour une correction et après vérification');

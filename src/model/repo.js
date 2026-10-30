@@ -1,3 +1,5 @@
+import {verifierCommandeCuisine,ErreurCuisine,estLigneCuisine,egalesCuisine} from '../domain/cuisine-format.js';
+import {MAGASINS_COMPARAISON_CUISINE,snapshotComparaisonCuisine,deriverComparaisonCuisine,verifierCommandesComparaisonCuisine,egalesCopiesCuisine} from '../domain/comparaison-cuisine.js';
 import {preparerGardesVersionsStructurees} from '../domain/versions-structurees.js';
 import {estCleReponseTraduction,validerReponseLocaleTraduction,verifierQuotaReponsesTraduction} from '../domain/traductions-locales-format.js';
 import {verifierCommandeTraduction,ErreurTraduction} from '../domain/traductions-format.js';
@@ -433,8 +435,9 @@ function lireCondition(c, courant, store, key, lecture) {
 
 // Tous les chemins du dépôt passent cette garde, y compris un lot n'écrivant que des enfants.
 // Les lectures préparatoires résolvent les parents ; les associations et cycles sont revalidés dans la transaction finale.
-async function protegerMutationRecettes(puts, conditionsInitiales, recettesInitiales, { origin = 'local', deletes = {}, editions: editionsInitiales = [], source_commands = [] } = {}) {
+async function protegerMutationRecettes(puts, conditionsInitiales, recettesInitiales, { origin = 'local', deletes = {}, editions: editionsInitiales = [], source_commands = [], cooking_commands = [] } = {}) {
   const conditions = Object.fromEntries(Object.entries(conditionsInitiales || {}).map(([s, xs]) => [s, [...xs]]));
+  if(origin==='local')for(const store of ['timer_launches','cook_sessions'])for(const key of deletes[store]||[]){const avant=await db.get(store,key);if(estLigneCuisine(store,avant))throw new ErreurCuisine('cuisson_protegee');conditionUnique(conditions,store,key,ancienne=>({key,fusion:r=>{if(estLigneCuisine(store,r))throw new ErreurCuisine('cuisson_protegee');return lireCondition(ancienne,r,store,key);}}));}
   if (origin !== 'local') return { conditions, recettes: [], editions: [] };
   if (!Array.isArray(recettesInitiales)) throw new TypeError('Les contextes de recette sont un tableau');
   const base = db, owner = (await base.get('sync_state', 'user_id'))?.value ?? null;
@@ -645,6 +648,10 @@ async function protegerMutationRecettes(puts, conditionsInitiales, recettesIniti
     for (const c of [...contextes.values(), ...contextesEditions.values()]) if ((courant?.value ?? null) !== c.owner_id || (c.contexteValide && !c.contexteValide())) throw new ErreurCycleRecette('compte_change', c.recipe_id);
     return lireCondition(ancienne, courant, 'sync_state', 'user_id');
   } }));
+  for(const store of ['cook_sessions','timer_launches']){
+    const entrantes=new Map((puts[store]||[]).map(r=>[r.id,r])),touches=new Set([...entrantes.keys(),...(conditions[store]||[]).filter(c=>c.key!=null).map(c=>c.key)]);
+    for(const key of touches)if(!cooking_commands.some(c=>c.store===store&&c.id===key))conditionUnique(conditions,store,key,ancienne=>({key,fusion:(courant,lecture)=>{const fusion=lireCondition(ancienne,courant,store,key,lecture),written=fusion||entrantes.get(key);if(written&&(estLigneCuisine(store,courant)||estLigneCuisine(store,written))){const before=structuredClone(courant),after=structuredClone(written);if(before)delete before.updated_at;delete after.updated_at;if(!egalesCuisine(before,after))throw new ErreurCuisine('cuisson_protegee');}return fusion;}}));
+  }
   const structurees=await preparerGardesVersionsStructurees({puts,conditions,deletes,lire:(store,id)=>base.get(store,id),lireReferencesVersion:async id=>({traductions:(await base.getAll('recipe_translations')).filter(r=>r.recipe_version_id===id),journaux:(await base.getAll('imports')).filter(r=>r.kind==='traduction'&&r.source_version_id===id)})});
   return { conditions:structurees, recettes: [...contextes.values()].map(({ contexteValide, creation, ...c }) => c), editions: [...contextesEditions.values()].map(({ contexteValide, creation, ...c }) => c) };
 }
@@ -837,6 +844,44 @@ export async function muterTraductions({metier={},internes={},commandes=[]}={}, 
  const finales=Object.fromEntries(Object.entries(protection.conditions).map(([s,xs])=>[s,s==='sync_state'?xs:xs.map(c=>c.fusion?{...c,fusion:(...a)=>{const r=c.fusion(...a);return r?taille({...r,created_at:r.created_at||now,updated_at:now}):r;}}:c)]));
  const ecrites=await base.mutate({origin,puts:{...stamped,...(locaux.length?{sync_state:locaux}:{})},deletes:{sync_state:deletes},conditions:finales,recettes:protection.recettes,editions:protection.editions,translation_commands:cmds});verifier();
  for(const s of new Set([...Object.keys(stamped),...Object.keys(ecrites||{})]))if(s!=='sync_state')emit('change',{store:s});return{metier:ecrites,internes:[...locaux,...(ecrites?.sync_state||[])]};
+}
+
+// L7 : cuisson, photos et actes conservés dans la même transaction.
+export async function muterCuisine({metier={},internes={},fichiers=[],commandes=[]}={}, {baseAttendue,contexteValide}={}){
+ const base=db,verifier=()=>{if(base!==baseAttendue||base!==db||typeof contexteValide!=='function'||!contexteValide())throw new ErreurCuisine('contexte_change');};verifier();
+ const fail=()=>{throw new ErreurCuisine('forme_invalide');};if(Object.keys(metier).some(k=>!['puts','conditions','recettes','editions'].includes(k))||Object.keys(internes).some(k=>k!=='conditions'))fail();
+ const cmds=structuredClone(commandes);for(const c of cmds)await verifierCommandeCuisine(c);verifier();
+ const batch=structuredClone(metier.puts||{}),conditions=Object.fromEntries(Object.entries(metier.conditions||{}).map(([s,cs])=>[s,[...cs]]));
+ if(Object.keys(batch).some(s=>!['cook_sessions','timer_launches','cook_history'].includes(s))||Object.keys(conditions).some(s=>!['recipes','recipe_versions','book_editions','cook_sessions','timer_launches','cook_history','files'].includes(s)))fail();
+ for(const [store,list]of Object.entries(conditions)){const merged=new Map(),others=[];for(const c of list){if(c.key==null){others.push(c);continue;}const previous=merged.get(c.key);if(!previous){merged.set(c.key,c);continue;}merged.set(c.key,{key:c.key,fusion:(r,l)=>{const a=lireCondition(previous,r,store,c.key,l),b=lireCondition(c,r,store,c.key,l);if(a&&b&&!egalesCuisine(a,b))fail();return b||a;}});}conditions[store]=[...merged.values(),...others];}
+ conditions.sync_state=(internes.conditions||[]).map(c=>{if(!['user_id','editor_library_epoch:v1'].includes(c.key)||typeof c.fusion!=='function')fail();return{key:c.key,fusion:r=>{verifier();if(c.fusion(r)!=null)fail();return null;}};});
+ const now=syncNow(),taille=r=>{if(octetsJsonbSources(r)>524288)throw new ErreurCuisine('bornes');return r;};
+ const stamped=Object.fromEntries(Object.entries(batch).map(([s,rs])=>[s,rs.map(r=>taille({...r,created_at:r.created_at||now,updated_at:now}))]));
+ // Les états déclaratifs de Raccourcis/Siri restent documentaires, même si la source a disparu.
+ const handoffs=new Set(cmds.filter(c=>c.store==='timer_launches'&&c.action==='handoff').map(c=>c.id)),declarations=(conditions.timer_launches||[]).filter(c=>handoffs.has(c.key));
+ if(declarations.length){conditions.timer_launches=(conditions.timer_launches||[]).filter(c=>!handoffs.has(c.key));if((stamped.timer_launches||[]).some(r=>handoffs.has(r.id)))fail();}
+ const protection=await protegerMutationRecettes(stamped,conditions,metier.recettes||[],{origin:'local',editions:metier.editions||[],cooking_commands:cmds});verifier();if(declarations.length)protection.conditions.timer_launches=[...(protection.conditions.timer_launches||[]),...declarations];conditionsFichiers(fichiers,protection.conditions,now);
+ const finales=Object.fromEntries(Object.entries(protection.conditions).map(([s,xs])=>[s,xs.map(c=>c.fusion?{...c,fusion:(...args)=>{verifier();const row=c.fusion(...args);if(!row)return null;if(!['cook_sessions','timer_launches','cook_history','files'].includes(s))fail();return s==='files'?row:taille({...row,created_at:row.created_at||now,updated_at:now});}}:c)]));
+ const ecrites=await base.mutate({origin:'local',puts:stamped,conditions:finales,recettes:protection.recettes,editions:protection.editions,cooking_commands:puts=>cmds.filter(c=>(puts[c.store]||[]).some(r=>r.id===c.id))});verifier();
+ for(const s of new Set([...Object.keys(stamped),...Object.keys(ecrites||{})]))emit('change',{store:s});return{metier:ecrites};
+}
+
+// Porte fermée L7 : seuls les overlays explicitement comparés passent dans la récupération locale.
+export async function reconcilierCuisine({cible,snapshot,owner_id,library_epoch,recovery_id,at}={}, {baseAttendue,contexteValide}={}){
+ const base=db,verifier=()=>{if(base!==db||base!==baseAttendue||typeof contexteValide!=='function'||!contexteValide())throw new ErreurCuisine('contexte_change');};verifier();
+ if(typeof recovery_id!=='string'||!/^cooking-recovery[_-][A-Za-z0-9_-]{1,160}$/.test(recovery_id)||!Number.isFinite(Date.parse(at)))throw new ErreurCuisine('forme_invalide');
+ const avant=snapshotComparaisonCuisine(structuredClone(snapshot)),derive=deriverComparaisonCuisine({snapshot:avant,cible,owner_id});
+ await verifierCommandesComparaisonCuisine(derive);verifier();
+ const state=new Map(avant.sync_state.map(r=>[r.key,r]));if((state.get('user_id')?.value??null)!==owner_id)throw new ErreurCuisine('compte_change');if(state.get('editor_library_epoch:v1')?.value!==library_epoch)throw new ErreurCuisine('bibliotheque_remplacee');
+ if(avant.sync_conflicts.some(r=>r.id===recovery_id))throw new ErreurCuisine('comparaison_changee');
+ const resolution={choix:'confirmation',at,recovery_id},recovery={id:recovery_id,kind:'cooking',store:cible.store,record_id:cible.id,user_id:owner_id,at,resolution,
+  recovery:{format:1,session_id:derive.session_id,lignes:derive.cibles.filter(c=>c.locale).map(c=>({store:c.store,id:c.id,data:structuredClone(c.locale),...(c.lectureLocale?{lecture:structuredClone(c.lectureLocale)}:{})})),commandes:structuredClone(derive.commandes),confirmations:derive.cibles.map(c=>({store:c.store,id:c.id,ligne:structuredClone(c.confirmation)})),conflits:structuredClone(derive.conflits)}};
+ const puts={sync_conflicts:[...derive.conflits.map(c=>({...c,resolution})),recovery]},deletes={outbox:derive.commandes.map(c=>c.seq)};
+ for(const c of derive.cibles){if(c.confirmee)(puts[c.store]??=[]).push(structuredClone(c.confirmee));else if(c.locale)(deletes[c.store]??=[]).push(c.id);}
+ const conditions=Object.fromEntries(MAGASINS_COMPARAISON_CUISINE.map(store=>[store,[{toutes:true,verifier:rows=>{verifier();const actuelle=store==='sync_state'?snapshotComparaisonCuisine({sync_state:rows}).sync_state:rows;if(!egalesCopiesCuisine(actuelle,avant[store]))throw new ErreurCuisine('comparaison_changee');}}]]));
+ await base.mutate({origin:'remote',puts,deletes,conditions});
+ for(const store of new Set([...Object.keys(puts),...Object.keys(deletes)]))emit('change',{store});
+ return{recovery_id,cibles:derive.cibles.map(c=>({store:c.store,id:c.id,confirmee:!!c.confirmee})),session_id:derive.session_id};
 }
 
 // Porte L5 : commandes immuables, fichiers et intention interne partagent le commit.

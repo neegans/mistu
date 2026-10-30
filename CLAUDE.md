@@ -3726,3 +3726,11 @@ Publication autorisée, en préparation à ce reçu ; version publique encore0.2
 
 
 **L6 publié et reçu le30octobre.** SQL0011 une fois à04:16:09UTC ;48 corps/droits clients et3 triggers conformes, capacité recipe_language1. Différences service_role expliquées par ACL Supabase, aucun héritage client ; aucune donnée métier distante consultée. Code87855c4 poussé main, Pages construit04:17:27UTC.96 fichiers publics exacts, suite10161/10161, zéro erreur JS/externe. Parcours publics lecture15/28 et éditeur7/20, cache unique0.28.0-1 avec12 modules nouveaux et rechargement hors ligne. L7–L10/E1 restent à réaliser.
+
+
+## L7 — Cuisine et minuteries — réception locale du 30 octobre 2026
+
+[Spec](docs/superpowers/specs/2026-10-29-l7-cuisine-minuteurs-design.md), [protocole](docs/superpowers/specs/2026-10-30-l7-protocole-cuisine.md), [rapport](docs/superpowers/plans/2026-10-29-l7-cuisine-minuteurs.md).
+0.29.0/cache0.29.0-1, DB6/archive6, migration0012 additive. Deux régions ingrédients/étape, version active exacte, progrès qualifié et bilan atomique local ; minuteurs persistants, voix/langue, Wake Lock explicite, comparaison et récupération conservées. Demandes Siri/Raccourcis distinctes du suivi indicatif, aucun départ système inventé.
+**10653/10653** navigateur (épingle10652, +492 sans retrait), Node232/232, générateur0, syntaxe86/diff propres. PostgreSQL neuf0001→0012 :107 vecteurs,14 refus/7 legacy,18 anciens RPC,41 publication,7 limites SQL+6JS,152ACL ; régressions L5 327 et L6 212+4JS. Concurrence27 contrôles ; deux moteurs31/14RPC, ACK perdu/rejeu, archive/bootstrap/autre appareil, aucune perte des quantités signées.
+Chrome8 mesures/36 gestes, deux onglets sans remontage, cache unique et11 modules, notes/photo décodée après rechargement réellement hors ligne. Mesure1000 minuteurs et10000 projections sans écriture. Aucune donnée privée ou appel assistant réel ; pas d’essai physique iPhone/Safari/TM7 ni alarme système. Publication autorisée en préparation ; public encore0.28.0 à ce reçu. L8–L10/E1 restent à terminer.

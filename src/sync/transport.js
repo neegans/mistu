@@ -36,7 +36,7 @@ export function createTransport(client) {
     async pousser(rows) {
       if (!client) return { reponse: null, erreur: SANS_CLIENT() };
       try {
-        const v2=rows.some(r=>['lifecycle','source_batch','source_revision','index_apply','source_transfer','translation_apply'].includes(r.op)||Object.hasOwn(r,'expected_cycle_id')||r.recipe_contexts||r.edition_contexts||r.archive_import);
+        const v2=rows.some(r=>['lifecycle','source_batch','source_revision','index_apply','source_transfer','translation_apply','cooking_apply'].includes(r.op)||Object.hasOwn(r,'expected_cycle_id')||r.recipe_contexts||r.edition_contexts||r.archive_import);
         const { data, error, status } = await client.rpc(v2?'sync_push_v2':'sync_push', { rows });
         if(error&&v2&&['PGRST202','42883'].includes(error.code)) return {reponse:null,erreur:{type:'incompatible',status,code:error.code,message:'Contrat de corbeille indisponible'}};
         if (error) return { reponse: null, erreur: classerErreur({ status, code: error.code, message: error.message }) };

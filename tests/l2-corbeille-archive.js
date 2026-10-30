@@ -13,7 +13,7 @@ const seed = db => db.putBatch({ books: [{ id: 'l2-book', title: 'Cuisine' }], b
 export async function runL2CorbeilleArchiveTests({ eq, ok }) {
   let archive;
   await withDatabase(async db => { await seed(db); archive = await createArchive(db); });
-  eq(archive.manifest.format_version, 5, 'L2 archive : format5 conserve les protections des cycles et annonce les révisions de sources');
+  eq(archive.manifest.format_version, 6, 'L2 archive : format6 conserve les protections des cycles et annonce les révisions de sources');
   const inspection = await inspectArchive(await archive.blob.arrayBuffer());
   ok(inspection.ok, 'L2 archive : groupe retiré et exception valides');
   await withDatabase(async db => {

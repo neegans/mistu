@@ -1,6 +1,6 @@
 # L7 — Plan de construction et réception cuisine
 
-**30 octobre 2026 — contrat technique fermé, construction à venir.** [Spec](../specs/2026-10-29-l7-cuisine-minuteurs-design.md), [protocole](../specs/2026-10-30-l7-protocole-cuisine.md), plan directeur §13 et maquettes relues. Base publique L6 code87855c4/reçu c5b6c08, 10161/10161 tests publics. Cible0.29.0/cache0.29.0-1, DB6/archive6, SQL0012 et cooking_persistence1. Aucun code, test ou essai physique L7 réalisé à cette revue ; autorisation générale de poursuivre, aucune relecture personnelle de Neegan inventée.
+**30 octobre 2026 — réception locale terminée, publication en préparation.** [Spec](../specs/2026-10-29-l7-cuisine-minuteurs-design.md), [protocole](../specs/2026-10-30-l7-protocole-cuisine.md), plan directeur §13 et maquettes relues. Base publique L6 code87855c4/reçu c5b6c08. Cible0.29.0/cache0.29.0-1, DB6/archive6, SQL0012 et cooking_persistence1. Autorisation générale de poursuivre et publier ; aucune relecture personnelle de Neegan inventée. Voir la réception constatée en fin de document ; les sections1–6 conservent le plan initial.
 
 ## 1. Avant le premier code
 
@@ -105,3 +105,24 @@ Sans ces essais, annoncer exactement les preuves Chrome obtenues et laisser ces 
 Conserver tous les scénarios anciens et leurs assertions causales ; adapter seulement les attentes réellement changées (parcours Raccourcis explicite, demande legacy sans miroir fabriqué, plan documentaire). Ciblés puis intégrés, syntaxe/diff, Node/générateur, SQL UTF8 si requis, captures et rapport. L’épingle est mesurée, jamais diminuée pour masquer un scénario interrompu.
 
 Après revue/intégration et autorisation existante : version/cache, capacité éventuelle vérifiée, Pages réellement construit, empreintes publiques identiques et parcours public. Aucun déploiement ni migration dans cette phase documentaire. Consigner les futures preuves sous `.superpowers/sdd/2026-10-30-l7/`, puis mettre STATE à jour sur faits observés. L7 et les lots suivants restent non réalisés à ce stade.
+
+
+## 7. Réception locale du 30 octobre 2026
+
+Cuisine à deux régions selon la largeur disponible, version active exacte et portions inconnues conservées. Progression qualifiée par version, choix de traduction explicite, dernier geste enregistré avec le bilan. Le panneau des minuteurs reste monté lors des changements d’étape/recette et des notifications entre onglets. Échéances conservées, demandes Siri/Raccourcis séparées du suivi indicatif, voix dans la langue réellement affichée, écran allumé uniquement sur demande révocable.
+
+Comparaison explicite de chaque copie et de ses dépendances, récupération intégrale des états locaux, aucun abandon générique ni effacement des notes/photos. Les lectures historiques avec propriétés undefined restent comparables sans affaiblir les commandes signées. Restore/bootstrap réservent de nouveaux jetons et conservent les dates, le texte source et les quantités associées aux bilans.
+
+Tests navigateur : **10653/10653**, épingle10652, +492 depuis L6, zéro erreur JavaScript/requête extérieure. Aucun scénario antérieur retiré : fixtures adaptées à la lecture réelle IndexedDB, structure DOM approuvée et format archive6. Node232/232, générateur0, syntaxe86 fichiers et diff propres. Onze modules nouveaux inclus au cache.
+
+PostgreSQL UTF8 neuf0001→0012 :107 vecteurs JS/SQL,14 refus causaux et7 écritures legacy/écho,18 contrôles d’anciens RPC/alias,41 contrôles de publication,7 limites SQL et6 limites JS,152 contrôles ACL et vraie écriture authenticated. Régressions L5 :327 contrôles ; L6 :212 contrôles et4 limites JS. Deux connexions réelles :27 contrôles de verrou/CAS, ancre et signalement concurrents, progrès disjoints, restauration invalidant anciens gestes.
+
+Deux moteurs avec PostgreSQL :31 contrôles,14 RPC, confirmation perdue puis rejeu réel, départ explicite sur l’autre appareil, bilan avant clôture, archive6/bootstrap/second appareil ; zéro rejet, erreur JavaScript ou requête extérieure. Données synthétiques et propriétaires jetables nettoyés.
+
+Parcours Chrome sur la vraie application :8 mesures et36 gestes à320/390/768/900/1280px et texte200 %, cibles44px, ingrédients réellement ouverts, deux onglets sans remontage, échéance inchangée après rechargement hors ligne, note conservée et image réellement ouverte/décodée. Cache unique0.29.0-1 et11 modules vérifiés hors ligne. Captures relues. Mesure synthétique :1000 suivis lus en223,6ms,10000 projections en2068,3ms et zéro écriture ; ces mesures locales ne prédisent pas les performances d’un téléphone.
+
+Les reproductions ont notamment fermé l’effacement des marqueurs par un vieux put, le changement de version source avant un geste, les dates techniques SQL injectées dans les données canoniques, l’ordre circulaire bilan/clôture, le nettoyage de texte signé à l’envoi/restauration, la boucle ResizeObserver et les boutons de36px.
+
+Migration0012 additive seulement ;0001–0011 inchangées. Transaction de livraison répétée sur base neuve, deuxième passage refusé avant mutation. SHA256 : `daa0767e323514b9d344494838f71b732e5ae8aeecf3dd9b582e7a34f8bbc669`. Aucun SQL de production ni code public L7 appliqué à cette réception locale.
+
+Preuves sous `.superpowers/sdd/2026-10-30-l7/` : rapports A/B/C, suite, preuves SQL, concurrence, pipeline et parcours. Aucun appel assistant réel ni compte privé. Voix/Wake Lock simulés dans Chrome ; aucun essai physique iPhone/Safari, Siri/Horloge ou TM7. Le suivi indicatif ne prouve aucune alarme système. L8–L10 et E1 restent à terminer.

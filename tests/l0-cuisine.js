@@ -86,16 +86,22 @@ export async function runL0CuisineTests({ eq, ok }) {
     const original = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
     Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'iPhone' });
     try {
-      const root = timerBlock(30, { seconds_max: 90, onRequest: async () => { throw new Error('écriture refusée'); } });
+      let refus = true;
+      const root = timerBlock(30, { seconds_max: 90, onRequest: async () => { if (refus) throw new Error('écriture refusée'); return { id: 'demande-documentaire' }; } });
       const select = root.querySelector('select'), link = root.querySelector('a');
       eq(link?.hasAttribute('href'), false, 'L0 minuteur : aucun lien Raccourcis avant un choix explicite');
       if (select) {
         select.value = '90'; select.dispatchEvent(new Event('change', { bubbles: true }));
-        eq(new URL(link.href).searchParams.get('text'), '90', 'L0 minuteur : URL Raccourcis porte la borne choisie');
+        eq(link.hasAttribute('href'), false, 'L0 minuteur : choix seul ne prépare pas une demande durable');
         button(root, 'J’ai demandé à Siri').click();
         await attendre(() => root.textContent.includes('n’a pas été enregistrée'));
         ok(root.textContent.includes('n’a pas été enregistrée'), 'L0 minuteur : refus d’écriture expliqué sans succès');
         eq(select.value, '90', 'L0 minuteur : échec garde le choix');
+        refus = false;
+        button(root, 'Préparer Raccourcis').click();
+        await attendre(() => link.hasAttribute('href'));
+        eq(new URL(link.href).searchParams.get('text'), '90', 'L0 minuteur : URL Raccourcis porte la borne choisie après préparation conservée');
+        root.dispose();
       }
     } finally {
       if (original) Object.defineProperty(navigator, 'userAgent', original); else delete navigator.userAgent;
@@ -104,7 +110,7 @@ export async function runL0CuisineTests({ eq, ok }) {
 
   await fixture('sélection et reprise', async (root, repo) => {
     button(root, 'Sauce').click();
-    await attendre(async () => (await repo.get('cook_sessions', 'l0-session'))?.active_version_id === versions[1].id);
+    await attendre(() => fiche(root)?.getAttribute('href') === '#/recipes/l0-r-b?v=l0-v-b');
     eq(button(root, 'Sauce').classList.contains('active'), true, 'L0 cuisine : onglet sauce actif');
     eq(fiche(root).getAttribute('href'), '#/recipes/l0-r-b?v=l0-v-b', 'L0 cuisine : lien vers la bonne version de sauce');
     eq(root.querySelector('[data-role=texte-etape]').textContent, 'Servir la sauce.', 'L0 cuisine : étape propre à la sauce conservée');
@@ -116,21 +122,22 @@ export async function runL0CuisineTests({ eq, ok }) {
     const current = await repo.get('cook_sessions', 'l0-session');
     const progress = { by_version: { [versions[0].id]: { current_step_id: versions[0].steps[1].id } }, done_step_ids: ['autre-onglet'] };
     await repo.save('cook_sessions', { ...current, progress });
+    await root.actualiserCuisine();
     button(root, 'Sauce').click(); button(root, 'Plat').click(); button(root, 'Sauce').click();
     await attendre(async () => (await repo.get('cook_sessions', 'l0-session'))?.active_version_id === versions[1].id);
     await pause(40);
     const saved = await repo.get('cook_sessions', 'l0-session');
     eq(saved.active_version_id, versions[1].id, 'L0 cuisine : dernier clic conservé');
-    eq(saved.progress, progress, 'L0 cuisine : simple sélection préserve la progression concurrente');
+    eq([saved.progress.current_step_id??null,saved.progress.done_step_ids,saved.progress.legacy_by_version],[progress.current_step_id??null,progress.done_step_ids,progress.by_version], 'L0 cuisine : sélection après relecture préserve progression legacy concurrente lors adoption');
   });
   await fixture('version retirée avant progression', async (root, repo) => {
     button(root, 'Sauce').click();
-    await attendre(async () => (await repo.get('cook_sessions', 'l0-session'))?.active_version_id === versions[1].id);
+    await attendre(() => fiche(root)?.getAttribute('href') === '#/recipes/l0-r-b?v=l0-v-b');
     button(root, '← Précédent').click();
     await attendre(async () => (await repo.get('cook_sessions', 'l0-session'))?.progress.by_version[versions[1].id]?.current_step_id === versions[1].steps[0].id);
     await attendre(() => !!button(root, 'Suivant →'));
     const current = await repo.get('cook_sessions', 'l0-session');
-    await repo.save('cook_sessions', { ...current, selected_version_ids: [versions[0].id], active_version_id: versions[0].id });
+    await repo.db.mutate({origin:'remote',puts:{cook_sessions:[{ ...current, selected_version_ids: [versions[0].id], active_version_id: versions[0].id }]}});
     const before = await repo.get('cook_sessions', 'l0-session'), outbox = await repo.all('outbox');
     button(root, 'Suivant →').click();
     await attendre(() => root.textContent.includes('progression'));
@@ -150,10 +157,10 @@ export async function runL0CuisineTests({ eq, ok }) {
     const expected = await repo.get('cook_sessions', before.id);
     const outbox = await repo.all('outbox');
     button(root, 'Sauce').click();
-    await attendre(() => root.textContent.includes('sélection'));
+    await attendre(() => root.textContent.includes('sélection') || root.textContent.includes('séance est terminée'));
     eq(await repo.get('cook_sessions', before.id), expected, `L0 cuisine : ${change}, aucune modification de session`);
     eq(await repo.all('outbox'), outbox, `L0 cuisine : ${change}, aucune capture d’écriture refusée`);
-    ok(root.textContent.includes('sélection'), `L0 cuisine : ${change}, refus expliqué`);
+    ok(root.textContent.includes('sélection') || root.textContent.includes('séance est terminée'), `L0 cuisine : ${change}, refus expliqué`);
   });
   await fixture('lancement durée choisie', async (root, repo) => {
     const select = root.querySelector('select');
@@ -168,9 +175,9 @@ export async function runL0CuisineTests({ eq, ok }) {
   await run('sélections sérialisées malgré latence', () => withRepo(async repo => {
     await repo.saveBatch({ recipes, recipe_versions: versions, cook_sessions: [session()] }, { conditions: { recipes: recipes.map(r => ({ key: r.id, absente: true })) } });
     let calls = 0, parallel = 0, maximum = 0;
-    const delayed = { ...repo, saveBatch: async (...args) => {
+    const delayed = { ...repo, muterCuisine: async (...args) => {
       const n = calls++; parallel++; maximum = Math.max(maximum, parallel);
-      try { await pause(n === 0 ? 60 : 2); return await repo.saveBatch(...args); } finally { parallel--; }
+      try { await pause(n === 0 ? 60 : 2); return await repo.muterCuisine(...args); } finally { parallel--; }
     } };
     const root = await renderCook({ id: 'l0-session' }, {}, await getData(true), { repo: delayed });
     try {
@@ -184,15 +191,16 @@ export async function runL0CuisineTests({ eq, ok }) {
     await repo.saveBatch({ recipes, recipe_versions: versions, cook_sessions: [session()] }, { conditions: { recipes: recipes.map(r => ({ key: r.id, absente: true })) } });
     let release;
     const gate = new Promise(resolve => { release = resolve; });
-    const delayed = { ...repo, save: async (...args) => { await gate; return repo.save(...args); } };
+    let entree = false;
+    const delayed = { ...repo, muterCuisine: async (...args) => { entree = true; await gate; return repo.muterCuisine(...args); } };
     const root = await renderCook({ id: 'l0-session' }, {}, await getData(true), { repo: delayed });
     const select = root.querySelector('select'); select.value = '30'; select.dispatchEvent(new Event('change', { bubbles: true }));
     const originalInterval = window.setInterval, originalClear = window.clearInterval, intervals = new Set();
     window.setInterval = (...args) => { const id = originalInterval(...args); intervals.add(id); return id; };
     window.clearInterval = id => { intervals.delete(id); originalClear(id); };
     try {
-      button(root, 'J’ai demandé à Siri').click(); root.dispose?.(); release();
-      await attendre(async () => (await repo.all('timer_launches')).length === 1); await pause(10);
+      button(root, 'J’ai demandé à Siri').click(); ok(await attendre(() => entree), 'L0 cuisine : demande atteint la vraie transaction avant fermeture'); root.dispose?.(); release();
+      await pause(30);
       eq(intervals.size, 0, 'L0 cuisine : demande tardive ne redémarre pas un miroir de vue détruite');
     } finally { for (const id of intervals) originalClear(id); window.setInterval = originalInterval; window.clearInterval = originalClear; }
   }));

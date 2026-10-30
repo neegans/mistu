@@ -17,11 +17,17 @@ import { pointeurValide } from '../domain/photo-web.js';
 import { comparerCuissons, photosPersonnellesParRecette } from '../domain/cuisine-personnelle.js';
 import { empreintesPhotos, fichierPhoto, contexteFichiers } from './components.js';
 import { recipeCard, section, sectionPlain, grilleCartes, pageHeader, emptyState, availabilityBadge, provenanceText, etoiles } from './components.js';
+import { creerServiceCuisine } from '../domain/cuisine-persistance.js';
+import { projeterSuiviMinuteur } from '../domain/cuisine-format.js';
+import { getSyncGeneration } from './state.js';
 
 // `deps.repo` : le sac injecté des routes (la suite y compte la passe getFiles) ; l'app ne passe rien (route('/', renderHome) : trois arguments) et le
 // module sert. T5 ronde 1 : Redécouvrir écrit par ce MÊME sac (rediscoverCard), jamais par le module en dehors de lui.
-export async function renderHome(params, query, ctx, { repo: depot = repo } = {}) {
+export async function renderHome(params, query, ctx, { repo: depot = repo, service: serviceInjecte, maintenant = () => Date.now() } = {}) {
   const root = el('div', null);
+  let dispose = false; const generation = getSyncGeneration(), base = depot.db;
+  const estCourante = () => !dispose && getSyncGeneration() === generation && depot.db === base;
+  root.dispose = () => { dispose = true; };
   const input = el('input', { type: 'search', placeholder: t('Qu’est-ce qu’on cuisine ?'), 'aria-label': t('Recherche'), enterkeyhint: 'search' });
   const go = () => { if (input.value.trim()) navigate('/search' + buildQuery({ q: input.value.trim(), mode: 'all' })); else navigate('/search'); };
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
@@ -33,16 +39,27 @@ export async function renderHome(params, query, ctx, { repo: depot = repo } = {}
 
   // Reprendre ma recette
   const active = ctx.cook_sessions.filter((s) => s.status === 'active').sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
-  if (active.length) {
-    root.append(sectionPlain(t('Reprendre ma recette'), ...active.slice(0, 3).map((s) => {
-      const doc = ctx.docsByRecipe.get(s.recipe_id);
-      const total = s.progress?.total_steps || doc?.version?.steps?.length || 0;
-      const done = s.progress?.done_step_ids?.length || 0;
-      return el('a', { class: 'item-link card flat', href: `#/cook/${s.id}` },
-        el('div', { class: 'row between' }, el('strong', null, doc?.recipe.display_title || doc?.recipe.original_title || t('Recette')), el('span', { class: 'muted' }, t('{d}/{n} étapes', { d: done, n: total }))),
-        el('div', { class: 'progress', style: { marginTop: '.4rem' } }, el('div', { style: { width: total ? `${Math.round(done / total * 100)}%` : '0%' } })));
-    })));
+  const suivis = new Set(); let lectureSuivisImpossible = false;
+  try { for (const timer of await depot.all('timer_launches')) if (timer.cook_session_id && projeterSuiviMinuteur(timer, maintenant()).etat === 'en_cours') suivis.add(timer.cook_session_id); }
+  catch { lectureSuivisImpossible = true; }
+  const reprises = [...new Map([...active.slice(0, 3), ...ctx.cook_sessions.filter(s => suivis.has(s.id))].map(s => [s.id, s])).values()];
+  if (reprises.length) {
+    const service = serviceInjecte ?? creerServiceCuisine({ repo: depot, getGeneration: getSyncGeneration });
+    const capture = await service.capturerPortee({ owner_id: ctx.proprietaireDonnees ?? null, estCourante });
+    const cartes = await Promise.all(reprises.map(async s => {
+      const lecture = capture.issue === 'ok' ? await service.lireSession({ portee: capture.portee, sessionId: s.id }) : null;
+      const p = lecture?.issue === 'ok' ? lecture.projection : null;
+      const entree = lecture?.affiche?.versions.find(v => v.version_id === p?.active_version_id);
+      const recipe = entree?.recipe;
+      const total = p?.total_steps ?? null, done = p?.done_count ?? 0;
+      return el('a', { class: 'item-link card flat', href: `#/cook/${encodeURIComponent(s.id)}` },
+        el('div', { class: 'row between' }, el('strong', null, recipe?.display_title || recipe?.original_title || t('Séance de cuisine')), el('span', { class: 'muted' }, total === null ? t('Progression partielle') : t('{d}/{n} étapes', { d: done, n: total }))),
+        suivis.has(s.id) ? el('p', { class: 'muted' }, s.status === 'active' ? t('Un suivi de durée est encore en cours.') : t('Séance terminée · suivi de durée encore en cours.')) : null,
+        total === null ? null : el('div', { class: 'progress', style: { marginTop: '.4rem' } }, el('div', { style: { width: total ? `${Math.min(100, Math.round(done / total * 100))}%` : '0%' } })));
+    }));
+    if (estCourante()) root.append(sectionPlain(t('Reprendre ma recette'), ...cartes));
   }
+  if (lectureSuivisImpossible && estCourante()) root.append(el('p', { class: 'status warn' }, t('Les suivis de durée n’ont pas pu être relus. Ouvre ta séance pour réessayer.')));
 
   // Redécouvrir
   if (ctx.settings.rediscover_enabled) root.append(await rediscoverCard(ctx, query, depot));

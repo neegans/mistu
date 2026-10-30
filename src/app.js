@@ -5,6 +5,7 @@ import { route, setNotFound, start, parseHash, refresh, remplacerAdresse } from 
 import { setUiLocale, t } from './core/i18n.js';
 import * as repo from './model/repo.js';
 import { on } from './core/bus.js';
+import { observerBase } from './core/observations-base.js';
 import { logError } from './core/log.js';
 import { revoquerUrlsDeBlob } from './core/blob-urls.js';
 import { getData, invalidate, getSyncState, getSyncGeneration, routeApresRetour, relireReglages, isActivitySynced, demarrerSync, setSyncState, poserMoteur, passeAEcrit, doitRendreApresPasse, SYNC_ROUTE_KEY, qualiteEnvoi } from './ui/state.js';
@@ -48,6 +49,22 @@ let coquilleARefaire = false;
 let renderSeq = 0;
 let porteeAffichee = null;
 let gardeRefusee = null;
+// Les notifications transportent seulement des noms de magasins. Cook relit sa portée
+// et conserve ses contrôleurs ; les autres routes retrouvent un cache invalidé.
+let baseObservee = null, arreterObservation = null;
+const MAGASINS_CUISINE = new Set(['cook_sessions', 'timer_launches', 'recipes', 'recipe_versions', 'recipe_translations', 'book_editions', 'cook_history', 'sync_state', 'outbox', 'sync_conflicts']);
+function assurerObservationBase() {
+  if (baseObservee === repo.db) return;
+  arreterObservation?.();
+  const base = repo.db; baseObservee = base;
+  arreterObservation = observerBase({base, estCourante: () => repo.db === base,
+    surChangement: ({magasins}) => {
+      invalidate();
+      if (magasins.some(n => MAGASINS_CUISINE.has(n))) return current?.main.firstElementChild?.actualiserCuisine?.();
+    }
+  });
+}
+
 function libererVue(){
   for(const node of current?.main.querySelectorAll('[data-role="photo-visible"]')||[])node.dispose?.();
   current?.main.firstElementChild?.dispose?.();
@@ -55,6 +72,7 @@ function libererVue(){
 }
 
 async function onRoute({ handler, params, query, path, navigation = {} }) {
+  assurerObservationBase();
   const seq = ++renderSeq, base = repo.db, generation = getSyncGeneration();
   if (current) capturerVue(current.main);
   // onRoute n'est appelé qu'après la garde de sortie. La langue peut changer pendant une saisie retenue.
@@ -287,6 +305,7 @@ async function porteDEntree() {
 
 async function boot() {
   try {
+    assurerObservationBase();
     // Capture posée avant toute écriture de l'application, init() compris : une seule porte, la mutation de db.js (spec § 5.2).
     // L'historique de consultation n'entre en file que si le réglage le dit, à chaque écriture. Les passes d'init() écrivent toutes en
     // origine 'device' (jamais capturées) SAUF l'effacement de la clé locale (Passerelle T4) : écriture d'origine 'local', elle doit
