@@ -78,6 +78,26 @@ export async function runL0CuisineTests({ eq, ok }) {
     ['Rest 1 h 2 to 3 hours', [[3600, null], [7200, 10800]]],
   ]) eq((detectTimers(texte).timers || []).map(tm => [tm.seconds, tm.seconds_max ?? null]), attendu, 'audit durée : plage distincte après heures — ' + texte);
 
+  await run('audit avertissements purs', async () => {
+    const { avertissementsAvantCuisson } = await import('../src/domain/cuisine-avertissements.js');
+    const { getUiLocale, setUiLocale } = await import('../src/core/i18n.js');
+    const item = (text, timers) => ({ recipe: { original_title: 'Pain' }, version: { steps: [{ position: 3, text, ...(timers ? { timers } : {}) }] } });
+    for (const text of ['Laisser mariner toute une nuit.', 'Préparer la veille.', 'Rest overnight.', '12 h de repos.', '2 heures de marinade.', '1 heure de repos.', 'réfrigérer 3 h.', 'Préparer la\nveille.']) {
+      eq(avertissementsAvantCuisson([item(text)]), [`Pain — étape 3 : ${text}`], 'audit avant cuisson : attente écrite — ' + text);
+    }
+    eq(avertissementsAvantCuisson([item('Cuire.', [{ seconds: 3600, label: '1 heure' }])]), ['Pain — étape 3 : 1 heure'], 'audit avant cuisson : seuil une heure inclus');
+    eq(avertissementsAvantCuisson([item('Cuire.', [{ seconds: 3599, label: '3599 s' }])]), [], 'audit avant cuisson : seuil inférieur exclu');
+    eq(avertissementsAvantCuisson([item('Servir.')]), [], 'audit avant cuisson : aucune attente inventée');
+    eq(avertissementsAvantCuisson([item('Repos.', [{ seconds: 3600, label: '1 heure' }, { seconds: 7200, label: '2 heures' }])]), ['Pain — étape 3 : 1 heure ; 2 heures'], 'audit avant cuisson : une ligne par étape avec ses durées longues');
+    eq(avertissementsAvantCuisson([item('Remuer.', [{ seconds: Infinity }, { seconds: '3600' }, { seconds: null }])]), [], 'audit avant cuisson : durées mal formées ignorées');
+    eq(avertissementsAvantCuisson([null, { recipe: {}, version: null }]), [], 'audit avant cuisson : version absente sans attente');
+    const source = [item('Préparer la veille.')], before = structuredClone(source);
+    avertissementsAvantCuisson(source); eq(source, before, 'audit avant cuisson : aucune mutation de source');
+    const locale = getUiLocale();
+    try { setUiLocale('en'); eq(avertissementsAvantCuisson(source), ['Pain — step 3: Préparer la veille.'], 'audit avant cuisson : libellé anglais sans traduction inventée du texte source'); }
+    finally { setUiLocale(locale); }
+  });
+
   await run('choix partagé', async () => {
     const calls = [];
     const root = timerBlock(30, { seconds_max: 90, onRequest: (...args) => calls.push(args) });

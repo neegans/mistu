@@ -41,3 +41,19 @@ Nouveau module **43/43**, contre-épreuves indépendantes **20/20** (9 rouges av
 Neuf échecs causaux avant correction, dont « 1 h 30 à 180 °C » réduit à3600 secondes. Le parseur accepte maintenant les minutes abrégées devant une préposition, avec une borne de0 à59. Les unités explicites de quantité/température et les plages de durées restent indépendantes. La lecture explicite de60/99 minutes est conservée ; une abréviation sans unité au-delà de59 n’est plus assimilée à des minutes.
 
 **31 assertions ajoutées**, ciblé cuisine143/143 et contre-épreuves indépendantes26/26. Suite complète **11879/11879**, zéro erreur JavaScript/requête extérieure. Preuves `t4-rouge.log`, `t4-vert.log`, `t4-suite.log`, `revue-t4.resultat.json`. Syntaxe, diff et générateur conformes. Livraison locale **0.32.1-4**,209 fichiers /3 645 498 octets, SHA256 `9ef27076ae60fb75e2d2180bfd5ba3b0c38738d63755072b34cbadd30a3e94d8`. Reste la tâche5 ; aucune publication.
+
+## Tâche 5 — avertissements avant cuisson
+
+Avant code : le nouveau module pur était absent et six contrôles d’écran échouaient, notamment la présence du rappel, son maintien après quota et la version exacte de la séance. Le bloc montre maintenant les attentes écrites et les durées longues, une ligne par étape. Il n’utilise que les versions exécutables choisies dans la séance : aucune instruction Thermomix bloquée n’est réintroduite. Une étape réellement faite dans n’importe quelle recette du repas retire le bloc ; une preuve héritée ambiguë ou un échec de stockage ne le retire pas. Le contrôleur de minuteries reste monté.
+
+Ciblés cuisine **159/159**, écran **75/75** ; contre-épreuves indépendantes T4/T5 **40/40**. **34 assertions ajoutées** depuis T4 :16 de domaine,15 d’écran et3 contrôles d’inscription du nouveau module. Suite complète **11913/11913**, zéro erreur JavaScript/requête extérieure. Node **271/271**, syntaxe et deux générateurs `--check` conformes. Preuves `t5-pur-rouge.log`, `t5-ecran-rouge.log`, `t5-*-vert.log`, `t5-suite.log`, `t5-node.log`, `revue-t4-t5.resultat.json`.
+
+Parcours sur la vraie route de cuisine, profil Chrome neuf et base jetable : **29/29 contrôles,4 mesures**. Captures320/390/1280 et reprise hors ligne390 relues ; rappel lisible sans débordement horizontal. La minuterie créée garde5400 secondes. Le quota atteint le vrai commit de progression et conserve le rappel ; le réessai réussi le retire dans les deux onglets. Le rechargement réellement hors ligne garde l’étape2/3, la note et l’identité/échéance du suivi. Le nouveau module est présent dans le cache de la livraison attendue. Reçus et captures : `.superpowers/sdd/2026-10-30-audit-a/parcours-cuisine/`.
+
+## État final du lot A
+
+**Les tâches1–5 sont terminées localement et commitées séparément sur `correctifs-audit-a`.** Livraison préparée **0.32.1-5**, APP_VERSION0.32.1, DB6/archive7 inchangés. Manifeste généré : **210 fichiers /3 647 407 octets**, SHA256 `5f24df4ab32bb6e0362fdd458ee5ed6ea915cfff487a080b2ddb6751652a3cd2`.
+
+Bilan navigateur : **11913/11913**, soit **+229** depuis11684 :35+86+43+31+34. Aucune assertion existante supprimée dans ce lot ; les épingles de version et l’attente du motif exact de changement de compte ont été ajustées. Ce constat porte sur ce lot seulement et ne remplace pas le relevé historique des scénarios modifiés dans l’audit. Node271/271 couvre les outils ; les parcours décrits ci-dessus couvrent l’application.
+
+**Aucun push, aucune migration SQL ni modification serveur.** Dernière livraison publique reçue :0.32.0-7. Le lot A attend le « go » explicite par lot prévu par le plan avant promotion/publication. Les lotsB àG restent à exécuter ; la migration0014 du lotC sera écrite seulement. Les essais sont locaux, avec transports simulés lorsque nécessaire : aucun compte privé, appel assistant payé, essai physique iPhone/Safari ou alarme système n’est revendiqué.

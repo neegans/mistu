@@ -2,6 +2,7 @@ import {preparerLectureRecette,projeterLectureRecette} from '../domain/lecture-r
 import {projectionCandidateTraduction} from '../domain/traductions-format.js';
 import {canoniqueSources} from '../domain/sources-format.js';
 import {creerServiceCuisine} from '../domain/cuisine-persistance.js';
+import {avertissementsAvantCuisson} from '../domain/cuisine-avertissements.js';
 import {el} from '../core/dom.js';
 import {t} from '../core/i18n.js';
 import {navigate,refresh} from '../core/router.js';
@@ -111,6 +112,10 @@ export async function renderCook(params,query,ctx,deps={}){
  function mutation(label,fn,{interdit=false,classe='btn',role=null}={}){return el('button',{class:classe,type:'button',disabled:interdit,dataset:{mutationCuisine:'',interdit:String(interdit),...(role?{role}:{})},onClick:fn},label);}
  function dessiner(){
   nettoyer();voix.arreter();contenu.replaceChildren();navigation.replaceChildren();photoHote.replaceChildren();avertissements.replaceChildren();onglets.replaceChildren();
+  if(projection.etat==='active'&&projection.done_count===0){
+   const rappels=avertissementsAvantCuisson(items.filter(it=>it.projection?.execution_autorisee));
+   if(rappels.length)avertissements.append(el('div',{class:'card warn',dataset:{role:'avant-de-commencer'}},el('strong',null,t('Avant de commencer')),el('ul',null,...rappels.map(texte=>el('li',null,texte)))));
+  }
   const active=items.find(it=>it.version_id===projection.active_version_id),session=affiche.session;
   const pr=active?.lecture?lectureDe(active):null;
   if(pr?.traductionId){const row=affiche.traductions.find(r=>r.id===pr.traductionId);if(row)traductionsChoisies.set(cleTraduction(active.version.id),{id:row.id,exact:cleRendu(projectionCandidateTraduction(row))});}

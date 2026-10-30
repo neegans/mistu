@@ -524,6 +524,7 @@ export const EN = {
   'Exporter JSON-LD': 'Export JSON-LD', 'Exporter YAML (Paprika)': 'Export YAML (Paprika)', 'Saisir à la main': 'Type it in', 'facultatif': 'optional', 'À vérifier': 'To check',
   'Texte source': 'Source text', 'Minuterie': 'Timer', 'Lancer la minuterie système': 'Start system timer', 'Ou dis à Siri': 'Or tell Siri', 'J’ai demandé à Siri': 'I asked Siri', 'Ça n’a pas démarré': 'It did not start',
   'Étape': 'Step', 'Précédent': 'Previous', 'Suivant': 'Next', 'Terminer': 'Finish', 'Fiche': 'Recipe', 'Avant de commencer': 'Before you start', 'Lire à voix haute': 'Read aloud', 'Plan commun': 'Shared plan', 'Indicatif': 'Indicative',
+  '{titre} — étape {n} : {texte}': '{titre} — step {n}: {texte}',
   'Cuisson terminée — à refaire ?': 'Done cooking — make it again?', 'Oui, à refaire': 'Yes, again', 'Non': 'No', 'Enregistrer': 'Save', 'Annuler': 'Cancel', 'Cuisson enregistrée': 'Cooking saved',
   'Nouveau repas': 'New meal', 'Repas': 'Meals', 'Listes d’épicerie': 'Grocery lists', 'Remplacer ce plat': 'Replace this dish', 'Retirer': 'Remove', 'Liste de courses commune': 'Shared grocery list', 'Commencer la préparation': 'Start cooking',
   'Noter ce repas': 'Rate this meal', 'Refaire ce repas': 'Make this meal again', 'Résumé du repas': 'Meal summary', 'Chercher un accompagnement': 'Find a side', 'Choisir moi-même': 'Choose myself',

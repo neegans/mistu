@@ -18,6 +18,37 @@ export async function runL7CuisineEcranTests({eq,ok}){
  const cas=async(nom,fn)=>{try{await withRepo(async(repo,db)=>{const f=fixtureCuisineL7();await fn({repo,db,f});});}catch(e){ok(false,'L7 '+nom+' : '+(e.stack||e));}finally{scene.firstChild?.dispose?.();scene.replaceChildren();document.querySelectorAll('[data-role=dialogue-cuissons]').forEach(d=>{d.querySelector('button')?.click();d.remove();});}};
  const monter=async({repo,db,f},deps={})=>{await db.mutate({origin:'remote',puts:{recipes:[f.a.recipe,f.b.recipe],recipe_versions:[f.a.version,f.b.version],cook_sessions:[f.session]}});const ctx=await getData(true);const root=await renderCook({id:f.session.id},{},ctx,{repo,...deps});scene.append(root);return{root,ctx};};
  try{
+  await cas('audit avant cuisson et refus de progression',async x=>{
+   x.f.session.progress={done_step_ids:[],by_version:{[x.f.a.version.id]:{current_step_id:'commun'}}};
+   x.f.a.version.steps[0].text='Préparer la veille dans la version choisie.';x.f.a.recipe.current_version_id='courante-distincte';
+   await x.db.put('recipe_versions',{...x.f.a.version,id:'courante-distincte',steps:[{id:'autre',position:1,text:'Servir la version courante.'}]},{origin:'remote'});
+   const {root}=await monter(x),bloc=()=>root.querySelector('[data-role=avant-de-commencer]'),panneau=root.querySelector('.cuisine-minuteurs');
+   ok(bloc()?.textContent.includes('Pain A')&&bloc().textContent.includes('la version choisie'),'audit avant cuisson : recette et version exactes de la séance');
+   ok(!bloc()?.textContent.includes('version courante'),'audit avant cuisson : aucun remplacement par pointeur courant');
+   const mutate=x.db.mutate.bind(x.db);let refus=true,commits=0;
+   x.db.mutate=async arg=>{if(arg.cooking_commands){commits++;if(refus)throw new DOMException('quota','QuotaExceededError');}return mutate(arg);};
+   try{
+    root.querySelector('[data-role=suivant-cuisine]').click();await attendre(()=>!root.querySelector('[data-role=etat-cuisine]').hidden);
+    eq(commits,1,'audit avant cuisson : progression atteint le commit refusé');
+    ok(!!bloc(),'audit avant cuisson : quota garde avertissement');
+    eq((await x.db.get('cook_sessions',x.f.session.id)).progress,x.f.session.progress,'audit avant cuisson : quota ne marque aucune étape faite');
+    refus=false;root.querySelector('[data-role=suivant-cuisine]').click();await attendre(()=>root.querySelector('[data-role=texte-etape]')?.textContent==='Dernière étape A.');
+    eq(bloc(),null,'audit avant cuisson : avertissement retiré après progression conservée');
+    eq(root.querySelector('.cuisine-minuteurs'),panneau,'audit avant cuisson : progression conserve contrôleur de minuteries');
+   }finally{x.db.mutate=mutate;}
+  });
+  for(const ailleurs of [false,true])await cas('audit avant cuisson preuve qualifiée '+ailleurs,async x=>{
+   x.f.a.version.steps[0].text='Préparer la veille.';
+   if(ailleurs)x.f.session.progress={done_step_ids:[],by_version:{[x.f.b.version.id]:{done_step_ids:['commun']}}};
+   const {root}=await monter(x);eq(!!root.querySelector('[data-role=avant-de-commencer]'),!ailleurs,ailleurs?'audit avant cuisson : étape faite dans autre recette retire rappel':'audit avant cuisson : preuve héritée ambiguë ne cache pas rappel');
+  });
+  await cas('audit avant cuisson Thermomix bloqué',async x=>{
+   x.f.session.progress={done_step_ids:[],by_version:{}};x.f.a.version.provenance={thermomix_invalide:true};x.f.a.version.steps[0].text='la veille : instruction Thermomix interdite';x.f.b.version.steps[0].text='Préparer la veille la sauce.';
+   const {root}=await monter(x);ok(root.querySelector('[data-role=avant-de-commencer]')?.textContent.includes('Sauce B'),'audit avant cuisson : autre recette exécutable garde rappel');ok(!root.textContent.includes('instruction Thermomix interdite'),'audit avant cuisson : texte Thermomix bloqué jamais réintroduit');
+  });
+  await cas('audit avant cuisson séance close',async x=>{x.f.session.status='done';x.f.session.progress={done_step_ids:[],by_version:{}};x.f.a.version.steps[0].text='Préparer la veille.';const {root}=await monter(x);eq(root.querySelector('[data-role=avant-de-commencer]'),null,'audit avant cuisson : séance close sans rappel de départ');});
+  await cas('audit avant cuisson sans attente',async x=>{x.f.session.progress={done_step_ids:[],by_version:{}};const {root}=await monter(x);eq(root.querySelector('[data-role=avant-de-commencer]'),null,'audit avant cuisson : aucune carte vide');});
+  await cas('audit avant cuisson texte hostile',async x=>{x.f.session.progress={done_step_ids:[],by_version:{}};x.f.a.recipe.original_title='<img src=x onerror="void 0">';x.f.a.version.steps[0].text='la veille <script>interdit</script>';const {root}=await monter(x),bloc=root.querySelector('[data-role=avant-de-commencer]');ok(bloc?.textContent.includes('<img')&&bloc.textContent.includes('<script>'),'audit avant cuisson : titre et étape restent texte');eq(bloc?.querySelectorAll('img,script').length,0,'audit avant cuisson : aucun élément hostile créé');});
   await cas('héritage undefined consultable',async x=>{x.f.a.version.notes=undefined;x.f.a.recipe.display_title=undefined;const {root}=await monter(x);eq(root.querySelector('[data-role=texte-etape]')?.textContent,'Dernière étape A.','L7 : champs undefined historiques ne cassent pas signature de rendu');ok(Object.hasOwn(await x.db.get('recipe_versions',x.f.a.version.id),'notes'),'L7 : lecture ne normalise pas source héritée stockée');});
   await cas('avertissements associés',async x=>{x.f.a.version.kind='synthesis';x.f.a.version.provenance={generated_by:'ai',creation:{}};x.f.b.version.provenance={generated_by:'ai'};x.f.b.version.verification_state='to_verify';const {root}=await monter(x);ok(root.querySelector('[data-role=cuisine-ia]')?.textContent.includes('Pain A'),'L7 : avertissement création nomme sa recette dans repas');ok(root.querySelector('[data-role=bandeau-non-relue]')?.textContent.includes('Sauce B'),'L7 : avertissement extraction nomme sa recette dans repas');});
   await cas('Thermomix bloqué consultable',async x=>{x.f.a.version.provenance={thermomix_invalide:true};const {root}=await monter(x);ok(root.querySelector('[data-role=thermomix-bloque]'),'L7 : refus Thermomix expliqué');eq(root.querySelector('[data-role=texte-etape]'),null,'L7 : instructions Thermomix invalides ne sont pas montrées');ok(root.querySelector('.cuisine-minuteurs'),'L7 : refus Thermomix conserve accès aux suivis');});

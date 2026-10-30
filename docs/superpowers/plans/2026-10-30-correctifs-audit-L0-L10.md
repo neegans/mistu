@@ -101,9 +101,9 @@
 - Modifier : `src/ui/cook.js:46` (conteneur `avertissements`, `data-role="avertissements-cuisine"`) : avant la première étape faite, un bloc `card warn` `data-role="avant-de-commencer"` avec `strong` `t('Avant de commencer')` et une liste.
 - Modifier : `tests/l7-cuisine-ecran.js` ; créer un bloc dans `tests/l0-cuisine.js` pour la fonction pure ; `tests/ajouter.js` si un texte neuf.
 
-- [ ] **Étape 1 : tests rouges** : (pure) étape « laisser mariner toute une nuit » → 1 ligne ; minuteur 3600 → 1 ligne ; recette sans attente → `[]` ; (écran) séance sur une version avec « toute une nuit » → `root.querySelector('[data-role="avant-de-commencer"]')` présent avec le titre de la recette ; après une étape marquée faite → absent.
-- [ ] **Étape 2 : rouge constaté. Étape 3 : implémenter. Étape 4 : suite verte, livraison (`cook.js` est dans la coquille : suffixe + générateur).**
-- [ ] **Étape 5 : commit** `feat(cuisine): remettre les avertissements avant de commencer (audit 3.1)`.
+- [x] **Étape 1 : tests rouges** : (pure) étape « laisser mariner toute une nuit » → 1 ligne ; minuteur 3600 → 1 ligne ; recette sans attente → `[]` ; (écran) séance sur une version avec « toute une nuit » → `root.querySelector('[data-role="avant-de-commencer"]')` présent avec le titre de la recette ; après une étape marquée faite → absent.
+- [x] **Étape 2 : rouge constaté. Étape 3 : implémenter. Étape 4 : suite verte, livraison (`cook.js` est dans la coquille : suffixe + générateur).**
+- [x] **Étape 5 : commit** `feat(cuisine): remettre les avertissements avant de commencer (audit 3.1)`.
 
 ### Tâche 6 : Démarrage sans worker et après publication (livraison I1, 3.1)
 
