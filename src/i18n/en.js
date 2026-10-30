@@ -1,6 +1,7 @@
 // Dictionnaire anglais : clé = chaîne française de référence. Une clé absente affiche le français.
 // Couverture : navigation, accueil, recherche, fiche recette, mode cuisine, réglages et libellés d'état.
 export const EN = {
+  'Une version plus récente est ouverte dans un autre onglet. Recharge cette page.': 'A newer version is open in another tab. Reload this page.',
   'identifiant invalide': 'invalid identifier',
   'contenu illisible': 'unreadable content',
   'cycle de recette invalide': 'invalid recipe removal history',

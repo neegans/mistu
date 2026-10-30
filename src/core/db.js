@@ -3,6 +3,7 @@ import {preparerCommandesCuisine} from '../sync/commandes-cuisine.js';
 import {preparerCommandesTraduction} from '../sync/commandes-traduction.js';
 import {preparerCommandesSources} from '../sync/commandes-sources.js';
 import {signalerCommit} from './observations-base.js';
+import {emit} from './bus.js';
 // Enveloppe IndexedDB à promesses. Un seul magasin d'objets par entité (spec §14 : « structures simples dans une seule base »).
 
 function req(request) {
@@ -234,9 +235,21 @@ export class Database {
         }
       }
     };
-    this.idb = await req(request);
-    this.idb.onversionchange = () => { this.idb.close(); this.idb = null; };
-    return this.idb;
+    let connexion;
+    try { connexion = await req(request); }
+    catch (error) {
+      if (error?.name === 'VersionError') emit('versionchange_bloquee', { db: this });
+      throw error;
+    }
+    this.idb = connexion;
+    connexion.onversionchange = event => {
+      // Deux open simultanés peuvent avoir rendu deux handles : chacun ferme le sien.
+      connexion.close();
+      if (this.idb === connexion) this.idb = null;
+      // deleteDatabase envoie null ; ce n'est pas une version supérieure de l'application.
+      if (event.newVersion !== null && event.newVersion > connexion.version) emit('versionchange_bloquee', { db: this });
+    };
+    return connexion;
   }
 
   async tx(names, mode = 'readonly') {

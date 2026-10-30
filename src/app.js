@@ -1,5 +1,6 @@
 import { demanderStockagePersistant } from './domain/stockage-persistant.js';
 import { remplacerRacineApplication } from './core/racine-application.js';
+import { afficherAvisVersionBase } from './ui/version-base.js';
 import { renderCorbeille } from './ui/corbeille.js';
 // Entrée métier après décision du démarrage : base, langue, coquille et routeur.
 import { el, replace, toast } from './core/dom.js';
@@ -333,6 +334,12 @@ async function porteDEntree() {
 
 async function boot() {
   try {
+    // La préférence en base reste prioritaire dès qu'elle peut être lue.
+    setUiLocale(/^en(?:-|$)/i.test(navigator.language || '') ? 'en' : 'fr');
+    const app = document.getElementById('app');
+    on('versionchange_bloquee', ({ db } = {}) => {
+      if (db === repo.db) afficherAvisVersionBase(app);
+    });
     assurerObservationBase();
     // Capture posée avant toute écriture de l'application, init() compris : une seule porte, la mutation de db.js (spec § 5.2).
     // L'historique de consultation n'entre en file que si le réglage le dit, à chaque écriture. Les passes d'init() écrivent toutes en
@@ -344,7 +351,9 @@ async function boot() {
     // peut les réécrire (réglage touché, restauration d'archive, vidage d'appareil).
     const settings = await relireReglages();
     setUiLocale(settings.ui_locale);
-    on('settings', ({ key, value }) => { if (key === 'ui_locale') { capturerVue(current?.main); setUiLocale(value); coquilleARefaire = true; refresh(); } });
+    const actualiserAvis = () => { if (app.querySelector('[data-role="bandeau-version"]')) afficherAvisVersionBase(app); };
+    actualiserAvis();
+    on('settings', ({ key, value }) => { if (key === 'ui_locale') { capturerVue(current?.main); setUiLocale(value); actualiserAvis(); coquilleARefaire = true; refresh(); } });
     // Le démarrage est l'unique autorité d'enregistrement et d'admission du worker.
     await bootSync();
     // La porte attend un geste ; si elle casse, l'app s'ouvre quand même (invariant I4).

@@ -968,17 +968,37 @@ export async function runSyncL3Tests({ eq, ok }) {
       eq(depuis.filter((a) => a.appel === 'lire' && a.table === 'books').length, 1, 'm5 : exécutions concurrentes → UN seul vol (la table books est lue exactement une fois, pas deux)');
       eq(depuis.filter((a) => a.appel === 'pousser').length, 0, 'm5 : … et la file étant vide, aucun envoi n’est tenté');
       // Déclencheurs : écriture regroupée, online, premier plan.
-      moteur.demarrer();
+      await moteur.demarrer();
       ok(['online', 'visibilitychange'].every((ev) => ecouteurs[ev]) && abonnes.change, 'moteur : écoute online, visibilitychange et le bus « change »');
       const n0 = tf.journal.length;
       await repo.save('books', { id: 'm2', title: 'Nouveau' });
-      abonnes.change({ store: 'books' }); abonnes.change({ store: 'books' });
-      await new Promise((r) => setTimeout(r, 60));
-      ok(tf.journal.filter((a, i) => i >= n0 && a.appel === 'pousser').length === 1, 'moteur : deux écritures rapprochées → un seul envoi (regroupement)');
-      const fini = moteur.arreter();
-      eq(Object.keys(ecouteurs).length, 0, 'moteur : arrêt → plus d’écoute');
-      // L’arrêt rend la passe en vol : la base temporaire ne se referme pas sous une passe encore en cours.
-      await fini;
+      // Le regroupement est piloté sans imposer 60 ms à toutes les lectures IndexedDB de la passe.
+      // Deux callbacks encore programmés constitueraient un défaut, même si le second n'envoie plus rien.
+      const vraiSetTimeout = globalThis.setTimeout, vraiClearTimeout = globalThis.clearTimeout;
+      const minuteries = new Map(); let commence = false, terminer, delai;
+      const terminee = new Promise(resolve => { terminer = resolve; });
+      const desabonnerFin = moteur.onEtat(e => { if(e.enCours) commence = true; else if(commence) terminer(); });
+      globalThis.setTimeout = (fn, ms, ...args) => {
+        if(ms !== 10) return vraiSetTimeout(fn, ms, ...args);
+        const id = {}; minuteries.set(id, () => fn(...args)); return id;
+      };
+      globalThis.clearTimeout = id => { if(!minuteries.delete(id)) vraiClearTimeout(id); };
+      try {
+        abonnes.change({ store: 'books' }); abonnes.change({ store: 'books' });
+        const programmees = minuteries.size;
+        for(const [id, lancer] of [...minuteries]) { minuteries.delete(id); lancer(); }
+        await Promise.race([terminee, new Promise((_, reject) => { delai = vraiSetTimeout(() => reject(Error('La passe regroupée ne s’est pas terminée.')), 15000); })]);
+        const regroupement = programmees === 1 && minuteries.size === 0;
+        const fini = moteur.arreter();
+        // L'arrêt rejoint la passe achevée et ne laisse aucun traitement sous la base temporaire.
+        await fini;
+        ok(regroupement && tf.journal.filter((a, i) => i >= n0 && a.appel === 'pousser').length === 1, 'moteur : deux écritures rapprochées → un seul envoi (regroupement)');
+        eq(Object.keys(ecouteurs).length, 0, 'moteur : arrêt → plus d’écoute');
+      } finally {
+        const fini = moteur.arreter();
+        globalThis.setTimeout = vraiSetTimeout; globalThis.clearTimeout = vraiClearTimeout;
+        vraiClearTimeout(delai); desabonnerFin(); await fini;
+      }
     });
 
     // R-L3-24 : les compteurs du moteur comptent le MÊME sous-ensemble que l'envoi — ce qui va partir, pas plus.

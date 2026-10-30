@@ -571,7 +571,13 @@ export async function runPasserelleTests({ eq, ok }) {
           const edit = await R.renderRecipeEdit({}, { pages: 'p1' }, ctxPages(SESSION));
           const bouton = [...edit.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA');
           bouton.click();
-          for (let i = 0; i < 100 && (appels.length === 0 || bouton.disabled); i += 1) await new Promise((r) => setTimeout(r, 5));
+          // Le départ du POST ne termine ni sa lecture ni l’écriture du journal. Ne pas
+          // disposer cet écran pour le cas suivant tant que son traitement est en cours.
+          const finExtraction = performance.now() + 5000;
+          while (appels.length === 0 || bouton.disabled) {
+            if (performance.now() >= finExtraction) throw Error(`Extraction recette ${statut} : traitement non terminé après 5 secondes (${appels.length} POST)`);
+            await new Promise(r => setTimeout(r, 10));
+          }
           await tick();
           eq([appels.length, JSON.parse(appels[0]?.options.body ?? '{}').outil, appels[0]?.options.headers.authorization, edit.textContent.includes(attendu)], [1, 'extraction', 'Bearer ' + JETON, true], `recette, ${statut} ${typeof corps === 'string' ? '(corps illisible)' : corps.erreur} : un POST d'extraction, « ${attendu} » à l'écran`);
           ok(!edit.textContent.includes(JETON) && !/trop_lourd|non_admis|non_connecte/.test(edit.textContent) && !edit.textContent.includes('Échec :') && (!attendu.startsWith('Trop de demandes') || !edit.textContent.includes('limite du jour')), `recette, ${statut} : ni le jeton, ni un mot de code seul après « Échec : », ni « limite du jour » pour un 429 relayé`);
@@ -592,9 +598,13 @@ export async function runPasserelleTests({ eq, ok }) {
           const edit = await R.renderRecipeEdit({}, { pages: 'pg,pp,pn' }, ctxPages(SESSION));
           const extraire = [...edit.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA');
           extraire.click();
-          for (let i = 0; i < 200 && appels.length === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
+          // Le décodage des trois images et la conservation du résultat sont asynchrones.
+          const finImages = performance.now() + 5000;
+          while (appels.length === 0 || extraire.disabled) {
+            if (performance.now() >= finImages) throw Error(`Extraction des trois images : traitement non terminé après 5 secondes (${appels.length} POST)`);
+            await new Promise(r => setTimeout(r, 10));
+          }
           eq([appels.length, appels.length ? await dimsEnvoyees(appels[0]) : null], [1, attendu3], 'F-3 recette : les mêmes trois pages sont réduites avant l’envoi (1568 px au plus, image/jpeg)');
-          for (let i = 0; i < 200 && extraire.disabled; i += 1) await new Promise((r) => setTimeout(r, 5)); // tâche 6 : la lecture (UN vol par document) finit avant la suivante
         }
         {
           const st = await repoTemp.getFile('sha-grande'); const bmp = await createImageBitmap(st.blob);
