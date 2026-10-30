@@ -1,5 +1,7 @@
 # STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L9 PUBLIÉ, 0.31.0 EN LIGNE
 
+**L10 — construction engagée après revue technique.** [Spec](docs/superpowers/specs/2026-10-29-l10-hors-ligne-volumes-design.md), [plan et attributions](docs/superpowers/plans/2026-10-30-l10-hors-ligne-volumes.md). Base publique L9 `ed454203`, reçu `14cc996` ; cible0.32.0, DB6/archive7 inchangés, sans SQL. Contrats livraison/hors-ligne/conservation figés avant code ; résultats L10 à recevoir. La version publique reste0.31.0.
+
 **L9 publié et reçu le 30 octobre.** Code **ed454203** poussé par avance rapide dans main ; Pages construit à **06:43:43 UTC (02 h 43 HAE)**.
 **38 fichiers** publics identiques ; suite publique **11262/11262**, zéro erreur JavaScript ou requête extérieure.
 Parcours publics : navigation **12 observations**, dialogues **20 observations**, lisibilité **40 configurations** FR/EN et contrôles de focus, petite hauteur, mouvement réduit et zoom visuel ; cuisine **8 mesures/36 gestes**, deux onglets, note et photo décodée après rechargement réellement hors ligne. Captures publiques relues.
