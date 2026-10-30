@@ -19,13 +19,15 @@ import { empreintesPhotos, fichierPhoto, contexteFichiers } from './components.j
 import { recipeCard, section, sectionPlain, grilleCartes, pageHeader, emptyState, availabilityBadge, provenanceText, etoiles } from './components.js';
 import { creerServiceCuisine } from '../domain/cuisine-persistance.js';
 import { projeterSuiviMinuteur } from '../domain/cuisine-format.js';
+import { getClockOffset } from '../sync/clock.js';
 import { getSyncGeneration } from './state.js';
 import { projeterLotInventaire } from '../domain/inventaire-persistance.js';
 import { quantiteInventaire, dateLotInventaire } from './inventaire-texte.js';
 
 // `deps.repo` : le sac injecté des routes (la suite y compte la passe getFiles) ; l'app ne passe rien (route('/', renderHome) : trois arguments) et le
 // module sert. T5 ronde 1 : Redécouvrir écrit par ce MÊME sac (rediscoverCard), jamais par le module en dehors de lui.
-export async function renderHome(params, query, ctx, { repo: depot = repo, service: serviceInjecte, maintenant = () => Date.now() } = {}) {
+const heureLocale = () => Date.now();
+export async function renderHome(params, query, ctx, { repo: depot = repo, service: serviceInjecte, maintenant = heureLocale } = {}) {
   const root = el('div', null);
   let dispose = false; const generation = getSyncGeneration(), base = depot.db;
   const estCourante = () => !dispose && getSyncGeneration() === generation && depot.db === base;
@@ -42,7 +44,10 @@ export async function renderHome(params, query, ctx, { repo: depot = repo, servi
   // Reprendre ma recette
   const active = ctx.cook_sessions.filter((s) => s.status === 'active').sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
   const suivis = new Set(); let lectureSuivisImpossible = false;
-  try { for (const timer of await depot.all('timer_launches')) if (timer.cook_session_id && projeterSuiviMinuteur(timer, maintenant()).etat === 'en_cours') suivis.add(timer.cook_session_id); }
+  try {
+    const minuteurs = await depot.all('timer_launches'), instantSuivis = maintenant() + (maintenant === heureLocale ? getClockOffset() : 0);
+    for (const timer of minuteurs) if (timer.cook_session_id && projeterSuiviMinuteur(timer, instantSuivis).etat === 'en_cours') suivis.add(timer.cook_session_id);
+  }
   catch { lectureSuivisImpossible = true; }
   const reprises = [...new Map([...active.slice(0, 3), ...ctx.cook_sessions.filter(s => suivis.has(s.id))].map(s => [s.id, s])).values()];
   if (reprises.length) {

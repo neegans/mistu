@@ -1,6 +1,7 @@
 import {runAuditCommandesProtegeesTests} from './audit-commandes-protegees.js';
 import {runAuditFichesCycleTests} from './audit-fiches-cycle.js';
 import {runAuditVersionBaseTests} from './audit-version-base.js';
+import {runAuditHorlogesCuisineTests} from './audit-horloges-cuisine.js';
 import {runAuditArchiveRetraitTests} from './audit-archive-retrait.js';
 import {runAuditArchiveFichesInvalidesTests} from './audit-archive-fiches-invalides.js';
 import {runAuditArchiveExclusionsUITests} from './audit-archive-exclusions-ui.js';
@@ -715,7 +716,8 @@ try { await runAuditArchiveFichesInvalidesTests({eq,ok}); } catch (e) { ok(false
 try { await runAuditArchiveExclusionsUITests({eq,ok}); } catch (e) { ok(false, 'runAuditArchiveExclusionsUITests : ' + (e.stack || e)); }
 try { await runAuditFichesCycleTests({eq,ok}); } catch (e) { ok(false, 'runAuditFichesCycleTests : ' + (e.stack || e)); }
 try { await runAuditVersionBaseTests({eq,ok}); } catch (e) { ok(false, 'runAuditVersionBaseTests : ' + (e.stack || e)); }
-eq(results.length, 12622,'compte d’assertions : une assertion qui disparait est un rouge');
+try { await runAuditHorlogesCuisineTests({eq,ok}); } catch (e) { ok(false, 'runAuditHorlogesCuisineTests : ' + (e.stack || e)); }
+eq(results.length, 12677,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

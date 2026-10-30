@@ -3,6 +3,7 @@ import { t } from '../core/i18n.js';
 import { timerBlock } from './components.js';
 import { describeDuration, normaliserDuree, shortcutUrl } from '../domain/timers.js';
 import { projeterSuiviMinuteur } from '../domain/cuisine-format.js';
+import { getClockOffset } from '../sync/clock.js';
 
 const succes = r => r?.issue === 'conserve' || r?.issue === 'deja_conserve';
 const courante = fn => { try { return fn(); } catch { return false; } };
@@ -101,7 +102,7 @@ function texteDemande(row) {
   return t('Ouverture non confirmée : vérifie dans Horloge.');
 }
 
-export function creerPanneauMinuteurs({ sessionId, ctx = {}, service, portee, estCourante = () => true, maintenant = () => Date.now(), fenetre = globalThis.window, document: doc = globalThis.document, performanceNow = () => globalThis.performance?.now(), surChangement }) {
+export function creerPanneauMinuteurs({ sessionId, ctx = {}, service, portee, estCourante = () => true, maintenant = () => Date.now() + getClockOffset(), fenetre = globalThis.window, document: doc = globalThis.document, performanceNow = () => globalThis.performance?.now(), surChangement }) {
   let detruit = false, numero = 0, lectureVol = null, relire = false, lectureSession = null, projectionSession = null, prochainCurseur = null, erreur = null;
   let intervalle = null, mesureHorloge = null, horlogeModifiee = false;
   const lignes = new Map(), annoncees = new Set(), liensUtilises = new Set();

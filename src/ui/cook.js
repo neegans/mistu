@@ -18,6 +18,7 @@ import {photoVisible} from './photos-visibles.js';
 import {ouvrirCuissons,noteEnCuisine} from './cuisson.js';
 import {ouvrirCuissonsAvecRestes} from './inventaire-restes.js';
 import {getSyncGeneration} from './state.js';
+import {syncNow} from '../sync/clock.js';
 import {creerPanneauMinuteurs,commandesMinuteurEtape} from './minuteurs-session.js';
 import {creerControleurEcran,creerCommandeEcranAllume} from './ecran-allume.js';
 import {creerControleurVoix,texteEtatVoix} from './voix-cuisine.js';
@@ -28,7 +29,7 @@ export async function renderCook(params,query,ctx,deps={}){
  const depot=deps.repo??repo,base=depot.db,generation=getSyncGeneration();
  let dispose=false,lecture=null,affiche=null,projection=null,items=[],occupe=false,bilanOuvert=false,planOuvert=false,numeroLecture=0,lectureEnCours=null,relireEnsuite=false,vueConfirmee=null,selectionEnAttente=null;
  const root=el('div',{class:'mode-cuisine'}),estCourante=()=>!dispose&&getSyncGeneration()===generation&&(!base||depot.db===base);
- const service=deps.service??creerServiceCuisine({repo:depot,getGeneration:getSyncGeneration,maintenant:deps.maintenant??(()=>new Date().toISOString()),newId:depot.newId});
+ const service=deps.service??creerServiceCuisine({repo:depot,getGeneration:getSyncGeneration,maintenant:deps.maintenant??syncNow,newId:depot.newId});
  const ouvertures=new Map(),traductionsChoisies=new Map(),traductionsPerimees=new Map();
  const nettoyages=[],permanents=[];
  const nettoyer=()=>{for(const fn of nettoyages.splice(0))fn();};
