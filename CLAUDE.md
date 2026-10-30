@@ -3760,3 +3760,8 @@ Catalogue distant :32 fonctions/corps et droits clients exacts,6 triggers confor
 Code **9bb96ac** poussé par avance rapide dans main ; Pages construit à **06:12:40UTC (02 h12 HAE)**. **76 fichiers** publics exacts et **11083/11083** tests publics, zéro erreur JavaScript/requête extérieure.
 Parcours publics inventaire **11 mesures/33 gestes**, repas/courses **8/28** ; deux onglets, rechargements réellement hors ligne, quantités/notes/cases/conventions conservées,14 modules en cache unique0.30.0-1. Captures publiques relues. Le harnais courses attend désormais le montage réel après reload avant de compter les cases ; aucun correctif produit nécessaire pour ce défaut de temporisation du harnais.
 **0.30.0 en ligne**, DB6/archive7/SQL0013. Aucun essai physique iPhone/Safari/TM7 ni appel assistant réel. **L9–L10 et E1 restent à terminer.**
+
+
+## E1 — Cookidoo — décision documentaire du 30 octobre 2026
+
+Automatisation écartée pour cette livraison : la recherche officielle ciblée ne démontre pas de voie autorisée de création tierce depuis Mistu. Aucune déclaration universelle d'absence d'API. La copie manuelle existante et les gardes Thermomix sont conservées ; aucun code ajouté. Aucun compte privé ou essai Canada/Cookidoo/TM7, aucune preuve de bout en bout. Spec et plan `2026-10-30-e1-cookidoo` consignent sources, limites et conditions de réouverture ; revue technique root/C. E1 clos sur l'alternative documentaire « démontrer ou écarter ». L9/L10 restent à terminer.
