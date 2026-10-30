@@ -1,4 +1,5 @@
 import {runAuditCommandesProtegeesTests} from './audit-commandes-protegees.js';
+import {runAuditFichesCycleTests} from './audit-fiches-cycle.js';
 import {runAuditArchiveRetraitTests} from './audit-archive-retrait.js';
 import {runAuditArchiveFichesInvalidesTests} from './audit-archive-fiches-invalides.js';
 import {runAuditArchiveExclusionsUITests} from './audit-archive-exclusions-ui.js';
@@ -711,7 +712,8 @@ try { await runAuditCommandesProtegeesTests({eq,ok}); } catch (e) { ok(false, 'r
 try { await runAuditArchiveRetraitTests({eq,ok}); } catch (e) { ok(false, 'runAuditArchiveRetraitTests : ' + (e.stack || e)); }
 try { await runAuditArchiveFichesInvalidesTests({eq,ok}); } catch (e) { ok(false, 'runAuditArchiveFichesInvalidesTests : ' + (e.stack || e)); }
 try { await runAuditArchiveExclusionsUITests({eq,ok}); } catch (e) { ok(false, 'runAuditArchiveExclusionsUITests : ' + (e.stack || e)); }
-eq(results.length, 12401,'compte d’assertions : une assertion qui disparait est un rouge');
+try { await runAuditFichesCycleTests({eq,ok}); } catch (e) { ok(false, 'runAuditFichesCycleTests : ' + (e.stack || e)); }
+eq(results.length, 12568,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

@@ -15,6 +15,8 @@ import {estCommandeProtegee,ciblesCommandeProtegee,estLectureTraductionSignee,es
 import {estLigneCuisine,validerMinuteurCuisine,validerSessionCuisine} from '../domain/cuisine-format.js';
 import {CLE_REPARATION_IMPORTS_GERES} from '../domain/imports-geres.js';
 import {protegerConflitsCycle} from './reponses.js';
+import {CLE_EPOQUE_EDITEUR} from '../domain/brouillons-format.js';
+import {lireCycleEdition,lireEtatRecette} from '../domain/cycle-edition.js';
 
 // R-L3-12 : les versions AVANT les recettes. Le pointeur d'une recette reçue désigne presque toujours une version
 // créée par le même geste, sur l'autre appareil : lue après la recette, elle serait encore inconnue ici et chaque
@@ -33,6 +35,10 @@ function stable(valeur) {
   }
   return valeur;
 }
+const memeLecture = (a,b) => JSON.stringify(stable(a??null)) === JSON.stringify(stable(b??null));
+const refuserLecture = () => {throw Object.assign(new Error('Fiche modifiée pendant la réception'),{code:'SYNC_SOURCE_CHANGED'});};
+const refuserBibliotheque = () => {throw Object.assign(new Error('Bibliothèque changée pendant la réception'),{code:'SYNC_LIBRARY_CHANGED'});};
+const refuserParent = () => {throw Object.assign(new Error('Édition parente changée pendant le renvoi'),{code:'SYNC_PARENT_CHANGED'});};
 
 // Les deux fiches sont comparées SANS leur updated_at (R-L3-11) : l'égalité d'instant est déjà établie avant
 // l'appel, et les deux chaînes qui portent ce même instant ne s'écrivent pas pareil ('.000Z' ici, '+00:00' là).
@@ -122,7 +128,17 @@ function refusDeForme(table, ligne, clePrimaire) {
 export function createPull({ db, transport, isActivitySynced = () => false, configSuitLeCompte = () => false, getUserId = () => null, surProgression = () => {}, limite = 1000 }) {
   // La fiche d'ici, plus récente, repart : une entrée `put` écrite EXPLICITEMENT (l'origine 'remote' de la page fait que
   // la capture ne la verrait pas). Une seule définition pour les deux chemins (conflit renvoyé, K-5 sans journal).
-  const remiseEnFile = (table, ligne, locale) => ({ user_id: getUserId(), store: table, id: ligne.id, op: 'put', updated_at: locale.updated_at || null, tries: 0 });
+  const remiseEnFile = (table, ligne, locale, owner) => ({ user_id: owner, store: table, id: ligne.id, op: 'put', updated_at: locale.updated_at || null, tries: 0 });
+  const verifierPortee = portee => {
+    if(getUserId()!==portee.owner)throw new Error('Compte de synchronisation changé');
+    if(db.idb!==portee.connexion)refuserBibliotheque();
+  };
+  const verifierEpoque = async portee => {
+    verifierPortee(portee);
+    const epoque=await db.get('sync_state',CLE_EPOQUE_EDITEUR);
+    verifierPortee(portee);
+    if(!memeLecture(epoque,portee.epoque))refuserBibliotheque();
+  };
 
   // SYNC_STORES n'est pas modifié : seule la liste de réception est réordonnée (R-L3-12).
   function tables() {
@@ -135,11 +151,12 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
   // Pointeur de version (spec § 5.5) : si la version locale pointée n'est pas un ancêtre de celle qu'on reçoit, les
   // deux appareils ont adapté la recette en parallèle. La fiche reçue (plus récente) est écrite — l'original n'est
   // jamais réécrit et AUCUNE version n'est masquée : seul le pointeur est signalé, la personne tranchera.
-  async function conflitDePointeur(ligne, locale) {
+  async function conflitDePointeur(ligne, locale, garderVersions = null) {
     const ici = locale?.current_version_id;
     const ailleurs = ligne.data?.current_version_id;
     if (!ici || !ailleurs || ici === ailleurs) return null;
     const versions = (await db.getAll('recipe_versions')).filter((v) => v.recipe_id === ligne.id);
+    garderVersions?.(ligne.id,versions);
     // R-L3-12 : la version pointée par la fiche reçue n'est pas encore arrivée ici (table retardée, page suivante,
     // passe interrompue). Rien à comparer, donc rien à signaler : un conflit annoncé sur une chaîne qu'on ne
     // connaît pas encore serait faux, et il masquerait le vrai quand elle arriverait.
@@ -148,16 +165,44 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
     return { id: `recipes:${ligne.id}`, store: 'recipes', record_id: ligne.id, local: locale, server: { data: ligne.data, updated_at: ligne.updated_at, deleted_at: null }, at: new Date().toISOString(), kind: 'version' };
   }
 
-  async function appliquerPage(table, lignes, bilan, curseur, tentative = 0, reparationImports = null, owner = getUserId()) {
+  async function appliquerPage(table, lignes, bilan, curseur, tentative, reparationImports, portee, parentsInitiaux = new Map()) {
+    verifierPortee(portee);
+    const owner=portee.owner;
     const commandesSources=rows=>rows.filter(e=>(estCommandeProtegee(e)||estPhaseJournalTraduction(e))&&(e.user_id==null||e.user_id===owner));
-    const fileSources=commandesSources(await db.getAll('outbox'));
+    const fileInitiale=await db.getAll('outbox'),fileSources=commandesSources(fileInitiale),filesCibles=new Map();
+    const cibleFile=(rows,store,id)=>rows.filter(e=>e.store===store&&e.id===id&&(e.user_id==null||e.user_id===owner));
+    const garderFileCible=(store,id)=>{const lignes=cibleFile(fileInitiale,store,id);filesCibles.set(JSON.stringify([store,id]),{store,id,lignes});return lignes;};
     const signatureFile=JSON.stringify(stable(fileSources));
-    const gardeFile={toutes:true,verifier:rows=>{if(JSON.stringify(stable(commandesSources(rows)))!==signatureFile)throw Object.assign(new Error('Commande source modifiée pendant la réception'),{code:'SYNC_SOURCE_CHANGED'});}};
+    const gardeFile={toutes:true,verifier:rows=>{
+      if(JSON.stringify(stable(commandesSources(rows)))!==signatureFile)refuserLecture();
+      for(const c of filesCibles.values())if(!memeLecture(cibleFile(rows,c.store,c.id),c.lignes))refuserLecture();
+    }};
     const puts = {}; const deletes = {}; const conflits = []; const refile = [];
     // Lot G, ronde 1 (#4, I-G3) : les lignes files ne s'écrivent pas depuis l'instantané lu plus haut (`locale`, hors transaction) mais par une
     // condition `fusion` refaite sur la ligne RELUE dans la transaction de la page (conditionFichier) : une copie téléchargée ou un original
     // importé pendant la page n'est jamais effacé. Une clé par fiche (la dernière ligne reçue d'une même clé gagne, comme un put).
-    const fusions = new Map(), confirmations = new Map();
+    const fusions = new Map(), confirmations = new Map(), parents = new Map(), versionsLues = new Map();
+    // Un renvoi est une copie de cette lecture, avec ses vrais contextes. Une intention
+    // déjà en attente garde sa base et sa place : elle ne peut être rebâtie implicitement.
+    async function renvoiCycle(ligne,locale) {
+      if(garderFileCible(table,ligne.id).length)return null;
+      const entree={...remiseEnFile(table,ligne,locale,owner),snapshot:structuredClone(locale)};
+      if(table==='book_editions')return lireCycleEdition(locale).etat==='active'
+        ?{...entree,edition_contexts:[{edition_id:locale.id,expected_cycle_id:idCycle(locale)}]}:null;
+      const eid=locale.edition_id??null,parent=eid?await db.get('book_editions',eid):null;
+      if(eid){
+        // La première lecture de ce parent reste la base pour toute la page et ses reprises.
+        // Une autre garde peut refuser avant celle du parent : relire ne vaut pas rebâtir une intention.
+        if(parentsInitiaux.has(eid)&&!memeLecture(parent,parentsInitiaux.get(eid)))refuserParent();
+        if(!parentsInitiaux.has(eid))parentsInitiaux.set(eid,parent);
+        parents.set(eid,{key:eid,fusion:actuelle=>{
+        if(!memeLecture(actuelle,parentsInitiaux.get(eid)))refuserParent();
+        return null;
+      }});if(garderFileCible('book_editions',eid).length)return null;}
+      if(lireEtatRecette(locale,parent).etat!=='active')return null;
+      return {...entree,recipe_id:locale.id,expected_cycle_id:idCycle(locale),expected_edition_id:eid,
+        ...(parent?{edition_contexts:[{edition_id:eid,expected_cycle_id:idCycle(parent),recipe_id:locale.id}]}:{})};
+    }
     // F-7 (§ 3.2) : un remote qui CHANGE — ligne écrite ou tombale — lève l'erreur de réception posée sur l'ancien, dans la même transaction ;
     // une erreur d'ENVOI reste (trop_gros, type : la renvoyer échouerait encore). Remotes comparés validés (memeRemote : true, absent → aucun).
     async function leverErreurReception(id, avant, apres) {
@@ -205,7 +250,7 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       }
       const decision = regleDuMagasin(table, decider({ locale, distante: ligne, table }));
       if (['recipes','book_editions'].includes(table) && !ligne.deleted_at && (decision==='cycle'||porteCycle(ligne.data)||porteCycle(locale))) {
-        const commandes=(await db.getAll('outbox')).filter(e=>e.op==='lifecycle'&&e.store===table&&e.id===ligne.id&&(e.user_id==null||e.user_id===getUserId()));
+        const commandes=garderFileCible(table,ligne.id).filter(e=>e.op==='lifecycle');
         const serveur={...ligne.data,updated_at:ligne.updated_at};
         const fusion=table==='book_editions'?fusionEdition:fusionCycle,cleConfirmee=table==='book_editions'?CLE_EDITION_CONFIRMEE:CLE_CYCLE_CONFIRME;
         const cle = cleConfirmee(ligne.id), connue = await db.get('sync_state', cle);
@@ -215,17 +260,33 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
         } });
         if (connue?.value?.user_id === owner && Number.isFinite(connue.value.server_seq) && connue.value.server_seq > ligne.server_seq) continue;
         const resultat=fusion(locale,serveur,commandes);
+        let retenue=resultat.row;
+        // Le cycle serveur brut doit être le même. Un cycle seulement égal après une
+        // commande pendante reste traité par la superposition, sans nouveau put ordinaire.
+        const contenu=!resultat.conflit&&!resultat.bloquees.length&&idCycle(locale)===idCycle(serveur);
+        if(contenu){
+          if(['ignorer','conflit','conflit_renvoyer'].includes(decision))retenue=locale;
+          if(['conflit','conflit_renvoyer'].includes(decision)){
+            const renvoi=decision==='conflit_renvoyer'?await renvoiCycle(ligne,locale):null;
+            if(renvoi)refile.push(renvoi);
+            conflits.push({id:`${table}:${ligne.id}`,store:table,record_id:ligne.id,local:locale,
+              server:{data:ligne.data,updated_at:ligne.updated_at,deleted_at:null},at:new Date().toISOString(),kind:'donnees',...(renvoi?{renvoye:true}:{})});
+          }else if(decision==='ecrire'&&table==='recipes'){
+            const pointeur=await conflitDePointeur(ligne,locale,(id,versions)=>versionsLues.set(id,versions));
+            if(pointeur)conflits.push(pointeur);
+          }
+        }
         fusions.set(ligne.id,{key:ligne.id,fusion:courant=>{
-          if(idCycle(courant)!==idCycle(locale)) return courant; // geste local fait depuis la lecture : son overlay reste en place
-          return fusion(courant,serveur,commandes).row;
+          if(!memeLecture(courant,locale))refuserLecture();
+          return retenue;
         }});
-        (puts.sync_state ||= []).push({key:cleConfirmee(ligne.id),value:{data:serveur,server_seq:ligne.server_seq,user_id:getUserId()}});
+        (puts.sync_state ||= []).push({key:cleConfirmee(ligne.id),value:{data:serveur,server_seq:ligne.server_seq,user_id:owner}});
         if(resultat.conflit||resultat.bloquees.length) conflits.push({id:`${table}:${ligne.id}`,store:table,record_id:ligne.id,local:locale,server:ligne,at:new Date().toISOString(),kind:'cycle'});
         for(const e of resultat.bloquees) (puts.outbox ||= []).push({...e,lifecycle_blocked:true,last_error:'cycle'});
         recues+=1;continue;
       }
       if (decision === 'renvoyer_seulement') { // K-5 : plus récent ici → repart, SANS entrée de journal
-        refile.push(remiseEnFile(table, ligne, locale));
+        refile.push(remiseEnFile(table, ligne, locale, owner));
         continue;
       }
       if (decision === 'supprimer') {
@@ -271,7 +332,7 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       // conflit_renvoyer : la fiche d'ici est plus récente, elle est conservée ET remise en file — le serveur
       // l'acceptera. L'entrée est écrite EXPLICITEMENT : l'origine 'remote' de la transaction fait que la capture
       // ne la verrait pas (c'est voulu : rien d'autre dans cette page ne doit repartir).
-      if (decision === 'conflit_renvoyer') refile.push(remiseEnFile(table, ligne, locale));
+      if (decision === 'conflit_renvoyer') refile.push(remiseEnFile(table, ligne, locale, owner));
     }
     if (refile.length) (puts.outbox ||= []).push(...refile);
     // Curseur atomique : il part dans la MÊME transaction que les écritures de sa page. Une page refusée plus haut
@@ -281,10 +342,14 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
     const dernier = Math.max(...lignes.map((l) => l.server_seq));
     (puts.sync_state ||= []).push({ key: `cursor:${table}`, value: Math.max(curseur, dernier) });
     try {
-      await db.mutate({ puts, deletes, origin: 'remote', conditions: { ...(fusions.size ? { [table]: [...fusions.values()] } : {}), ...(conflits.length?{sync_conflicts:protegerConflitsCycle(conflits)}:{}), outbox:[gardeFile], sync_state: [gardeCompteCycle(owner,getUserId),
+      await db.mutate({ puts, deletes, origin: 'remote', conditions: { ...(fusions.size ? { [table]: [...fusions.values()] } : {}),
+        ...(parents.size?{book_editions:[...parents.values()]}:{}),
+        ...(versionsLues.size?{recipe_versions:[{toutes:true,verifier:rows=>{for(const[id,versions]of versionsLues)if(!memeLecture(rows.filter(r=>r.recipe_id===id),versions))refuserLecture();}}]}:{}),
+        ...(conflits.length?{sync_conflicts:protegerConflitsCycle(conflits)}:{}), outbox:[gardeFile], sync_state: [gardeCompteCycle(owner,getUserId),
+        {key:CLE_EPOQUE_EDITEUR,fusion:epoque=>{verifierPortee(portee);if(!memeLecture(epoque,portee.epoque))refuserBibliotheque();return null;}},
         ...(table==='imports'?[{key:CLE_REPARATION_IMPORTS_GERES,fusion:courante=>{if(JSON.stringify(stable(courante??null))!==JSON.stringify(stable(reparationImports)))throw Object.assign(new Error('Réparation des imports modifiée pendant la réception'),{code:'SYNC_IMPORTS_REPAIR_CHANGED'});return null;}}]:[]),...confirmations.values()] } });
     } catch (error) {
-      if (['SYNC_CONFIRMATION_CHANGED','SYNC_SOURCE_CHANGED'].includes(error.code) && tentative < 3) return appliquerPage(table, lignes, bilan, curseur, tentative + 1,reparationImports,owner);
+      if (['SYNC_CONFIRMATION_CHANGED','SYNC_SOURCE_CHANGED'].includes(error.code) && tentative < 3) return appliquerPage(table, lignes, bilan, curseur, tentative + 1,reparationImports,portee,parentsInitiaux);
       throw error;
     }
     bilan.recues += recues;
@@ -295,6 +360,9 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
 
   async function recevoir() {
     const bilan = { recues: 0, supprimees: 0, conflits: 0, erreur: null };
+    const owner=getUserId(),connexion=await db.open(),epoque=await db.get('sync_state',CLE_EPOQUE_EDITEUR);
+    const portee={owner,connexion,epoque};
+    verifierPortee(portee);
     const liste = tables();
     for (const [i, table] of liste.entries()) {
       surProgression({ phase: 'reception', table, n: i + 1, total: liste.length });
@@ -303,9 +371,10 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       let reparationImports=table==='imports'?(await db.get('sync_state',CLE_REPARATION_IMPORTS_GERES))??null:null,reprisesImports=0;
       let curseur = (await db.get('sync_state', `cursor:${table}`))?.value || 0;
       for (;;) {
-        const owner=getUserId();
+        await verifierEpoque(portee);
         const { lignes, erreur } = await transport.lire(table, curseur, limite);
         if(getUserId()!==owner) {bilan.erreur={type:'auth',status:null};return bilan;}
+        await verifierEpoque(portee);
         if (erreur) { bilan.erreur = erreur; logError('sync.pull', { table, reason: erreur.type, status: erreur.status }); return bilan; }
         let r;
         try{
@@ -313,7 +382,7 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
           if(getUserId()!==owner){bilan.erreur={type:'auth',status:null};return bilan;}
           if(table==='imports'&&JSON.stringify(stable(reparationCourante))!==JSON.stringify(stable(reparationImports)))throw Object.assign(new Error('Réparation des imports modifiée pendant la réception'),{code:'SYNC_IMPORTS_REPAIR_CHANGED'});
           if (!lignes.length) break;
-          r = await appliquerPage(table, lignes, bilan, curseur,0,reparationImports,owner);
+          r = await appliquerPage(table, lignes, bilan, curseur,0,reparationImports,portee);
         }catch(e){
           if(e?.code!=='SYNC_IMPORTS_REPAIR_CHANGED'||reprisesImports>=2)throw e;
           if(getUserId()!==owner){bilan.erreur={type:'auth',status:null};return bilan;}

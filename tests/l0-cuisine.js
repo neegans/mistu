@@ -150,7 +150,15 @@ export async function runL0CuisineTests({ eq, ok }) {
 
   await fixture('sélection et reprise', async (root, repo) => {
     button(root, 'Sauce').click();
-    await attendre(() => fiche(root)?.getAttribute('href') === '#/recipes/l0-r-b?v=l0-v-b');
+    await new Promise((resolve, reject) => {
+      const observer = new MutationObserver(verifier);
+      const timer = setTimeout(() => { observer.disconnect(); reject(new Error('La sélection conservée n’a pas été affichée.')); }, 5000);
+      function verifier() {
+        if (fiche(root)?.getAttribute('href') !== '#/recipes/l0-r-b?v=l0-v-b') return;
+        observer.disconnect(); clearTimeout(timer); resolve();
+      }
+      observer.observe(root, { subtree: true, childList: true, attributes: true }); verifier();
+    });
     eq(button(root, 'Sauce').classList.contains('active'), true, 'L0 cuisine : onglet sauce actif');
     eq(fiche(root).getAttribute('href'), '#/recipes/l0-r-b?v=l0-v-b', 'L0 cuisine : lien vers la bonne version de sauce');
     eq(root.querySelector('[data-role=texte-etape]').textContent, 'Servir la sauce.', 'L0 cuisine : étape propre à la sauce conservée');

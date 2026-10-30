@@ -1774,7 +1774,14 @@ export async function runCreerIaTests({ eq, ok }) {
 
         // C-4 / C-12 — « Garder » : UNE écriture, la version SEULE ; la fiche et la parente intactes en base ; navigation vers la version
         const g7 = bouton(root, 'garder-ia');
-        g7.click(); g7.click(); await tick(); await tick(); // double clic : une seule écriture (C-4)
+        g7.click(); g7.click(); // double clic avant toute attente : une seule écriture (C-4)
+        // Deux tours de boucle ne garantissent pas la fin d’IndexedDB. Attendre l’issue réelle
+        // avant de lire les lignes ou de quitter withRepo, qui fermerait la base encore utilisée.
+        const finEnregistrement = performance.now() + 5000;
+        while (!S.etatCreation().memoire?.gardee?.ecrite && !dits.length) {
+          if (performance.now() >= finEnregistrement) throw Error('Adaptation IA : aucune issue d’enregistrement après 5 secondes');
+          await new Promise(r => setTimeout(r, 10));
+        }
         const ficheApres = await repo.get('recipes', fiche.id);
         const versionsApres = (await repo.all('recipe_versions')).filter((x) => x.recipe_id === fiche.id);
         const [b0] = ecritures; const v = b0?.recipe_versions?.[0];
