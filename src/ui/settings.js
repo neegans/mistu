@@ -9,6 +9,7 @@ import * as repo from '../model/repo.js';
 import { logError } from '../core/log.js';
 import { reprendreEnvoi, retirerEnvoi, fileDe, estDeCeCompte } from '../sync/outbox.js';
 import {obtenirControleLivraison} from '../core/livraison.js';
+import {creerRechercheMiseAJour} from './mise-a-jour.js';
 import {projeterDiagnosticApp,texteDiagnosticApp} from '../domain/diagnostic-app.js';
 import { estCommandeTraduction, estPhaseJournalTraduction } from '../sync/commandes-traduction.js';
 import { estCommandeCuisine } from '../sync/commandes-cuisine.js';
@@ -105,7 +106,9 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
   const root = el('div', {class:'reglages-page'}, pageHeader(t('Réglages'), { subtitle: `Cuisine OS ${APP_VERSION}` }));
   let detruit=false;
   const diagnostic=creerPanneauDiagnostic({estCourante:()=>!detruit&&root.isConnected});
-  root.dispose=()=>{detruit=true;diagnostic.dispose();};
+  const miseAJour=creerRechercheMiseAJour({livraison:obtenirControleLivraison(),estCourante:()=>!detruit&&root.isConnected});
+  root.append(miseAJour);
+  root.dispose=()=>{detruit=true;diagnostic.dispose();miseAJour.dispose();};
 
   // Préférences
   root.append(section(t('Préférences'),
@@ -129,7 +132,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
   const conflits = (await repo.db.getAll('sync_conflicts')).filter(c=>c.kind!=='cooking'||c.user_id===(ctx.proprietaireDonnees??null)&&(!c.resolution||c.recovery));
   // Le moteur est posé par le démarrage (L3, tâche 9) : tant qu'il n'est pas là, rien de L3 n'est affiché.
   const moteur = getSyncState().moteur || null;
-  suivreMoteurDeLaPage(moteur,diagnostic);
+  suivreMoteurDeLaPage(moteur,{retientVue:()=>diagnostic.retientVue()||miseAJour.retientVue()});
   // Lot G (§ 4.1) : les erreurs de fichiers et le snapshot (pour nomFichier) sont lus au rendu, comme la quarantaine — seulement s'il y a un moteur.
   // Ronde 1 : le snapshot (sept magasins, `files` entier) n'est lu que s'il y a une erreur à nommer — c'est son seul usage. Réglages se redessine
   // au plus toutes les 300 ms pendant une passe : sans cette garde, l'écran relirait `files` à chaque fois (S-12 contournée par l'écran).

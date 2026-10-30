@@ -7,10 +7,11 @@ export function installerControleLivraison(instance,{mode,manifest_sha256}={}){
  const i=internes.get(instance);if(!i||i.detruit()||singleton&&singleton!==instance||!['controlee','en_ligne_non_verifiee'].includes(mode))throw new ErreurLivraison('execution_invalide');
  i.admettre(mode,manifest_sha256);singleton=instance;return instance;
 }
-export function creerControleLivraison({releasePage,baseURL,serviceWorker=globalThis.navigator?.serviceWorker,MessageChannel=globalThis.MessageChannel,maintenant=()=>new Date().toISOString(),delaiMs=LIMITES_LIVRAISON.delai}={}){
+export function creerControleLivraison({releasePage,baseURL,serviceWorker=globalThis.navigator?.serviceWorker,MessageChannel=globalThis.MessageChannel,maintenant=()=>new Date().toISOString(),delaiMs=LIMITES_LIVRAISON.delai,delaiRechercheMs=30000}={}){
  const base=normaliserPorteeLivraison(baseURL);if(!releaseValide(releasePage))throw new ErreurLivraison('livraison_incompatible');
  const delai=Number.isFinite(delaiMs)?Math.max(1,Math.min(LIMITES_LIVRAISON.delaiMax,delaiMs)):LIMITES_LIVRAISON.delai;
- let registration=null,epoch=0,detruit=false,observation=null,verification=null,admis=false,relireApres=false;
+ const delaiRecherche=Number.isFinite(delaiRechercheMs)?Math.max(1,Math.min(60000,delaiRechercheMs)):30000;
+ let registration=null,epoch=0,detruit=false,observation=null,verification=null,recherche=null,arreterRecherche=null,admis=false,relireApres=false;
  let execution={release:releasePage,mode:'en_ligne_non_verifiee',manifest_sha256:null};
  const callbacks=new Set(),preuves=new WeakMap(),requêtes=new Map(),terminer=new Set(),abonnements=new Map();
  const cibles=()=>[serviceWorker?.controller||null,registration?.active||null,registration?.waiting||null,registration?.installing||null];
@@ -56,7 +57,66 @@ export function creerControleLivraison({releasePage,baseURL,serviceWorker=global
   return poser(etat,raison,stats);
  }
  function verifier(){if(verification)return verification;verification=Promise.resolve().then(lire).finally(()=>{verification=null;if(relireApres&&!detruit){relireApres=false;queueMicrotask(()=>{if(!detruit)void verifier()})}});return verification;}
- const service={verifier,etat:()=>observation,estCourante,observer:cb=>{if(typeof cb!=='function'||detruit)return()=>{};callbacks.add(cb);return()=>callbacks.delete(cb)},dispose(){if(detruit)return;detruit=true;epoch++;for(const fin of [...terminer])fin({data:null,raison:'dispose'});for(const [objet,events]of abonnements)for(const event of events)objet.removeEventListener?.(event,invalider);abonnements.clear();callbacks.clear();if(singleton===service)singleton=null;}};
+ // La découverte réseau est volontairement séparée de la preuve locale de coquille.
+ // Son délai couvre aussi l'installation et la relecture ; une réponse tardive ne relance rien.
+ function rechercherMiseAJour(){
+  if(recherche)return recherche;
+  recherche=new Promise(resolve=>{
+   let fini=false,timer,regRecherche=null,derniereInstallation=null,attenteInstallation=null;
+   const workers=new Set();
+   const nettoyer=()=>{regRecherche?.removeEventListener?.('updatefound',suivreInstallation);for(const w of workers)w.removeEventListener?.('statechange',suivreInstallation);workers.clear();attenteInstallation?.('dispose');attenteInstallation=null;};
+   const fin=(issue,raison,vue=observation)=>{if(fini)return;fini=true;clearTimeout(timer);nettoyer();arreterRecherche=null;resolve(Object.freeze({issue,...(raison?{raison}:{}),observation:vue}));};
+   function suivreInstallation(){
+    if(fini)return;const w=regRecherche?.installing;
+    if(w){derniereInstallation=w;if(!workers.has(w)){workers.add(w);w.addEventListener?.('statechange',suivreInstallation);}}
+    if(!attenteInstallation)return;
+    if(derniereInstallation?.state==='redundant')attenteInstallation('installation_echouee');
+    else if(!derniereInstallation||regRecherche.waiting===derniereInstallation||regRecherche.active===derniereInstallation&&derniereInstallation.state==='activated')attenteInstallation(null);
+   }
+   arreterRecherche=()=>fin('echec','dispose');
+   if(detruit){fin('echec','dispose');return;}
+   timer=setTimeout(()=>fin('echec','delai'),delaiRecherche);
+   void(async()=>{
+    try{
+     if(!serviceWorker?.getRegistration){fin('echec','indisponible');return;}
+     const reg=await serviceWorker.getRegistration(base);if(fini)return;
+     if(!reg||typeof reg.update!=='function'){fin('echec','indisponible');return;}
+     if(reg.scope!==base){fin('echec','portee_incompatible');return;}
+     regRecherche=reg;reg.addEventListener?.('updatefound',suivreInstallation);suivreInstallation();
+     await reg.update();if(fini)return;
+     const erreur=await new Promise(resoudre=>{attenteInstallation=resoudre;suivreInstallation();});attenteInstallation=null;
+     if(fini)return;if(erreur){fin('echec',erreur);return;}
+     let vue=await verifier();if(fini)return;
+     // Une vérification invalidée par updatefound peut précéder celle de la nouvelle attente.
+     while(!estCourante(vue)||vue.raison==='worker_change'){vue=await verifier();if(fini)return;}
+     fin('ok',null,vue);
+    }catch{if(!fini)fin('echec','indisponible');}
+   })();
+  }).finally(()=>{recherche=null;});return recherche;
+ }
+ const service={verifier,rechercherMiseAJour,etat:()=>observation,estCourante,observer:cb=>{if(typeof cb!=='function'||detruit)return()=>{};callbacks.add(cb);return()=>callbacks.delete(cb)},dispose(){if(detruit)return;detruit=true;epoch++;arreterRecherche?.();for(const fin of [...terminer])fin({data:null,raison:'dispose'});for(const [objet,events]of abonnements)for(const event of events)objet.removeEventListener?.(event,invalider);abonnements.clear();callbacks.clear();if(singleton===service)singleton=null;}};
  internes.set(service,{detruit:()=>detruit,admettre(mode,manifest){if(admis){if(mode!==execution.mode||manifest!==execution.manifest_sha256)throw new ErreurLivraison('execution_invalide');return}if(mode==='controlee'){const p=preuves.get(observation);if(!estCourante(observation)||!observation.controleur?.complete||observation.controleur.release!==releasePage||observation.controleur.manifest_sha256!==manifest||p.targets[0]!==p.targets[1])throw new ErreurLivraison('execution_invalide')}else if(manifest!==null)throw new ErreurLivraison('execution_invalide');execution={release:releasePage,mode,manifest_sha256:manifest};admis=true;epoch++;observation=null;}});
  ecouter();return service;
+}
+
+// Une seule surveillance appartient à l'application, indépendamment du montage des vues.
+export function surveillerMisesAJour({livraison,fenetre=globalThis.window,document=globalThis.document,navigator=globalThis.navigator,maintenant=()=>Date.now(),delaiMs=60000,setTimeout:programmer=globalThis.setTimeout,clearTimeout:annuler=globalThis.clearTimeout}={}){
+ const delai=Number.isFinite(delaiMs)?Math.max(1,delaiMs):60000;
+ let detruit=false,enCours=false,timer=null,dernier=-Infinity,horsLigne=navigator?.onLine===false;
+ const disponible=()=>document?.visibilityState==='visible'&&navigator?.onLine!==false;
+ const retirerTimer=()=>{if(timer!==null){annuler(timer);timer=null;}};
+ const programmerSuite=()=>{retirerTimer();if(!detruit&&!enCours&&disponible())timer=programmer(()=>{timer=null;rechercher();},Math.max(0,dernier+delai-maintenant()));};
+ function rechercher(force=false){
+  if(detruit)return;retirerTimer();
+  if(!disponible()||enCours||typeof livraison?.rechercherMiseAJour!=='function')return;
+  const instant=maintenant();if(!force&&instant-dernier<delai){programmerSuite();return;}
+  dernier=instant;enCours=true;
+  Promise.resolve().then(()=>{if(!detruit)return livraison.rechercherMiseAJour();}).catch(()=>{}).finally(()=>{enCours=false;programmerSuite();});
+ }
+ const revenir=()=>rechercher();
+ const deconnecter=()=>{horsLigne=true;retirerTimer();};
+ const reconnecter=()=>{const force=horsLigne;horsLigne=navigator?.onLine===false;rechercher(force&&!horsLigne);};
+ document?.addEventListener?.('visibilitychange',revenir);fenetre?.addEventListener?.('focus',revenir);fenetre?.addEventListener?.('online',reconnecter);fenetre?.addEventListener?.('offline',deconnecter);
+ rechercher();
+ return{dispose(){if(detruit)return;detruit=true;retirerTimer();document?.removeEventListener?.('visibilitychange',revenir);fenetre?.removeEventListener?.('focus',revenir);fenetre?.removeEventListener?.('online',reconnecter);fenetre?.removeEventListener?.('offline',deconnecter);}};
 }

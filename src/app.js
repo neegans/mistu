@@ -16,7 +16,7 @@ import { createTransport, createStockage } from './sync/transport.js';
 import { configAssistantSuitLeCompte } from './sync/config.js';
 import { majPastille } from './ui/components.js';
 import { NAV, coquille } from './ui/coquille.js';
-import {obtenirControleLivraison} from './core/livraison.js';
+import {obtenirControleLivraison,surveillerMisesAJour} from './core/livraison.js';
 import {creerStatutMiseAJour} from './ui/mise-a-jour.js';
 
 import { renderHome } from './ui/home.js';
@@ -355,6 +355,11 @@ async function boot() {
     installerRetours();
     window.addEventListener('pagehide', () => capturerVue(current?.main));
     start(onRoute);
+    let surveillance=null;
+    const surveiller=()=>{surveillance?.dispose();surveillance=surveillerMisesAJour({livraison:obtenirControleLivraison()});};
+    surveiller();
+    window.addEventListener('pagehide',()=>{surveillance?.dispose();surveillance=null;});
+    window.addEventListener('pageshow',e=>{if(e.persisted)surveiller();});
   } catch (e) {
     logError('boot', { error: e });
     replace(document.getElementById('app'), el('div', { class: 'card danger', style: { margin: '1rem' } }, el('h2', null, 'Cuisine OS ne peut pas démarrer'), el('p', { class: 'muted' }, t('Code : {c}', { c: e?.name || 'Erreur' })), el('button', { class: 'btn', onClick: () => location.reload() }, t('Recharger'))));

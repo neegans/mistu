@@ -33,8 +33,9 @@ export function creerStatutMiseAJour({livraison=null,lireVue,demander=demanderGa
   }
   const conserver=el('button',{type:'button',class:'btn',dataset:{role:'conserver-avant-fermeture'},onClick:()=>conserverSaisie('conserver')},t('Conserver mon travail')),
     revoir=el('button',{type:'button',class:'btn',hidden:true,dataset:{role:'revoir-avant-fermeture'},onClick:()=>conserverSaisie('revoir_sortie')},t('Revoir avant de fermer')),
-    verifier=el('button',{type:'button',class:'btn',onClick:async()=>{if(enCours||detruit)return;enCours=true;boutons();try{dessiner(await livraison?.verifier());}catch{dessiner(null);}finally{enCours=false;boutons();}}},t('Vérifier la mise à jour'));
-  racine.append(titre,versions,instructions,el('div',{class:'row'},conserver,revoir,verifier),resultat);
+    verifier=el('button',{type:'button',class:'btn',onClick:async()=>{if(enCours||detruit)return;enCours=true;boutons();recherche.textContent=t('Recherche de mise à jour…');try{const r=await livraison?.rechercherMiseAJour();if(detruit)return;if(r?.observation)dessiner(r.observation);recherche.textContent=r?.issue==='ok'?t('Recherche terminée.'):t('Impossible de rechercher une mise à jour pour le moment. Réessaie.');}catch{if(!detruit)recherche.textContent=t('Impossible de rechercher une mise à jour pour le moment. Réessaie.');}finally{enCours=false;if(!detruit)boutons();}}},t('Vérifier la mise à jour'));
+  const recherche=el('p',{role:'status',class:'muted'});
+  racine.append(titre,versions,instructions,el('div',{class:'row'},conserver,revoir,verifier),recherche,resultat);
   function dessiner(o){
     if(detruit)return;const actuelle=o&&livraison?.estCourante(o)===true,attente=actuelle?o.attente:null;
     // Une observation ancienne ne doit ni certifier l'attente, ni effacer une demande courante.
@@ -49,4 +50,26 @@ export function creerStatutMiseAJour({livraison=null,lireVue,demander=demanderGa
   racine.actualiserVue=()=>{sequence++;enCours=false;suivreVue();boutons();};
   racine.dispose=()=>{if(detruit)return;detruit=true;sequence++;stop?.();for(const nom of['input','change'])vueSuivie?.removeEventListener(nom,effacerResultat,true);vueSuivie=null;};
   return racine;
+}
+
+// Disponible dans Réglages même lorsqu'aucune publication en attente n'a encore été découverte.
+export function creerRechercheMiseAJour({livraison=null,estCourante=()=>true}={}){
+  let detruit=false,enCours=false,resultat=null;
+  const version=el('p',{class:'muted'}),etat=el('p',{role:'status'}),instructions=el('p',{hidden:true},t('Pour utiliser cette mise à jour, conserve ton travail puis ferme toutes les fenêtres Mistu, y compris l’app installée. Rouvre ensuite Mistu.'));
+  const bouton=el('button',{type:'button',class:'btn',disabled:typeof livraison?.rechercherMiseAJour!=='function',onClick:async()=>{
+    if(detruit||enCours||!estCourante())return;enCours=true;bouton.disabled=true;etat.textContent=t('Recherche de mise à jour…');
+    try{resultat=await livraison.rechercherMiseAJour();}
+    catch{resultat={issue:'echec'};}
+    finally{enCours=false;if(!detruit){bouton.disabled=false;if(estCourante())dessiner(livraison?.estCourante(resultat?.observation)?resultat.observation:livraison?.etat());}}
+  }},t('Rechercher une mise à jour'));
+  const racine=el('section',{class:'card stack',dataset:{role:'recherche-mise-a-jour'}},el('h2',null,t('Mise à jour de l’application')),version,bouton,etat,instructions);
+  function dessiner(o){
+    if(detruit)return;const courante=o&&livraison?.estCourante(o),execution=courante?releaseAffichable(o.execution?.release):null,attente=courante?o.attente:null,prete=attente?.complete===true&&releaseAffichable(attente.release);
+    version.textContent=execution?(prete?t('Cette fenêtre utilise encore la version {version}.',{version:execution}):t('Version de cette fenêtre : {version}.',{version:execution})):t('La version de cette fenêtre n’est pas vérifiée.');
+    instructions.hidden=!prete;
+    etat.textContent=prete?t('Mise à jour prête : {version}',{version:attente.release}):enCours?t('Recherche de mise à jour…'):resultat?resultat.issue==='ok'?t('Recherche terminée.'):t('Impossible de rechercher une mise à jour pour le moment. Réessaie.'):'';
+  }
+  const stop=livraison?.observer(dessiner);dessiner(livraison?.etat());
+  racine.retientVue=()=>!detruit&&racine.isConnected&&(enCours||!!resultat);
+  racine.dispose=()=>{detruit=true;stop?.();};return racine;
 }

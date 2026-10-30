@@ -688,7 +688,7 @@ try { await runL7MinuteursCommandesTests({eq,ok}); } catch (e) { ok(false, 'runL
 try { await runL7MinuteursDepotEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursDepotEcranTests : ' + (e.stack || e)); }
 try { await runL7MinuteursEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursEcranTests : ' + (e.stack || e)); }
 try { await runL7VoixTests({eq,ok}); } catch (e) { ok(false, 'runL7VoixTests : ' + (e.stack || e)); }
-eq(results.length, 11538,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 11589,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

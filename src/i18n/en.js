@@ -2248,4 +2248,9 @@ export const EN = {
   "Traduction anglaise affichée.": "English translation displayed.",
   "Traduction française affichée.": "French translation displayed.",
   "Le coût en appels est indiqué avant de lancer la traduction. Traduction manuelle sans appel.": "The call cost is shown before starting the translation. Manual translation uses no calls.",
+  "Rechercher une mise à jour": "Check for an update",
+  "Version de cette fenêtre : {version}.": "Version in this window: {version}.",
+  "Recherche de mise à jour…": "Checking for an update…",
+  "Recherche terminée.": "Check complete.",
+  "Impossible de rechercher une mise à jour pour le moment. Réessaie.": "Could not check for an update right now. Try again.",
 };
