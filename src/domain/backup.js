@@ -19,6 +19,7 @@ import { contientTraductionsExactes, estLigneTraductionReservee, validerFormesTr
 import { contientCuisineExacte, estLigneCuisineReservee, validerFormesCuisineArchive, verifierIdentitesCuisineArchive, preparerCuisineArchive } from './cuisine-archive.js';
 import {contientInventaireProtege,validerFormesInventaireArchive,verifierIdentitesInventaireArchive,preparerInventaireArchive} from './inventaire-archive.js';
 import {estLotProtege} from './inventaire-format.js';
+import {validerTransitionVersionStructuree} from './versions-structurees.js';
 
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf', 'application/epub+zip': 'epub', 'text/plain': 'txt' };
 export const extFor = (mime) => MIME_EXT[mime] || 'bin';
@@ -39,6 +40,23 @@ const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const validKey = (value) => typeof value === 'string' && value.trim().length > 0;
 const validCount = (value) => Number.isSafeInteger(value) && value >= 0;
+const MOTIFS_EXCLUSION = new Set(['cle_invalide','serialisation_invalide','cycle_recette_invalide','exception_livre_invalide','cycle_livre_invalide','source_invalide','version_invalide','traduction_invalide','cuisine_invalide','stock_invalide','relation_invalide','relation_absente','dependance_exclue','fichier_invalide']);
+const refusArchive = code => {throw Object.assign(new Error(code),{code});};
+function lireExclusions(manifest,stores,files=[]) {
+  if(manifest==null||!own(manifest,'exclues'))return [];
+  if(!Array.isArray(manifest.exclues))refusArchive('exclusions_archive_invalides');
+  const vues=new Set();
+  for(const r of manifest.exclues){
+    if(!record(r)||Object.keys(r).length!==3||!['store','id','motif'].every(k=>own(r,k))||![...DATA_STORES,'files'].includes(r.store)
+      ||r.id!==null&&!validKey(r.id)||!MOTIFS_EXCLUSION.has(r.motif))refusArchive('exclusions_archive_invalides');
+    if(r.id!==null){
+      const cle=JSON.stringify([r.store,r.id]),presentes=r.store==='files'?files:stores[r.store]||[];
+      if(vues.has(cle)||presentes.some(x=>x?.[STORES[r.store].keyPath]===r.id))refusArchive('exclusions_archive_invalides');
+      vues.add(cle);
+    }
+  }
+  return structuredClone(manifest.exclues);
+}
 // Vague finale du lot G (chef d'orchestre, revue finale) : `upload_quality` est « par appareil, jamais synchronisé » (spec G § 3.3) — il ne voyage pas
 // dans l'archive et une archive qui le porte ne l'écrit pas à la restauration (une seule définition pour les deux sens).
 const CLES_PAR_APPAREIL = ['upload_quality'];
@@ -166,7 +184,7 @@ function relationValues(value, parts) {
   return next.flatMap((item) => relationValues(item, rest));
 }
 
-export function checkRelations(stores, fileHashes) {
+export function checkRelations(stores, fileHashes, {signaler=()=>{}}={}) {
   const errors = [];
   const ids = new Map();
   for (const [name, rows] of Object.entries(stores)) {
@@ -180,13 +198,15 @@ export function checkRelations(stores, fileHashes) {
     for (const row of rows) {
       let values;
       try { values = relationValues(row, field.split('.')); }
-      catch (e) { errors.push(child + '.' + field + ' : ' + e.message); continue; }
+      catch (e) { errors.push(child + '.' + field + ' : ' + e.message);signaler({store:child,row,motif:'relation_invalide'});continue; }
       for (const value of values) {
         if (value == null || value === '') continue;
         if (!validKey(value)) {
           errors.push(child + '.' + field + ' : identifiant invalide');
+          signaler({store:child,row,motif:'relation_invalide'});
         } else if (parent === 'files' ? !fileHashes.has(value) : !ids.get(parent)?.has(value)) {
           errors.push(child + '.' + field + ' → ' + parent + ' ' + value + ' introuvable');
+          signaler({store:child,row,motif:'relation_absente',parent,id:value});
         }
       }
     }
@@ -201,7 +221,7 @@ export function checkRelations(stores, fileHashes) {
         const parent=pages.get(page.source_revision.parent_page_id),origine=pages.get(page.source_copy?.source_id);
         if(!(page.source_revision.reason==='rotate'&&parent&&parent.document_id==null||page.source_revision.reason==='attach'&&origine&&origine.document_id==null))throw new Error();
       }else if(!doc||(doc.edition_id??null)!==(page.edition_id??null)||doc.sha256!==page.sha256)throw new Error();
-    } catch { errors.push('Historique de source incomplet ou incohérent : '+page.id); }
+    } catch { errors.push('Historique de source incomplet ou incohérent : '+page.id);signaler({store:'source_pages',row:page,motif:'source_invalide'}); }
   }
   for(const session of stores.scan_sessions||[])if(record(session)&&own(session,'source_state')) {
     try {
@@ -210,36 +230,84 @@ export function checkRelations(stores, fileHashes) {
         const p=pages.get(id),doc=p&&documents.get(p.document_id);
         if(!p||(p.edition_id??null)!==(session.edition_id??null)||p.document_id!=null&&(!doc||!session.document_ids?.includes(doc.id)||doc.scan_session_id!==session.id))throw new Error();
       }
-    } catch { errors.push('Sélection de sources incomplète ou incohérente : '+session.id); }
+    } catch { errors.push('Sélection de sources incomplète ou incohérente : '+session.id);signaler({store:'scan_sessions',row:session,motif:'source_invalide'}); }
   }
   return errors;
+}
+
+// Chaque diagnostic vise une seule ligne. Une preuve portant sur plusieurs lignes reste
+// contrôlée à la fin : on ne devine jamais laquelle supprimer pour faire passer une signature.
+function motifFicheExport(store,row,versions) {
+  if(store==='recipes'){
+    if(lireCycleRecette(row).etat==='invalide')return 'cycle_recette_invalide';
+    if(!exceptionEditionValide(row))return 'exception_livre_invalide';
+  }
+  if(store==='book_editions'&&lireCycleEdition(row).etat==='invalide')return 'cycle_livre_invalide';
+  if(['source_pages','source_documents','scan_sessions','imports'].includes(store)&&porteSourcesL5(row))try{
+    canoniqueSources(row);if(store!=='imports')validerCopieSource(row);
+    if(store==='source_pages')validerRevisionSource(row);
+    if(store==='scan_sessions'&&own(row,'source_state'))pagesActivesSeance(row);
+    if(store==='imports'&&row.source_capture!=null)validerCaptureSources(row.source_capture);
+    if(store==='imports'&&row.index_call!=null)validerAppelIndex(row.index_call);
+  }catch{return 'source_invalide';}
+  if(store==='recipe_versions')try{validerTransitionVersionStructuree(null,row,{parents:versions});}catch{return 'version_invalide';}
+  if(['recipe_translations','imports'].includes(store))try{validerFormesTraductionsArchive({[store]:[row]});}catch{return 'traduction_invalide';}
+  if(['cook_sessions','timer_launches'].includes(store))try{validerFormesCuisineArchive({[store]:[row]});}catch{return 'cuisine_invalide';}
+  if(store==='inventory')try{validerFormesInventaireArchive({stores:{inventory:[row]},archiveVersion:ARCHIVE_FORMAT_VERSION});}catch{return 'stock_invalide';}
+  return null;
+}
+async function selectionExport(snapshot) {
+  const exclues=[],retirees=new Set(),cle=(store,id)=>JSON.stringify([store,id]);
+  const ecarter=(store,row,motif)=>{const id=validKey(row?.[STORES[store].keyPath])?row[STORES[store].keyPath]:null;exclues.push({store,id,motif});if(id!==null)retirees.add(cle(store,id));};
+  const stores=Object.fromEntries(DATA_STORES.map(store=>{
+    const rows=snapshot[store]??(MAGASINS_AJOUTES_APRES_V1.includes(store)?[]:null);
+    if(!Array.isArray(rows))refusArchive('preuve_archive_non_attribuable');
+    const selection=[];
+    for(const row of store==='settings'?publicSettings(rows):rows){
+      if(!record(row)||!validKey(row[STORES[store].keyPath])){ecarter(store,row,'cle_invalide');continue;}
+      try{selection.push(JSON.parse(JSON.stringify(row)));}catch{ecarter(store,row,'serialisation_invalide');}
+    }
+    return[store,selection];
+  }));
+  const files=(snapshot.files||[]).filter(row=>{if(record(row)&&typeof row.sha256==='string'&&HASH.test(row.sha256))return true;ecarter('files',row,'fichier_invalide');return false;}),hashes=new Set(files.map(f=>f.sha256));
+  const versions=new Map(stores.recipe_versions.map(r=>[r.id,r]));
+  for(const store of DATA_STORES)stores[store]=stores[store].filter(row=>{const motif=motifFicheExport(store,row,versions);if(!motif)return true;ecarter(store,row,motif);return false;});
+  let change=true;
+  while(change){
+    const invalides=new Map();
+    checkRelations(stores,hashes,{signaler:({store,row,motif,parent,id})=>{if(!invalides.has(row))invalides.set(row,{store,motif:parent&&retirees.has(cle(parent,id))?'dependance_exclue':motif});}});
+    // Ces pointeurs historiques sont souples en général. S'ils ciblent une ligne que cet
+    // export écarte, leur dépendance connue ne peut pas servir à annoncer une restauration complète.
+    for(const store of DATA_STORES)for(const row of stores[store]){
+      const refs=[];
+      if(store==='recipes')refs.push(['imports',row.index_import_id],['source_pages',row.index_page_id]);
+      if(store==='imports'&&row.source_capture)refs.push(['scan_sessions',row.source_capture.session_id],...(row.source_capture.selected_page_ids||[]).map(id=>['source_pages',id]),...(row.source_capture.pages||[]).map(p=>['source_pages',p.id]));
+      if(store==='recipe_translations')for(const s of row.translated_content?.segments||[])if(s.origin==='ai')refs.push(['imports',s.journal_id]);
+      if(!invalides.has(row)&&refs.some(([s,id])=>validKey(id)&&retirees.has(cle(s,id))))invalides.set(row,{store,motif:'dependance_exclue'});
+    }
+    change=invalides.size>0;
+    for(const store of DATA_STORES)stores[store]=stores[store].filter(row=>{const invalid=invalides.get(row);if(!invalid)return true;ecarter(store,row,invalid.motif);return false;});
+  }
+  try{
+    if(validateRows(stores).length||checkRelations(stores,hashes).length)refusArchive('preuve_archive_non_attribuable');
+    await verifierPreuvesSources(stores);await verifierIdentitesInventaireArchive({batch:stores,snapshot:{}});
+  }catch{refusArchive('preuve_archive_non_attribuable');}
+  return{stores,files,exclues};
 }
 
 // Une seule lecture IndexedDB cohérente ; le hachage et le ZIP se font après la transaction.
 export async function createArchive(db, { deviceName = '' } = {}) {
   // Les magasins internes (spec § 5.1) n'existent pas forcément sur une base plus ancienne : lire ceux de la base, pas du schéma courant.
   const snapshot = await db.getSnapshot(Object.keys(db.stores));
-  // Une base plus ancienne (ouverte avec un STORES d'avant) n'a pas forcément un magasin ajouté après le format 1 : il vaut [] (C1).
-  const lignes = (name) => (MAGASINS_AJOUTES_APRES_V1.includes(name) ? (snapshot[name] ?? []) : snapshot[name]);
-  const stores = Object.fromEntries(DATA_STORES.map((name) => [
-    name, JSON.parse(JSON.stringify(name === 'settings' ? publicSettings(lignes(name)) : lignes(name))),
-  ]));
-  // R-E-11 (lot E, § 3.7) : une trace de CONSULTATION (library_activity, rediscovery_prefs) dont l'édition n'existe pas dans CE même instantané rendrait
-  // l'archive non restaurable ; elle est ÉCARTÉE de l'archive — jamais de la base (une passe destructive effacerait des traces dont l'édition n'est pas
-  // encore reçue). Une ligne sans edition_id (relation optionnelle) ou à l'edition_id invalide (signalée comme avant) n'est pas touchée ; aucune autre
-  // relation n'est filtrée (library_activity.recipe_id reste vérifiée). Décomptes et empreintes portent les lignes gardées (calculés après).
-  const editionsPresentes = new Set((stores.book_editions || []).map((e) => e?.id).filter(validKey));
+  const {stores,files:fichiersValables,exclues}=await selectionExport(snapshot);
+  // Conserver le compteur historique R-E-11 des traces vers une édition absente. Le bilan
+  // B3 décrit désormais aussi les autres exclusions, sans aucune suppression dans la base.
+  const editionsPresentes = new Set((snapshot.book_editions || []).map((e) => e?.id).filter(validKey));
   let tracesOrphelines = 0;
   for (const name of ['library_activity', 'rediscovery_prefs']) {
-    const gardees = (stores[name] || []).filter((row) => !(record(row) && validKey(row.edition_id) && !editionsPresentes.has(row.edition_id)));
-    tracesOrphelines += (stores[name] || []).length - gardees.length;
-    stores[name] = gardees;
+    tracesOrphelines += (snapshot[name]||[]).filter(row=>record(row)&&validKey(row.edition_id)&&!editionsPresentes.has(row.edition_id)).length;
   }
-  const errors = validateRows(stores);
-  // Une incohérence déjà présente ne doit pas empêcher de conserver une copie.
-  // Elle est signalée à l’export et restera bloquante à l’inspection avant restauration.
-  const warnings = checkRelations(stores, new Set(snapshot.files.map((f) => f.sha256)));
-  if (errors.length) throw new Error('Bibliothèque incohérente : ' + errors.slice(0, 10).join(' · '));
+  const warnings = [];
   const entries = [], dataFiles = [], files = [];
   const counts = {};
   const enc = new TextEncoder();
@@ -253,8 +321,7 @@ export async function createArchive(db, { deviceName = '' } = {}) {
   let bytesTotal = 0;
   const manquantes = [];
   const copies = { serveur: 0, inconnues: 0 };
-  for (const file of snapshot.files) {
-    if (!HASH.test(file.sha256)) throw new Error('Fichier source invalide : ' + file.sha256);
+  for (const file of fichiersValables) {
     const remote = remoteValide(file.remote) ? file.remote : undefined;
     const mime = validKey(file.mime) ? file.mime : (validKey(file.blob?.type) ? file.blob.type : 'application/octet-stream');
     if (!(file.blob instanceof Blob)) {
@@ -282,12 +349,12 @@ export async function createArchive(db, { deviceName = '' } = {}) {
   counts.files = files.length; // missing_files n'entre PAS dans counts : un client plus ancien refuse tout décompte de magasin inconnu
   const manifest = {
     format: ARCHIVE_FORMAT, format_version: ARCHIVE_FORMAT_VERSION, app_version: APP_VERSION,
-    created_at: new Date().toISOString(), device_name: deviceName || null, counts, data_files: dataFiles, files, missing_files: manquantes,
+    created_at: new Date().toISOString(), device_name: deviceName || null, counts, data_files: dataFiles, files, missing_files: manquantes,...(exclues.length?{exclues}:{}),
   };
   entries.unshift({ path: 'manifest.json', data: JSON.stringify(manifest, null, 2) });
   entries.push({ path: 'README.txt', data: README_TXT });
   const zip = createZip(entries);
-  return { blob: new Blob([zip], { type: 'application/zip' }), manifest, bytes: zip.length, filesBytes: bytesTotal, warnings, tracesOrphelines, missingFiles: manquantes.length, copies };
+  return { blob: new Blob([zip], { type: 'application/zip' }), manifest, bytes: zip.length, filesBytes: bytesTotal, warnings, tracesOrphelines, missingFiles: manquantes.length, copies,exclues };
 }
 
 // Inspection isolée : aucune écriture. Les archives v1 complètes existantes restent acceptées.
@@ -364,8 +431,9 @@ export async function inspectArchive(arrayBuffer, {db = null} = {}) {
     errors.push(...relationErrors);
     try { await verifierPreuvesSources(payload.stores); } catch(e) { errors.push('Preuve de source invalide : '+e.message); }
     if (payload.stores.settings?.some((r) => record(r) && SECRET_SETTING_KEYS.includes(r.key))) warnings.push('Les réglages secrets présents dans cette archive seront ignorés.');
+    let exclues=[];try{exclues=lireExclusions(manifest,payload.stores,[...payload.files,...payload.missing]);}catch(e){errors.push(e.code);}
     const inspection = {
-      ok: errors.length === 0, errors, warnings, manifest, payload,
+      ok: errors.length === 0, errors, warnings, manifest, payload,exclues,
       summary: { counts: Object.fromEntries(Object.entries(payload.stores).map(([name, rows]) => [name, rows.length])),
         files_ok: payload.files.length, files_missing: missing, hash_mismatches: hashMismatch, relation_errors: relationErrors.length,
         files_distants: payload.missing.length, files_copies: payload.files.filter((f) => own(f, 'bytes_sha256')).length },
@@ -401,6 +469,7 @@ function requireInspection(inspection, mode) {
   const payload = inspection?.payload;
   // Ronde 1 (#25) : un `missing` présent qui n'est pas un tableau est refusé ici, nommé — pas plus loin, par une clé invalide.
   if (!inspection?.ok || !record(payload) || !Array.isArray(payload.files) || (payload.missing != null && !Array.isArray(payload.missing))) throw new Error('Archive non validée');
+  lireExclusions(inspection.manifest,payload.stores,[...payload.files,...payload.missing||[]]);
   const errors = validateRows(payload.stores);
   if(exigeArchive4(payload.stores,inspection.manifest?.format_version))errors.push('Les révisions de source et lectures exactes exigent le format 4.');
   if(inspection.manifest?.format_version<5&&contientTraductionsExactes(payload.stores))errors.push('Les groupes d’ingrédients et traductions exactes exigent le format 5.');

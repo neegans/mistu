@@ -43,6 +43,43 @@ export const archiveEnCours = () => archiveOperation;
 // Posée par le bouton d’archive de cette page, jamais déduite d’un réglage ni d’une date.
 const ARCHIVE_FLAG = 'cuisineos.archive_created';
 
+function motifExclusionArchive(motif) {
+  switch (motif) {
+    case 'cle_invalide': return t('identifiant invalide');
+    case 'serialisation_invalide': return t('contenu illisible');
+    case 'cycle_recette_invalide': return t('cycle de recette invalide');
+    case 'exception_livre_invalide': return t('exception de livre invalide');
+    case 'cycle_livre_invalide': return t('cycle de livre invalide');
+    case 'source_invalide': return t('source invalide');
+    case 'version_invalide': return t('version de recette invalide');
+    case 'traduction_invalide': return t('traduction invalide');
+    case 'cuisine_invalide': return t('séance ou minuteur invalide');
+    case 'stock_invalide': return t('stock invalide');
+    case 'relation_invalide': return t('référence invalide');
+    case 'relation_absente': return t('référence introuvable');
+    case 'dependance_exclue': return t('fiche liée exclue');
+    case 'fichier_invalide': return t('fichier invalide');
+    default: return t('motif inconnu');
+  }
+}
+
+function panneauExclusionsArchive(exclues) {
+  if (!Array.isArray(exclues) || !exclues.length) return null;
+  const lignes = exclues.filter(r => r && typeof r.store === 'string' && typeof r.motif === 'string');
+  if (!lignes.length) return null;
+  const groupes = new Map();
+  for (const ligne of lignes) groupes.set(ligne.motif, (groupes.get(ligne.motif) || 0) + 1);
+  return el('div', {class:'status warn stack', style:{display:'block',overflowWrap:'anywhere'}, dataset:{role:'exclusions-archive'}},
+    ...[...groupes].map(([motif,n]) => el('p', null, n === 1
+      ? t('1 fiche exclue ({motif})', {motif:motifExclusionArchive(motif)})
+      : t('{n} fiches exclues ({motif})', {n,motif:motifExclusionArchive(motif)}))),
+    el('p', null, t('Ces fiches ne sont pas dans cette archive.')),
+    el('details', null, el('summary', null, t('Voir les fiches exclues')),
+      el('ul', null, ...lignes.slice(0,100).map(r => el('li', null,
+        `${tronquer(r.store,NOM_MAX)} · ${typeof r.id === 'string' ? tronquer(r.id,NOM_MAX) : t('Fiche non identifiable')} — ${motifExclusionArchive(r.motif)}`))),
+      lignes.length > 100 ? el('p', null, t('La liste complète est conservée dans l’archive.')) : null));
+}
+
 async function compteursDiagnostic(base) {
   const stores=[...new Set([...MAGASINS_FICHIERS,'outbox','sync_conflicts','sync_state'])],tx=await base.tx(stores,'readonly');
   return new Promise((resolve,reject)=>{
@@ -179,6 +216,12 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
       el('ul', null, ...warnings.slice(0, 10).map((warning) => el('li', null, warning)))));
   };
   showExportWarnings(lb?.warnings);
+  const showExportExclusions = (exclues) => {
+    backupStatus.querySelector('[data-role="exclusions-archive"]')?.remove();
+    const bilan = panneauExclusionsArchive(exclues);
+    if (bilan) backupStatus.append(bilan);
+  };
+  showExportExclusions(lb?.exclues);
   const restoreBox = el('div', null);
   const archiveControls = el('div', { class: 'row' });
   const setArchiveBusy = (busy) => {
@@ -193,7 +236,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
       button.textContent = t('Préparation de l’archive…');
       let generated = false;
       try {
-        const { blob, manifest, bytes, warnings, missingFiles = 0, copies, tracesOrphelines = 0 } = await createArchive(repo.db, { deviceName: s.device_name });
+        const { blob, manifest, bytes, warnings, missingFiles = 0, copies, tracesOrphelines = 0, exclues = [] } = await createArchive(repo.db, { deviceName: s.device_name });
         telechargerArchive(blob, 'cuisine-os-' + manifest.created_at.slice(0, 19).replace(/[:T]/g, '-') + '.zip');
         generated = true;
         // § 4.6 : le bilan de création, une phrase par cas (pages manquantes, copies du serveur, octets inconnus) ; rien à dire, rien de dit. Posé
@@ -201,10 +244,11 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
         backupStatus.querySelector('[data-role="bilan-archive"]')?.remove();
         const bilanArchive = messagesArchive({ missingFiles, copies, tracesOrphelines }); // lot E (R-E-11) : les traces écartées, dans le même bilan
         if (bilanArchive.length) backupStatus.append(el('div', { class: 'status warn', dataset: { role: 'bilan-archive' } }, ...bilanArchive.map((p) => el('p', null, p))));
+        showExportExclusions(exclues);
         // Une archive existe pour cette session : « Changer de compte sur cet appareil » l’exige.
         try { sessionStorage.setItem(ARCHIVE_FLAG, manifest.created_at); } catch { /* stockage indisponible */ }
         showExportWarnings(warnings);
-        await repo.setSetting('last_backup', { at: manifest.created_at, counts: manifest.counts, files: manifest.files.length, bytes, state: 'generated', warnings });
+        await repo.setSetting('last_backup', { at: manifest.created_at, counts: manifest.counts, files: manifest.files.length, bytes, state: 'generated', warnings, exclues });
         backupStatus.firstChild.replaceWith(el('div', { class: 'status info' }, t('Dernière archive générée') + ' : ' + formatDate(manifest.created_at, { withTime: true }) + ' — ' + (bytes / 1048576).toFixed(1) + ' Mo'));
         toast(t('Archive générée ({n} Mo). Vérifie qu’elle est bien enregistrée.', { n: (bytes / 1048576).toFixed(1) }));
       } catch (err) {
@@ -352,6 +396,8 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
         el('ul', null, ...insp.errors.slice(0, 30).map((error) => el('li', null, error))));
       return box;
     }
+    const exclusions = panneauExclusionsArchive(insp.exclues);
+    if (exclusions) box.append(exclusions);
     const controls = el('div', { class: 'row' });
     const result = el('div', { class: 'stack', role: 'status' });
     let appliedOnce = false;

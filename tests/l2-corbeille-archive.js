@@ -1,4 +1,4 @@
-import { withDatabase } from './backup.js';
+import { withDatabase, rewriteArchive } from './backup.js';
 import { createArchive, inspectArchive, applyArchive, verifyRestored } from '../src/domain/backup.js';
 import { createZip, readZip, textOf } from '../src/core/zip.js';
 import { lireEtatRecette } from '../src/domain/cycle-edition.js';
@@ -39,10 +39,11 @@ export async function runL2CorbeilleArchiveTests({ eq, ok }) {
     ok(await refuse(() => applyArchive(db, vide, { mode: 'replace' })), 'L2 archive : remplacement ne purge pas édition protégée omise');
     eq((await db.get('book_editions', 'l2-ed')).lifecycle_id, 'edition-trash', 'L2 archive : édition omise conservée');
   });
-  await withDatabase(async db => {
-    await seed(db); await db.put('book_editions', { ...edition, trash_mode: 'inconnu' });
-    ok(await refuse(() => createArchive(db)), 'L2 archive : mode inconnu refuse une archive prétendue valide');
-  });
+  // L'export B3 écarte désormais la fiche invalide ; l'inspecteur reste strict sur un ZIP hostile.
+  const modeInconnu=await inspectArchive(await rewriteArchive(archive.blob,async({rewriteRows})=>{
+    await rewriteRows('book_editions',rows=>{rows[0].trash_mode='inconnu';});
+  }));
+  ok(!modeInconnu.ok, 'L2 archive : mode inconnu refuse une archive prétendue valide');
   await withDatabase(async db => {
     await seed(db); const mutate = db.mutate.bind(db); let premier = true;
     db.mutate = async args => { if (premier) { premier = false; await mutate({ puts: { book_editions: [{ ...edition, lifecycle_id: 'retour-concurrent', trashed_at: null, trash_mode: null }] }, origin: 'remote' }); } return mutate(args); };
@@ -123,11 +124,10 @@ export async function runL2CorbeilleArchiveTests({ eq, ok }) {
     ok(ancienne.ok, `L2 archive : ancien format ${format} accepté sans cycle de livre`);
     await withDatabase(async db => { await applyArchive(db, ancienne); ok((await verifyRestored(db, ancienne)).ok, `L2 archive : ancien format ${format} restauré fidèlement`); });
   }
-  await withDatabase(async db => {
-    await db.put('recipes', recette);
-    const invalide = await inspectArchive(await (await createArchive(db)).blob.arrayBuffer());
-    ok(!invalide.ok, 'L2 archive : membre sans son édition refusé à l’inspection');
-  });
+  const sansEdition=await inspectArchive(await rewriteArchive(archive.blob,async({rewriteRows})=>{
+    await rewriteRows('book_editions',rows=>{rows.length=0;});
+  }));
+  ok(!sansEdition.ok, 'L2 archive : membre sans son édition refusé à l’inspection');
   const blob = new Blob(['photo conservée'], { type: 'image/jpeg' }), sha256 = await sha256Hex(blob);
   let avecPhoto;
   await withDatabase(async db => {

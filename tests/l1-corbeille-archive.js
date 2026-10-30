@@ -1,4 +1,4 @@
-import { withDatabase } from './backup.js';
+import { withDatabase, rewriteArchive } from './backup.js';
 import { createArchive, inspectArchive, applyArchive, verifyRestored } from '../src/domain/backup.js';
 import { createZip, readZip, textOf } from '../src/core/zip.js';
 
@@ -36,11 +36,11 @@ export async function runL1CorbeilleArchiveTests({ eq, ok }) {
     ok(await refuse(() => applyArchive(db, inspection)), 'L1 archive : changement après inspection refusé dans transaction');
     eq((await db.get('recipes', 'l1-r')).lifecycle_id, 'restore-concurrent', 'L1 archive : cycle concurrent intact');
   });
-  let partielle;
-  await withDatabase(async db => {
-    await db.putBatch({ recipe_versions: [{ ...version, steps: [{ text: 'Enfant de cycle inconnu' }] }] });
-    partielle = await inspectArchive(await (await createArchive(db)).blob.arrayBuffer());
-  });
+  // B3 filtre cet orphelin à l'export : fabriquer le ZIP hostile conserve ici la preuve
+  // que l'inspection, puis applyArchive, refusent toujours un enfant sans parent.
+  const partielle = await inspectArchive(await rewriteArchive(ancienne.blob,async({rewriteRows})=>{
+    await rewriteRows('recipes',rows=>{rows.length=0;});
+  }));
   eq(partielle.ok, false, 'L1 archive : enfant sans parent refusé dès inspection');
   await withDatabase(async db => {
     await db.putBatch({ recipes: [recette('restore-2', null)], recipe_versions: [version] });

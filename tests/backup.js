@@ -206,12 +206,12 @@ export async function runBackupTests({ eq, ok }) {
     const archive = await createArchive(db);
     ok(archive.blob instanceof Blob && archive.blob.size > 0, 'Sauvegarde : copie ZIP générée malgré une ancienne relation cassée');
     eq(archive.tracesOrphelines, 0, 'Sauvegarde : une relation cassée vers une recette n’est pas une trace écartée (R-E-11)');
-    ok(Array.isArray(archive.warnings) && archive.warnings.length > 0, 'Sauvegarde : relation cassée signalée dans les avertissements');
+    eq(archive.exclues,[{store:'library_activity',id:activity.id,motif:'relation_absente'}], 'Sauvegarde B3 : relation cassée attribuée à la seule fiche exclue');
     const bytes = await archive.blob.arrayBuffer();
     const entries = readZip(bytes);
-    eq(JSON.parse(textOf(entries.get('data/library_activity.json'))), [activity], 'Sauvegarde : la fiche orpheline est conservée dans la copie');
+    eq(JSON.parse(textOf(entries.get('data/library_activity.json'))), [], 'Sauvegarde B3 : la fiche orpheline ne rend plus la copie non restaurable');
     const inspection = await inspectArchive(bytes);
-    ok(!inspection.ok && inspection.errors.length > 0, 'Restauration : copie aux relations cassées refusée avant écriture');
+    ok(inspection.ok && inspection.errors.length === 0, 'Restauration B3 : copie filtrée inspectée sans erreur');
     eq(await snapshotValue(db), before, 'Sauvegarde avec avertissement : source intégralement inchangée');
   }));
 
@@ -240,15 +240,15 @@ export async function runBackupTests({ eq, ok }) {
     eq(await snapshotValue(db), before, 'Sauvegarde : base source INCHANGÉE — rien n’est supprimé en base (mutant : orphelin supprimé de la base → rouge)');
   }));
 
-  // Ronde 1 de la tâche 3 du lot E : une activité à edition_id INVALIDE (42, espaces) n'est pas une trace écartée — elle reste dans l'archive et y est
-  // signalée comme avant le lot (« identifiant invalide ») ; seule une clé VALIDE absente des éditions est écartée.
-  await run('trace à edition_id invalide : signalée, jamais écartée (R-E-11)', () => withDatabase(async (db) => {
+  // B3 distingue une relation invalide d'une trace pointant une édition absente : les deux
+  // fiches sont maintenant écartées de l'archive restaurable, sans changer le compteur historique R-E-11.
+  await run('trace à edition_id invalide : exclusion précise (B3)', () => withDatabase(async (db) => {
     await prepared(db);
     await db.putBatch({ library_activity: [{ id: 'la_num', edition_id: 42, event_type: 'open_book', occurred_at: '2026-01-01T00:00:00.000Z', updated_at: DATE_FIXTURE }, { id: 'la_blanc', edition_id: '  ', event_type: 'open_book', occurred_at: '2026-01-02T00:00:00.000Z', updated_at: DATE_FIXTURE }] });
     const archive = await createArchive(db);
     const gardees = JSON.parse(textOf(readZip(await archive.blob.arrayBuffer()).get('data/library_activity.json'))).map((a) => a.id).filter((id) => id === 'la_num' || id === 'la_blanc').sort();
-    eq([archive.tracesOrphelines, gardees, archive.warnings.filter((w) => w === 'library_activity.edition_id : identifiant invalide').length], [0, ['la_blanc', 'la_num'], 2],
-      'Sauvegarde : une activité à edition_id invalide n’est ni écartée ni comptée, elle reste signalée « identifiant invalide » (mutant : validKey remplacé par != null → écartées et comptées → rouge)');
+    eq([archive.tracesOrphelines, gardees, archive.exclues], [0, [], [{store:'library_activity',id:'la_blanc',motif:'relation_invalide'},{store:'library_activity',id:'la_num',motif:'relation_invalide'}]],
+      'Sauvegarde B3 : identifiants de relation invalides écartés avec motif exact, hors compteur des éditions absentes');
   }));
 
   await run('archives refusées', () => withDatabase(async (db) => {

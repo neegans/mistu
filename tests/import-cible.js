@@ -245,15 +245,18 @@ export async function runImportCibleTests({ eq, ok }) {
     // Aller-retour AVEC une ligne imports : archivée, comptée, retrouvée telle quelle.
     const ligne = { id: 'imp_ar', kind: 'recette', edition_id: 'ed1', recipe_id: 'rc1', scan_session_id: null, page_ids: ['pg_absente'], status: 'a_verifier', updated_at: DATE };
     await source.put('imports', ligne);
-    const insp2 = await inspectArchive(await (await createArchive(source)).blob.arrayBuffer());
+    const avecImport = await createArchive(source);
+    const insp2 = await inspectArchive(await avecImport.blob.arrayBuffer());
     eq([insp2.ok, insp2.errors, insp2.manifest?.counts.imports], [true, [], 1], 'aller-retour : une ligne imports est archivée et comptée ; recipe_id et page_ids ne sont pas des relations (une page absente ne bloque pas)');
     await withDatabase(async (cible) => {
       await applyArchive(cible, insp2, { mode: 'replace' });
       eq([await cible.get('imports', 'imp_ar'), (await verifyRestored(cible, insp2, { mode: 'replace' })).ok], [ligne, true], 'aller-retour : la ligne imports est retrouvée telle quelle');
     });
-    // Une ligne imports dont l'édition manque est une relation cassée : refusée comme les autres.
-    await source.put('imports', { ...ligne, id: 'imp_orpheline', edition_id: 'ed_absente' });
-    const insp3 = await inspectArchive(await (await createArchive(source)).blob.arrayBuffer());
+    // L'export B3 écarte désormais les orphelins. Un ZIP hostile garde le contrôle
+    // d'inspection de cette relation, sans exclusion descriptive qui masquerait le refus.
+    const insp3 = await inspectArchive(await rewriteArchive(avecImport.blob, async ({rewriteRows}) => {
+      await rewriteRows('imports', rows => rows.push({ ...ligne, id: 'imp_orpheline', edition_id: 'ed_absente' }));
+    }));
     ok(!insp3.ok && insp3.errors.some((e) => e.startsWith('imports.edition_id → book_editions ed_absente')), 'archive : imports.edition_id est une relation vérifiée');
     // data/recipes.json absent : toujours refusé, nommé.
     const sansRecettes = await rewriteArchive(archive.blob, ({ manifest, entries }) => {
