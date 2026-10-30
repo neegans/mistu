@@ -48,6 +48,7 @@ const porteSourcesL5 = row => record(row) && champsSourcesL5.some(k=>own(row,k))
 const exigeArchive4 = (stores,version) => version<4 && ['source_pages','source_documents','scan_sessions','imports'].some(s=>(stores[s]||[]).some(porteSourcesL5));
 const contientSourcesExactes = stores => ['source_pages','source_documents','scan_sessions'].some(s=>(stores[s]||[]).some(porteSourcesL5));
 const restaurationsSources = new WeakMap();
+const observationsArchives = new WeakMap();
 const MAGASINS_CAPTURE_SOURCES = ['source_documents','source_pages','scan_sessions','imports','book_editions','recipes','recipe_versions','recipe_translations','cook_sessions','timer_launches','cook_history','inventory'];
 async function verifierPreuvesSources(stores) {
   await verifierPreuvesTraductionsArchive(stores);
@@ -290,7 +291,7 @@ export async function createArchive(db, { deviceName = '' } = {}) {
 }
 
 // Inspection isolée : aucune écriture. Les archives v1 complètes existantes restent acceptées.
-export async function inspectArchive(arrayBuffer) {
+export async function inspectArchive(arrayBuffer, {db = null} = {}) {
   const errors = [], warnings = [];
   let manifest = null;
   const payload = { stores: Object.create(null), files: [], missing: [] };
@@ -363,12 +364,32 @@ export async function inspectArchive(arrayBuffer) {
     errors.push(...relationErrors);
     try { await verifierPreuvesSources(payload.stores); } catch(e) { errors.push('Preuve de source invalide : '+e.message); }
     if (payload.stores.settings?.some((r) => record(r) && SECRET_SETTING_KEYS.includes(r.key))) warnings.push('Les réglages secrets présents dans cette archive seront ignorés.');
-    return {
+    const inspection = {
       ok: errors.length === 0, errors, warnings, manifest, payload,
       summary: { counts: Object.fromEntries(Object.entries(payload.stores).map(([name, rows]) => [name, rows.length])),
         files_ok: payload.files.length, files_missing: missing, hash_mismatches: hashMismatch, relation_errors: relationErrors.length,
         files_distants: payload.missing.length, files_copies: payload.files.filter((f) => own(f, 'bytes_sha256')).length },
     };
+    if (inspection.ok && db) {
+      const snapshot = await db.getSnapshot([...MAGASINS_GRAPHE_ARCHIVE, 'sync_state']);
+      const divergences = conflitsDansSnapshot(snapshot, payload.stores, 'merge');
+      observationsArchives.set(inspection, {db, snapshot});
+      if (divergences.length) {
+        inspection.recettes = divergences.filter(d => d.entite !== 'edition').map(d => d.id);
+        inspection.editions = divergences.filter(d => d.entite === 'edition').map(d => d.id);
+        const anciennes = new Map(payload.stores.recipes.map(r => [r.id, r]));
+        inspection.refus = !inspection.editions.length && inspection.recettes.length && inspection.recettes.every(id =>
+          lireCycleRecette(anciennes.get(id)).id === null && lireCycleRecette(snapshot.recipes.find(r => r.id === id)).id !== null)
+          ? 'retrait_posterieur' : 'cycles_divergents';
+        if (!inspection.editions.length && inspection.recettes.length) {
+          const selection = selectionFusion(payload.stores, snapshot, inspection.recettes);
+          inspection.fusionSansRecettes = {ecartees:selection.ecartees,
+            recettes:selection.ecartees.filter(r=>r.store==='recipes').map(r=>{const fiche=snapshot.recipes.find(x=>x.id===r.id)||anciennes.get(r.id);return {...r,titre:fiche?.display_title||fiche?.original_title||''};}),
+            fiches:compterFichesSynchronisees({payload:{...payload,stores:selection.stores}})};
+        }
+      }
+    }
+    return inspection;
   } catch (e) {
     errors.push('Archive illisible : ' + e.message);
     return fail();
@@ -520,8 +541,8 @@ function verifierIdentitesSources(stores,locales) {
 }
 // Une collision de clé ne peut détacher une copie d'un parent protégé, y compris dans un historique ou un repas.
 const MAGASINS_GRAPHE_ARCHIVE = DATA_STORES.filter(store => store !== 'settings');
-function deplacementsGraphes(stores, locales) {
-  const avant = capturerContextesInitiaux(locales), apres = capturerContextesInitiaux(stores);
+function deplacementsGraphes(stores, locales, mode) {
+  const avant = capturerContextesInitiaux(locales), apres = capturerContextesInitiaux(mode==='merge'?combinerArchives(locales,stores):stores);
   const cles = new Set(Object.entries(stores).flatMap(([store, rows]) => (rows || []).map(row => JSON.stringify([store, row[STORES[store].keyPath]]))));
   const parentsSources = { source_documents:['edition_id','scan_session_id'],source_pages:['edition_id','document_id'],scan_sessions:['edition_id'] };
   const collisionsSources = new Set();
@@ -562,28 +583,101 @@ function conflitsCycles(courantes, entrantes, mode, deplaces = new Set(), editio
   }).map(r => ({ id: r.id, titre: typeof r.original_title === 'string' ? r.original_title : r.id, cycle: lireCycleRecette(r) }));
 }
 const editionsAvecCycle = locales => new Set((locales.book_editions || []).filter(e => lireCycleEdition(e).id !== null || lireCycleEdition(e).etat !== 'active').map(e => e.id));
+function conflitsDansSnapshot(locales, stores, mode) {
+  const deplaces = deplacementsGraphes(stores, locales, mode);
+  return [...conflitsCycles(locales.recipes || [], stores.recipes || [], mode, deplaces.recettes, editionsAvecCycle(locales)),
+    ...conflitsEditions(locales.book_editions || [], stores.book_editions || [], mode, deplaces.editions)];
+}
+const erreurExclusion = code => { throw Object.assign(new Error(code), {code}); };
+const cleFiche = (store, row) => JSON.stringify([store, row[STORES[store].keyPath]]);
+function combinerArchives(locales, entrantes) {
+  return Object.fromEntries(DATA_STORES.map(store => [store, [...new Map([...(locales[store] || []), ...(entrantes[store] || [])]
+    .map(row => [row[STORES[store].keyPath], row])).values()]]));
+}
+// Les sources et repas partagés ne sont jamais réécrits pour enlever une référence : leurs
+// copies locales restent utilisables. Une dépendance absente de la base écarte la fiche entière.
+function selectionFusion(stores, locales, recettes) {
+  const ids = new Set(recettes), interdites = new Set(), ecartees = new Map();
+  for (const graphe of [stores, locales]) for (const contexte of capturerContextesInitiaux(graphe).recettes) {
+    if (ids.has(contexte.recipe_id)) for (const r of contexte.records) if (r.store !== 'files') interdites.add(JSON.stringify([r.store,r.id]));
+  }
+  const ajouter=(store,id)=>{if(validKey(id))interdites.add(JSON.stringify([store,id]));};
+  const sources=new Set(['source_pages','source_documents','scan_sessions','imports']);
+  // Les anciennes captures n'avaient pas toujours recipe_ids sur leur séance. Partir aussi
+  // des pointeurs de la recette/version et préserver toute la chaîne source, sans en réécrire les liens.
+  for(const graphe of [stores,locales]){
+    for(const row of graphe.recipes||[])if(ids.has(row.id)){
+      for(const id of row.source_page_ids||[])ajouter('source_pages',id);
+      ajouter('source_pages',row.index_page_id);ajouter('imports',row.index_import_id);
+    }
+    for(const row of graphe.recipe_versions||[])if(ids.has(row.recipe_id)){
+      for(const id of row.provenance?.source_page_ids||[])ajouter('source_pages',id);
+      ajouter('source_documents',row.provenance?.source_document_id);
+    }
+  }
+  let taille=-1;
+  while(taille!==interdites.size){
+    taille=interdites.size;
+    for(const graphe of [stores,locales])for(const store of sources)for(const row of graphe[store]||[]){
+      const liens=RELATIONS.filter(([enfant,,parent])=>enfant===store&&sources.has(parent))
+        .flatMap(([,champ,parent])=>relationValues(row,champ.split('.')).filter(validKey).map(id=>[parent,id]));
+      if(store==='imports')for(const id of row.page_ids||[])if(validKey(id))liens.push(['source_pages',id]);
+      const cle=cleFiche(store,row);
+      if(liens.some(([parent,id])=>interdites.has(JSON.stringify([parent,id]))))interdites.add(cle);
+      if(interdites.has(cle))for(const [parent,id]of liens)ajouter(parent,id);
+    }
+  }
+  let selection = Object.fromEntries(DATA_STORES.map(store => [store, (stores[store] || []).filter(row => {
+    const key = cleFiche(store,row);
+    if (!interdites.has(key)) return true;
+    ecartees.set(key,{store,id:row[STORES[store].keyPath],motif:'recette_exclue'});return false;
+  })]));
+  let change = true;
+  while (change) {
+    change = false;
+    const effectif = combinerArchives(locales, selection), presents = new Map(DATA_STORES.map(store => [store,new Set(effectif[store].map(r=>r[STORES[store].keyPath]))]));
+    for (const store of DATA_STORES) selection[store] = selection[store].filter(row => {
+      const manque = RELATIONS.some(([enfant,champ,parent]) => enfant === store && parent !== 'files' &&
+        relationValues(row,champ.split('.')).some(id => id != null && id !== '' && !presents.get(parent)?.has(id)));
+      if (!manque) return true;
+      ecartees.set(cleFiche(store,row),{store,id:row[STORES[store].keyPath],motif:'dependance_exclue'});change=true;return false;
+    });
+  }
+  return {stores:selection,ecartees:[...ecartees.values()]};
+}
 export async function conflitsCyclesArchive(db, inspection, { mode = 'merge' } = {}) {
   requireInspection(inspection, mode);
-  const noms = MAGASINS_GRAPHE_ARCHIVE;
-  const lignes = await Promise.all(noms.map(store => db.getAll(store)));
-  const locales = Object.fromEntries(noms.map((store, i) => [store, lignes[i]]));
-  const deplaces = deplacementsGraphes(inspection.payload.stores, locales);
-  return [...conflitsCycles(locales.recipes, inspection.payload.stores.recipes || [], mode, deplaces.recettes, editionsAvecCycle(locales)), ...conflitsEditions(locales.book_editions, inspection.payload.stores.book_editions || [], mode, deplaces.editions)];
+  return conflitsDansSnapshot(await db.getSnapshot(MAGASINS_GRAPHE_ARCHIVE),inspection.payload.stores,mode);
 }
 
-export async function applyArchive(db, inspection, { mode = 'merge', horodater = null } = {}) {
+export async function applyArchive(db, inspection, { mode = 'merge', horodater = null, exclure = [], estCourante = () => true } = {}) {
   requireInspection(inspection, mode);
+  if (!Array.isArray(exclure) || exclure.some(id => !validKey(id)) || new Set(exclure).size !== exclure.length) erreurExclusion('exclusion_invalide');
+  if (exclure.length && mode !== 'merge') erreurExclusion('exclusion_fusion_seulement');
+  const observation = observationsArchives.get(inspection);
+  if(!estCourante()||observation&&observation.db!==db)erreurExclusion('contexte_archive_change');
+  const connexion = await db.open();
+  const verifierPortee = () => {if (!estCourante() || db.idb !== connexion || observation && observation.db !== db) erreurExclusion('contexte_archive_change');};
+  verifierPortee();
   await verifierPreuvesSources(inspection.payload.stores);
-  const owner = (await db.get('sync_state', 'user_id'))?.value ?? null;
-  const epoqueAvant=await db.get('sync_state',CLE_EPOQUE_EDITEUR);
-  const divergences = await conflitsCyclesArchive(db, inspection, { mode });
+  const snapshotAvant=await db.getSnapshot([...MAGASINS_GRAPHE_ARCHIVE,'sync_state']);
+  verifierPortee();
+  const owner = snapshotAvant.sync_state.find(r=>r.key==='user_id')?.value ?? null;
+  const epoqueAvant=snapshotAvant.sync_state.find(r=>r.key===CLE_EPOQUE_EDITEUR);
+  if (observation && (canonical(observation.snapshot.sync_state.find(r=>r.key==='user_id')??null)!==canonical(snapshotAvant.sync_state.find(r=>r.key==='user_id')??null)
+    || canonical(observation.snapshot.sync_state.find(r=>r.key===CLE_EPOQUE_EDITEUR)??null)!==canonical(epoqueAvant??null))) erreurExclusion('contexte_archive_change');
+  const divergentes = new Set(conflitsDansSnapshot(snapshotAvant,inspection.payload.stores,mode).filter(r=>r.entite!=='edition').map(r=>r.id));
+  if (exclure.some(id=>!divergentes.has(id))) erreurExclusion('exclusion_invalide');
+  if (observation && exclure.some(id=>!memeCycleRecette(observation.snapshot.recipes.find(r=>r.id===id),snapshotAvant.recipes.find(r=>r.id===id)))) erreurExclusion('contexte_archive_change');
+  const selection = exclure.length ? selectionFusion(restoredStores(inspection),snapshotAvant,exclure) : {stores:restoredStores(inspection),ecartees:[]};
+  const divergences = conflitsDansSnapshot(snapshotAvant,selection.stores,mode);
   if (divergences.length) throw new ErreurCycleArchive(divergences);
-  const sourcesAvant=await db.getSnapshot(MAGASINS_CAPTURE_SOURCES);
-  verifierIdentitesSources(inspection.payload.stores,sourcesAvant);
-  verifierIdentitesTraductionsArchive(inspection.payload.stores,sourcesAvant);
-  verifierIdentitesCuisineArchive(inspection.payload.stores,sourcesAvant);
-  await verifierIdentitesInventaireArchive({batch:inspection.payload.stores,snapshot:sourcesAvant});
-  let batch = structuredClone(restoredStores(inspection));
+  const sourcesAvant=Object.fromEntries(MAGASINS_CAPTURE_SOURCES.map(store=>[store,snapshotAvant[store]]));
+  verifierIdentitesSources(selection.stores,sourcesAvant);
+  verifierIdentitesTraductionsArchive(selection.stores,sourcesAvant);
+  verifierIdentitesCuisineArchive(selection.stores,sourcesAvant);
+  await verifierIdentitesInventaireArchive({batch:selection.stores,snapshot:sourcesAvant});
+  let batch = structuredClone(selection.stores);
   normaliserFiches(batch, { horodater, sourcesExactes:contientSourcesExactes(batch), traductionsExactes:contientTraductionsExactes(batch), cuisineExacte:contientCuisineExacte(batch), historiquesInventaire:historiquesInventaireExacts({inventory:[...(sourcesAvant.inventory||[]),...(batch.inventory||[])]}) });
   const transfert=await preparerSourcesArchive({batch,snapshot:sourcesAvant,owner_id:owner});
   const traductions=await preparerTraductionsArchive({batch:transfert.batch,snapshot:sourcesAvant,owner_id:owner});
@@ -613,12 +707,13 @@ export async function applyArchive(db, inspection, { mode = 'merge', horodater =
   const locales = {};
   const liensGardes = Object.fromEntries(MAGASINS_GRAPHE_ARCHIVE.filter(store => store !== 'recipes').map(store => [store, [{ toutes: true, verifier: rows => { locales[store] = rows; } }]]));
   const cycleGarde = { toutes: true, verifier: courantes => {
+    verifierPortee();
     locales.recipes = courantes;
     verifierIdentitesSources(batch,locales);
-    for(const store of MAGASINS_CAPTURE_SOURCES) {
-      if(canonical(locales[store])!==canonical(sourcesAvant[store]))throw new ErreurSourcesArchive(store,null);
+    for(const store of exclure.length?MAGASINS_GRAPHE_ARCHIVE:MAGASINS_CAPTURE_SOURCES) {
+      if(canonical(locales[store])!==canonical(snapshotAvant[store]))throw new ErreurSourcesArchive(store,null);
     }
-    const deplaces = deplacementsGraphes(batch, locales);
+    const deplaces = deplacementsGraphes(batch, locales, mode);
     const ecarts = [...conflitsCycles(courantes, batch.recipes || [], mode, deplaces.recettes, editionsAvecCycle(locales)), ...conflitsEditions(locales.book_editions, batch.book_editions || [], mode, deplaces.editions)];
     if (ecarts.length) throw new ErreurCycleArchive(ecarts);
   } };
@@ -635,8 +730,9 @@ export async function applyArchive(db, inspection, { mode = 'merge', horodater =
     ?{store,id:row.id,cooking_incarnation:row.cooking_incarnation,cooking_revision:row.cooking_revision,cooking_receipts:structuredClone(row.cooking_receipts),cooking_receipt_floor:row.cooking_receipt_floor}
     :{store,id:row.id,cooking_state:structuredClone(row.cooking_state),progress_revisions:Object.fromEntries(Object.entries(row.progress.by_version).map(([id,p])=>[id,p.revision]))}));
   const normalisationsInventaire=(batch.inventory||[]).filter(estLotProtege).map(r=>({id:r.id,stock_revision:r.stock_revision,stock_receipts:structuredClone(r.stock_receipts),stock_receipt_floor:r.stock_receipt_floor}));
-  restaurationsSources.set(inspection,{db,normalisationsSources,normalisationsTraductions,normalisationsCuisine,normalisationsInventaire});
-  return { ...Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length])), files: conditions.length, originauxConserves, normalisationsSources, normalisationsTraductions, normalisationsCuisine, normalisationsInventaire };
+  restaurationsSources.set(inspection,{db,normalisationsSources,normalisationsTraductions,normalisationsCuisine,normalisationsInventaire,
+    selection:structuredClone(selection.stores),archiveSignature:canonical(inspection.payload.stores)});
+  return { ...Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length])), files: conditions.length, originauxConserves, normalisationsSources, normalisationsTraductions, normalisationsCuisine, normalisationsInventaire,ecartees:selection.ecartees };
 }
 
 // Comparaison JSON indépendante de l’ordre des propriétés, sensible à l’ordre des tableaux.
@@ -663,12 +759,13 @@ export async function verifyRestored(db, inspection, { mode = 'merge', horodate 
   const synchronises = new Set(SYNC_STORES);
   const diffs = [];
   const snapshot = await db.getSnapshot(Object.keys(STORES));
-  const expected = restoredStores(inspection);
+  const preuve=restaurationsSources.get(inspection);
+  if(preuve?.db===db&&preuve.archiveSignature!==canonical(inspection.payload.stores))throw new Error('Archive modifiée depuis la restauration.');
+  const expected = preuve?.db===db ? preuve.selection : restoredStores(inspection);
   const sourcesExactes=contientSourcesExactes(expected);
   const traductionsExactes=contientTraductionsExactes(expected);
   const cuisineExacte=contientCuisineExacte(expected);
   const historiquesInventaire=historiquesInventaireExacts({inventory:[...(snapshot.inventory||[]),...(expected.inventory||[])]});
-  const preuve=restaurationsSources.get(inspection);
   const normalisations=normalisationsSources||(preuve?.db===db?preuve.normalisationsSources:[]);
   const traductions=normalisationsTraductions||(preuve?.db===db?preuve.normalisationsTraductions:[])||[];
   const cuisine=normalisationsCuisine||(preuve?.db===db?preuve.normalisationsCuisine:[])||[];

@@ -105,6 +105,7 @@ export function creerPanneauDiagnostic({collecter=collecterDiagnosticApp,navigat
 // Injections (lot G, tâche 2) : createArchive, pickFiles (le choix de l’archive à restaurer) et telechargerArchive (l’enregistrement de l’archive
 // créée) — le bilan de création et le vrai rapport d’inspection s’éprouvent sans téléchargement réel dans le Chrome sans tête.
 export async function renderSettings(params, query, ctx, { fetch, createArchive = createArchiveReel, pickFiles: choisirArchive = pickFiles, telechargerArchive = downloadBlob, telechargerRecettes = downloadBlob } = {}) {
+  const baseArchives=repo.db;
   const s = ctx.settings;
   const root = el('div', {class:'reglages-page'}, pageHeader(t('Réglages'), { subtitle: `Cuisine OS ${APP_VERSION}` }));
   let detruit=false;
@@ -221,7 +222,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
       setArchiveBusy(true);
       restoreBox.replaceChildren(el('p', { class: 'muted' }, t('Validation de l’archive… rien n’est écrit.')));
       try {
-        const insp = await inspectArchive(await files[0].arrayBuffer());
+        const insp = await inspectArchive(await files[0].arrayBuffer(),{db:baseArchives});
         restoreBox.replaceChildren(await restoreReport(insp));
       } catch (err) {
         restoreBox.replaceChildren(el('div', { class: 'status danger' }, t('Lecture de l’archive impossible. Rien n’a été modifié.') + ' ' + err.message));
@@ -343,7 +344,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     for (const phrase of ins.phrases) box.append(el('div', { class: 'status info' }, phrase));
     // Avec un compte, une restauration n’est pas seulement locale : tout ce qu’elle écrit repart au serveur, donc
     // sur les autres appareils. La personne doit le savoir AVANT le geste, et avec un nombre, pas une allusion.
-    const renvoi = getSyncState().user ? messageRenvoi(compterFichesSynchronisees(insp)) : null;
+    const renvoi = getSyncState().user ? messageRenvoi(insp.fusionSansRecettes?.fiches??compterFichesSynchronisees(insp)) : null;
     if (renvoi) box.append(el('div', { class: 'status info' }, renvoi));
     for (const warning of insp.warnings) box.append(el('div', { class: 'status warn' }, warning));
     if (!insp.ok) {
@@ -355,18 +356,20 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     const result = el('div', { class: 'stack', role: 'status' });
     let appliedOnce = false;
     // Le geste : la décision (R31) vit dans restaurerArchive(), les effets dans appliquerArchive().
-    const apply = (mode) => restaurerArchive({
+    const apply = (mode,exclure=[]) => restaurerArchive({
       mode,
       pending: () => repo.db.count('outbox'),
       toast,
-      appliquer: () => appliquerArchive(mode),
+      appliquer: () => appliquerArchive(mode,exclure),
     });
-    const appliquerArchive = async (mode) => {
+    const appliquerArchive = async (mode,exclure=[]) => {
       if (appliedOnce || archiveOperation) return;
       setArchiveBusy(true);
       let committed = false;
       try {
-        const message = mode === 'replace'
+        const message = exclure.length
+          ? t('Fusionner cette archive en conservant sur cet appareil les recettes écartées et leurs données liées ?')
+          : mode === 'replace'
           ? t('Remplacer toute la bibliothèque actuelle par l’archive ?') + ' ' + t('Les brouillons actuels resteront récupérables en texte, sans pouvoir modifier directement la bibliothèque restaurée.')
           : t('Fusionner l’archive par identifiants (aucun doublon, les fiches existantes sont écrasées par celles de l’archive) ?');
         if (!(await confirmDialog(message, { danger: mode === 'replace', okLabel: t('Restaurer') }))) return;
@@ -375,7 +378,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
         // comme en remplacement — sinon le serveur garderait sa version (I7) et rien ne se verrait ailleurs.
         // Le compte est relu AU MOMENT du geste : la session a pu changer depuis le rendu de la page.
         const reHorodatage = !!getSyncState().user;
-        const bilanRestauration = await applyArchive(repo.db, insp, { mode, horodater: reHorodatage ? syncNow : null });
+        const bilanRestauration = await applyArchive(baseArchives, insp, { mode,exclure,horodater:reHorodatage?syncNow:null,estCourante:()=>repo.db===baseArchives });
         committed = true;
         if (mode === 'replace') invaliderNavigation({ motif: 'bibliotheque_remplacee' });
         appliedOnce = true;
@@ -387,12 +390,13 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
         // La vérification peut durer : bloquer immédiatement les commandes fondées sur l’ancien contexte.
         for (const control of root.querySelectorAll('button, input, select, textarea')) control.disabled = true;
         result.replaceChildren(el('p', { class: 'muted' }, t('Données restaurées. Vérification en cours…')));
-        const check = await verifyRestored(repo.db, insp, { mode, horodate: reHorodatage, normalisationsSources:bilanRestauration.normalisationsSources });
+        const check = await verifyRestored(baseArchives, insp, { mode, horodate: reHorodatage, normalisationsSources:bilanRestauration.normalisationsSources });
         result.replaceChildren(check.ok
           ? el('div', { class: 'status ok' }, t('Restauration vérifiée : contenu des fiches, relations et fichiers contrôlés.'))
           : el('div', { class: 'status danger' }, t('La restauration a été écrite, mais des écarts subsistent. Conserve l’archive et ce bilan.')));
         if (!check.ok) result.append(el('ul', null, ...check.diffs.slice(0, 30).map((diff) => el('li', null, diff))));
         else if (mode === 'merge') result.append(el('small', { class: 'muted' }, t('Les fiches supplémentaires déjà présentes ont été conservées.')));
+        if(exclure.length)result.append(el('p',{class:'muted'},t('Les recettes écartées et leurs données locales ont été conservées.')));
         // R-G-6 : les originaux de cet appareil gardés (l’archive portait des copies), dits après le statut de verifyRestored.
         const conserves = messageOriginauxConserves(bilanRestauration?.originauxConserves);
         if (conserves) result.append(el('p', { class: 'muted' }, conserves));
@@ -410,19 +414,29 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
         }
       }
     };
-    const empty = await repo.db.isEmpty(['unit_definitions', 'unit_conventions', 'ingredients', 'settings']);
-    controls.append(
+    const empty = await baseArchives.isEmpty(['unit_definitions', 'unit_conventions', 'ingredients', 'settings']);
+    if(insp.refus){
+      box.append(el('p',{class:'status warn',dataset:{role:'refus-archive-cycle'}},insp.refus==='retrait_posterieur'
+        ?t('Cette archive est antérieure à un retrait : restaure-la après avoir vidé l’appareil, ou choisis « Fusionner sans les recettes retirées ».')
+        :t('Cette archive et cet appareil portent des cycles différents. La restauration complète est bloquée pour conserver les changements de cet appareil.')));
+      if(insp.fusionSansRecettes){
+        box.append(el('ul',{dataset:{role:'recettes-ecartees'}},...insp.fusionSansRecettes.recettes.map(r=>el('li',null,tronquer(typeof r.titre==='string'&&r.titre?r.titre:t('Sans titre'),NOM_MAX)))),
+          el('p',{class:'muted'},t('{n} fiches liées seront aussi écartées. Les fichiers présents dans l’archive seront récupérés.',{n:insp.fusionSansRecettes.ecartees.length-insp.fusionSansRecettes.recettes.length})),
+          el('details',null,el('summary',null,t('Voir les fiches écartées de cette fusion')),el('ul',null,...insp.fusionSansRecettes.ecartees.map(r=>el('li',null,`${r.store} · ${r.id}`)))));
+        controls.append(el('button',{class:'btn primary',onClick:()=>apply('merge',insp.recettes)},insp.refus==='retrait_posterieur'?t('Fusionner sans les recettes retirées'):t('Fusionner sans ces recettes')));
+      }
+    }else controls.append(
       el('button', { class: 'btn primary', onClick: () => apply('merge') }, empty ? t('Restaurer dans cette base vide') : t('Fusionner avec la bibliothèque actuelle')),
       empty ? null : el('button', { class: 'btn danger', onClick: () => apply('replace') }, t('Remplacer toute la bibliothèque')));
     box.append(controls);
     // Ce qu’un remplacement ne fait PAS (R-L3-18) : il vide cet appareil, pas le serveur. Aucune tombale n’est
     // envoyée pour ce qui manque à l’archive, donc ces fiches reviendront à la prochaine réception. Dit à côté du
     // bouton qui en décide, et pas dans le bilan — celui-ci est commun aux deux modes.
-    const horsArchive = empty ? null : messageRemplacementServeur(!!getSyncState().user);
+    const horsArchive = empty||insp.refus ? null : messageRemplacementServeur(!!getSyncState().user);
     if (horsArchive) box.append(el('small', { class: 'muted' }, horsArchive));
     // B-28 (lot G) : un remplacement vide `files` puis réécrit — les octets locaux des pages absentes de l’archive partent d’ici ; une page que
     // l’archive nomme sans ses octets (missing_files) garde ceux d’ici (ronde 1, #4, #8 : decisionManquante), la phrase reste donc exacte.
-    if (!empty) box.append(el('small', { class: 'muted' }, t('Les pages de cet appareil absentes de l’archive seront retirées d’ici.')));
+    if (!empty&&!insp.refus) box.append(el('small', { class: 'muted' }, t('Les pages de cet appareil absentes de l’archive seront retirées d’ici.')));
     box.append(result);
     return box;
   }

@@ -1,6 +1,14 @@
 // Dictionnaire anglais : clé = chaîne française de référence. Une clé absente affiche le français.
 // Couverture : navigation, accueil, recherche, fiche recette, mode cuisine, réglages et libellés d'état.
 export const EN = {
+  "Cette archive est antérieure à un retrait : restaure-la après avoir vidé l’appareil, ou choisis « Fusionner sans les recettes retirées ».": "This archive predates a removal: restore it after clearing this device, or choose “Merge without the removed recipes”.",
+  "Cette archive et cet appareil portent des cycles différents. La restauration complète est bloquée pour conserver les changements de cet appareil.": "This archive and this device have different removal histories. Full restoration is blocked to preserve changes on this device.",
+  "Fusionner sans les recettes retirées": "Merge without the removed recipes",
+  "Fusionner sans ces recettes": "Merge without these recipes",
+  "Fusionner cette archive en conservant sur cet appareil les recettes écartées et leurs données liées ?": "Merge this archive while keeping the excluded recipes and their related data on this device?",
+  "Les recettes écartées et leurs données locales ont été conservées.": "The excluded recipes and their local data have been kept.",
+  "{n} fiches liées seront aussi écartées. Les fichiers présents dans l’archive seront récupérés.": "{n} related records will also be excluded. Files present in the archive will be recovered.",
+  "Voir les fiches écartées de cette fusion": "View records excluded from this merge",
   'OK': 'OK',
   'Choisir': 'Choose',
   "Retirer le filtre : {filtre}": "Remove filter: {filtre}",

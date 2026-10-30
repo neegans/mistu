@@ -57,6 +57,8 @@ export async function preparerSourcesArchive({batch,snapshot={},owner_id,purpose
   const edition=(normalise.book_editions||[]).find(e=>e.id===journal.edition_id)||(snapshot.book_editions||[]).find(e=>e.id===journal.edition_id),baseTarget=(snapshot.imports||[]).find(r=>r.id===journal.id)||null;
   const p=await preparerTransfertSources({purpose,store:'imports',owner_id,target:journal,rows,baseTarget,edition_id:journal.edition_id??null,base_edition_cycle_id:edition?.lifecycle_id??null,nonce:ids('transfert'),requested_at:maintenant()});
   if(!(normalise.imports||[]).some(r=>r.id===journal.id))(normalise.imports||=[]).push(clone(journal));
+  // Une référence conservée peut réutiliser un manifeste local absent du lot entrant.
+  for(const r of rows)if(r.store==='imports'&&!normalise.imports.some(x=>x.id===r.id))normalise.imports.push(clone(r.data));
   commandes.push(...p.commandes);transferts.push({id:p.transfer_id,command_ids:p.commandes.map(c=>c.operation_id)});couvertes.add('imports:'+journal.id);for(const r of rows)couvertes.add(r.store+':'+r.id);
  }
 

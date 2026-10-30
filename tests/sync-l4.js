@@ -1133,7 +1133,7 @@ export async function runSyncL4Tests({ eq, ok }) {
     const insp = await ouvrir(await archiveDeCopie(orig.sha256, orig.size, copie, R({ sha256: await sha256Hex(copie), size: copie.size })));
     await withDatabase(async (db) => {
       // Un autre onglet importe l'original ENTRE toute lecture d'applyArchive et son écriture : la décision doit se prendre sur la ligne relue.
-      const entrelace = { stores: db.stores, get: (...a) => db.get(...a), getSnapshot: (n) => db.getSnapshot(n), getAll: (s) => db.getAll(s),
+      const entrelace = { stores: db.stores, open: () => db.open(), get idb() { return db.idb; }, get: (...a) => db.get(...a), getSnapshot: (n) => db.getSnapshot(n), getAll: (s) => db.getAll(s),
         putBatch: (batch, o = {}) => entrelace.mutate({ ...o, puts: batch }),
         mutate: async (args) => { await db.putBatch({ files: [orig] }); return db.mutate(args); } };
       const bilan = await B.applyArchive(entrelace, insp, { mode: 'merge' });
