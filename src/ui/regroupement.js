@@ -13,6 +13,7 @@ import { logError } from '../core/log.js';
 import { on, emit } from '../core/bus.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { borner } from '../core/bornes.js';
+import { pagesActivesSeance, projectionSessionSources, canoniqueSources } from '../domain/sources-format.js';
 import { TransitionRefusee } from '../core/db.js';
 import { typeAffichage, displayUrl } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
@@ -40,7 +41,7 @@ export function reinitialiserLot() { lot = null; }
 // est posé à l'import de ce module-là, donc avant celui-ci).
 const vues = new Set();
 if (typeof window !== 'undefined') {
-  const reseau = () => { for (const v of [...vues]) { if (!v.racine.isConnected) { vues.delete(v); continue; } v.redessiner(); } };
+  const reseau = () => { for (const v of [...vues]) { if (!v.racine.isConnected) { if(v.aEteMontee())v.dispose(); continue; } v.redessiner(); } };
   window.addEventListener('online', reseau);
   window.addEventListener('offline', reseau);
 }
@@ -117,7 +118,7 @@ export function selecteurReferences({ candidats = [], occupees = [], exclus = ne
 // les choix effectifs (faits, à défaut les propositions cochées). Toutes les relectures AVANT la transaction ; AUCUNE écriture avant elle ; puis UNE
 // transaction : le classement a_verifier → enregistre (clé rejouée DANS la transaction), les lignes neuves (absente) et une condition d'index par
 // référence cochée. Rend { issue: 'cree', importIds } ou { issue: 'refuse', raison }.
-export async function creerLesLectures(classementId, { cle, editionId = null, etat, choix, ctx = null, repo = repoModule, maintenant = horloge, newId = repoModule.newId, deviceId = repoModule.deviceId(), contexteEdition = null, compte = null } = {}) {
+export async function creerLesLectures(classementId, { cle, editionId = null, etat, choix, ctx = null, repo = repoModule, maintenant = horloge, newId = repoModule.newId, deviceId = repoModule.deviceId(), contexteEdition = null, compte = null, sessionAffichee = undefined } = {}) {
   const proprietaire=await(compte||capturerProprietaire(repo,ctx));
   const refuse = (raison) => ({ issue: 'refuse', raison });
   const ligne = await repo.get('imports', classementId);
@@ -125,6 +126,14 @@ export async function creerLesLectures(classementId, { cle, editionId = null, et
   if (!revaliderResultatClassement(ligne.resultat, ligne.page_ids)) return refuse('classement');
   const seance = typeof ligne.scan_session_id === 'string' ? await repo.get('scan_sessions', ligne.scan_session_id) : null;
   if ((seance?.edition_id ?? null) !== (editionId ?? null)) return refuse('edition');
+  const sessionVue = sessionAffichee === undefined ? seance : sessionAffichee;
+  const signatureSeance = s => s ? canoniqueSources(projectionSessionSources(s)) : null;
+  let signatureVue;
+  try {
+    signatureVue = signatureSeance(sessionVue);
+    if (signatureSeance(seance) !== signatureVue) return refuse('sources');
+    if (seance?.source_state && ligne.page_ids.some(id => !pagesActivesSeance(seance).includes(id))) return refuse('sources');
+  } catch { return refuse('sources'); }
   const edition=editionId?(ctx?.editionsById?.get(editionId)||await repo.get('book_editions',editionId)):null;
   const capture=contexteEdition||(edition?await capturerEdition(repo,edition,{ctx}):null);
   if(capture)verifierCaptureEditionImport(ligne,capture);
@@ -151,7 +160,7 @@ export async function creerLesLectures(classementId, { cle, editionId = null, et
       editions:capture?[capture]:[],recettes:captures,
       patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', classementId, c.status);if(capture)verifierCaptureEditionImport(c,capture); return { status: 'enregistre', reponse_brute: null, brouillon: null, finished_at: maintenant() }; },
       puts: { imports: lignes },
-      conditions: { ...conditionsSourcesImport(ligne.sources_attendues),imports: [...lignes.map((l) => ({ key: l.id, absente: true })), ...references.map((r) => ({ index: 'recipe_id', valeur: r, exclus: IMPORTS_OUVERTS }))],sync_state:[conditionProprietaire(proprietaire)],recipes:references.map(id=>({key:id,fusion:r=>{if(!candidatsReference(r?[r]:[],{editionId}).length)throw new TransitionRefusee('recipes',id,null);return null;}})) },
+      conditions: { ...conditionsSourcesImport(ligne.sources_attendues),scan_sessions:seance?[{key:seance.id,fusion:current=>{if(signatureSeance(current)!==signatureVue)throw new TransitionRefusee('scan_sessions',seance.id,current?.status);return null;}}]:[],imports: [...lignes.map((l) => ({ key: l.id, absente: true })), ...references.map((r) => ({ index: 'recipe_id', valeur: r, exclus: IMPORTS_OUVERTS }))],sync_state:[conditionProprietaire(proprietaire)],recipes:references.map(id=>({key:id,fusion:r=>{if(!candidatsReference(r?[r]:[],{editionId}).length)throw new TransitionRefusee('recipes',id,null);return null;}})) },
     });
   } catch (e) { if (e instanceof TransitionRefusee) return refuse('transition'); throw e; }
   return { issue: 'cree', importIds: lignes.map((l) => l.id) };
@@ -198,13 +207,28 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   let editionCapturee=null;captureEdition.then(c=>{editionCapturee=c;dessiner();}).catch(()=>{});
   const protections=async(ligne=null,historique=false)=>{const c=await captureEdition;if(c&&ligne&&!historique)verifierCaptureEditionImport(ligne,c);return {editions:c?[{...c,historique}]:[],conditions:{sync_state:[conditionProprietaire(await compte)]}};};
   const racine = el('div', { class: 'card stack', dataset: { role: 'classement' } });
-  const pagesSeance = () => liste(session?.page_ids);
+  const pagesSeance = () => { try { return pagesActivesSeance(session); } catch { return []; } };
   const presentes = (ids) => liste(ids).filter((id) => typeof id === 'string' && ctx?.pagesById instanceof Map && ctx.pagesById.has(id));
   // ligne : le classement ouvert de la séance ; imports, recettes, edition : relus ; session : celle de l'assistant (undefined tant qu'elle n'est pas
   // lue) ; occupe : un geste écrit (verrou d'instance) ; regroupement : l'état de l'écran 3 (R) ; ecriture / aEcrire : le brouillon en vol et celui qui
   // attend ; focus : { role, page } à focaliser au prochain dessin ; illisibles : les clés déjà marquées illisibles (jamais deux fois).
   const etat = { ligne: ligneOuverteDeSeance(ctx?.imports, session?.id, { importId, kind: 'classement' }), imports: liste(ctx?.imports), recettes: liste(ctx?.recipes), edition: session?.edition_id ?? null,
     session: undefined, occupe: false, signature: null, regroupement: null, ecriture: null, aEcrire: false, focus: null, illisibles: new Set(), instance: ++instances };
+  let lectureAvantRevision=null;
+  const sourceHistorique=L=>!!L&&((lectureAvantRevision?.id===L.id&&lectureAvantRevision.started_at===L.started_at)||liste(L.page_ids).some(id=>!pagesSeance().includes(id)));
+  const texteSourceHistorique=()=>t('Les photos ont changé. Ce classement reste conservé avec ses anciennes images.');
+  racine.actualiserSources=({session:nouvelle,pages=[]}={})=>{
+    if(nouvelle?.id!==session?.id)return false;
+    const avant=JSON.stringify(session.source_state??session.page_ids),apres=JSON.stringify(nouvelle.source_state??nouvelle.page_ids);
+    if(avant!==apres&&etat.ligne)lectureAvantRevision={id:etat.ligne.id,started_at:etat.ligne.started_at};
+    session=structuredClone(nouvelle);
+    for(const p of pages)ctx.pagesById?.set(p.id,structuredClone(p));
+    if(sourceHistorique(etat.ligne)){
+      const lire=racine.querySelector('[data-role=lire-recettes]');if(lire)lire.disabled=true;
+      if(!racine.querySelector('[data-role=classement-source-historique]'))racine.prepend(el('p',{class:'status warn',role:'status',dataset:{role:'classement-source-historique'}},texteSourceHistorique()));
+    }
+    return true;
+  };
   const ouverte = () => !!etat.ligne && IMPORTS_OUVERTS.includes(etat.ligne.status);
   const signatureDe = (L) => JSON.stringify([L?.status ?? null, L?.document_id_vol ?? null, L ? cleClassement(L) : null, volEnCours()?.importId ?? null, lotEnCours()?.classementId ?? null]);
   const connecter = () => demarrerConnexion(ctx?.sync?.auth);
@@ -243,6 +267,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   // RECETTE ouverte de la séance (ligne de lot pas encore lue, lecture ciblée, autre « Regrouper ») — l'éditeur la relirait comme recette, un appel de
   // plus ; une ligne d'index ou de classement garde sa règle (C : les pages d'un index repris restent regroupables ; D-D3 ci-dessus).
   racine.regrouperPermis = (selection) => {
+    if (liste(selection).some(id => !pagesSeance().includes(id))) return false;
     const L = etat.ligne;
     const prises = pagesEnCours(etat.imports.filter((i) => i?.kind === 'recette'), session?.id);
     if (liste(selection).some((p) => prises.has(p))) return false;
@@ -317,7 +342,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   function preparer(L) {
     const resultat = revaliderResultatClassement(L.resultat, L.page_ids);
     if (!resultat) return null;
-    const pagesParId = new Map(pagesSeance().map(id=>[id,ctx?.pagesById?.get(id)]).filter(([,p])=>p));
+    const pagesParId = new Map(liste(L.page_ids).map(id=>[id,ctx?.pagesById?.get(id)]).filter(([,p])=>p));
     const restaure = restaurerBrouillon(L.brouillon ?? null, { resultat, pageIds: L.page_ids, startedAt: L.started_at, pagesParId });
     const base = restaure ?? { etat: regroupementInitial(resultat, pagesParId), choixFaits: new Map() };
     const R = { cle: cleClassement(L), editionId: etat.edition, resultat, etat: base.etat, choix: base.choixFaits, octets: null, ouverture: new Map(), saisies: new Map(), affiches: new Map() };
@@ -420,7 +445,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
           : (volEnCours() || lotEnCours()) ? { texte: t('Une lecture est en cours : attends sa fin ou annule-la.') }
             : manquent ? { texte: t('Les photos de cette séance ne sont pas sur cet appareil.') } : null;
     const kLire = prisesDe(pagesGroupes);
-    const raisonLire = commune ?? (kLire ? { texte: t('{k} photo(s) déjà en cours d’import ailleurs : retire-les de leur recette, ou termine l’autre import.', { k: kLire }) } : null);
+    const raisonLire = sourceHistorique(L)?{texte:texteSourceHistorique()}:commune ?? (kLire ? { texte: t('{k} photo(s) déjà en cours d’import ailleurs : retire-les de leur recette, ou termine l’autre import.', { k: kLire }) } : null);
     const aReclasser = pagesALire(presentes(getSelection()), L, pagesSeance(), ctx?.pagesById);
     // Ronde 1 (constat 19) : la raison qui éteint « Reclasser » pour la SÉLECTION est dite (les textes de raisonEteint, I-D4) — jamais un bouton éteint en
     // silence ; elle va sur sa propre ligne (raison-reclasser) : la ligne de « Lire » reste la seule de § 4.3.
@@ -648,13 +673,14 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   async function lireRecettes() {
     const R = etat.regroupement; const L = etat.ligne;
     if (!R || !L || etat.occupe) return;
+    if(sourceHistorique(L)){toast(texteSourceHistorique());return;}
     // Ronde 1 (constat 28) : revérifiés AU CLIC, avant toute écriture (un rendu périmé : l'événement offline relu en différé, un vol posé sans événement) —
     // le réseau, la session, un vol ou un lot tenus ; le refus est dit, rien n'est écrit, le panneau relu.
     const refus = !enLigne() ? t('Tu es hors ligne.') : (volEnCours() || lotEnCours()) ? t('Une lecture est déjà en cours : annule-la d’abord.') : null;
     if (refus || !etat.session) { if (refus) toast(refus); await synchroniser({ forcer: true }); return; }
     // Vérification de la tâche 3 (D-D23, § 4.5) : la clé, l'édition, l'état et les choix RENDUS, pris AVANT le redessin qui éteint le bouton — ce
     // redessin relit etat.edition et les recettes que le bus a pu changer sans redessiner (la signature ne les porte pas) : la personne ne l'a pas vu.
-    const rendu = { cle: R.cle, editionId: R.editionId, etat: R.etat, choix: R.affiches };
+    const rendu = { cle: R.cle, editionId: R.editionId, etat: R.etat, choix: R.affiches, sessionAffichee: structuredClone(session) };
     etat.occupe = true; dessiner();
     let cree = null;
     try {
@@ -675,16 +701,17 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     await synchroniser({ forcer: true });
   }
 
-  // --- Montage : le bus tant que le panneau est monté (désabonné au premier événement où il ne l'est plus, ou s'il ne l'a jamais été — modèle d'add.js).
+  // Le parent peut attendre des images avant de monter le panneau. Un délai seul ne prouve pas sa sortie.
   let montee = false;
-  const vue = { racine, redessiner: () => synchroniser({ forcer: true }) };
+  const vue = { racine, aEteMontee:()=>montee, dispose:()=>racine.dispose(), redessiner: () => { montee=true;return synchroniser({ forcer: true }); } };
   const desabonner = on('change', ({ store } = {}) => {
-    if (!racine.isConnected) { if (montee) { desabonner(); quitterMoteur(); vues.delete(vue); } return; }
+    if (!racine.isConnected) { if (montee) racine.dispose(); return; }
     montee = true;
     if (store === 'imports' || store === 'recipes' || store === 'scan_sessions' || store === '*') synchroniser();
   });
+  racine.dispose=()=>{desabonner();quitterMoteur();vues.delete(vue);if(veille)clearTimeout(veille);};
   vues.add(vue);
-  setTimeout(() => { if (!racine.isConnected) { desabonner(); quitterMoteur(); vues.delete(vue); return; } montee = true; }, 0);
+  setTimeout(() => { if(racine.isConnected)montee=true; }, 0);
   sessionAssistant(ctx).then((s) => { etat.session = s; dessiner(); prevenir(); });
   etat.signature = signatureDe(etat.ligne);
   dessiner();

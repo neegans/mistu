@@ -1,0 +1,10 @@
+import {creerScenariosIndex} from './fixtures-sources-index.mjs';const scenarios=await creerScenariosIndex();const lit=s=>"'"+s.replaceAll("'","''")+"'",j=v=>lit(JSON.stringify(v))+'::jsonb';let sql='\\set ON_ERROR_STOP on\n',count=0;
+for(const s of scenarios){sql+=`begin;set app.proof_uid=${lit(s.owner_id)};insert into private.allowed_users(email) values('l1@example.test') on conflict do nothing;insert into auth.users(id,email) values(${lit(s.owner_id)},'l1@example.test') on conflict do nothing;\n`;
+ const order=['books','book_editions','scan_sessions','source_documents','source_pages','imports'];for(const r of [...s.rows].sort((a,b)=>order.indexOf(a.store)-order.indexOf(b.store)))sql+=`insert into public.${r.store}(owner_id,id,data,updated_at) values(${lit(s.owner_id)},${lit(r.id)},${j(r.data)},clock_timestamp());\n`;
+ sql+='set role authenticated;\n';
+ for(const c of s.commands){sql+=`do $$declare r jsonb;begin r:=public.sync_push_v2(${j([c])});if jsonb_array_length(r->'accepted')<>1 then raise exception 'Application ${c.operation_id} : %',r;end if;end $$;\n`;count++;}
+ const ed=s.commands[0].edition_id;sql+=`do $$begin if (select count(*) from public.recipes where owner_id=auth.uid() and data->>'edition_id'=${lit(ed)})<>${s.expected.recipes} then raise exception 'Compte références ${s.name}';end if;end $$;\n`;count++;
+ for(const id of s.expected.journals_closed){sql+=`do $$begin if (select data->>'status' from public.imports where owner_id=auth.uid() and id=${lit(id)}) is distinct from 'enregistre' then raise exception 'Clôture ${id}';end if;end $$;\n`;count++;}
+ for(const c of s.commands){sql+=`do $$declare r jsonb;begin r:=public.sync_push_v2(${j([c])});if jsonb_array_length(r->'accepted')<>1 or r->'accepted'->0->'already_applied' is distinct from 'true'::jsonb then raise exception 'Réessai ${c.operation_id} : %',r;end if;end $$;\n`;count++;}
+ sql+='rollback;\n';}
+sql+=`select ${lit('L5 index volumes : '+count+' assertions réussies')} as bilan;\n`;process.stdout.write(sql);

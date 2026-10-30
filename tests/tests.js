@@ -1,3 +1,19 @@
+import { runL5ComplementsRecetteTests } from './l5-complements-recette.js';
+import { runL5ComplementsRecetteUiTests } from './l5-complements-recette-ui.js';
+import { runL5JournalSnapshotTests } from './l5-journal-snapshot.js';
+import { runL5PremiereLiaisonTests } from './l5-premiere-liaison.js';
+import { runL5ComparaisonSourcesUiTests } from './l5-comparaison-sources-ui.js';
+import { runL5ComparaisonSourcesTests } from './l5-comparaison-sources.js';
+import { runL5TransfertsSourceTests } from './l5-transferts-source.js';
+import { runL5SyncSourcesTests } from './l5-sync-sources.js';
+import { runL5RevisionsSourceTests } from './l5-revisions-source.js';
+import { runL5ReceptionSourcesTests } from './l5-reception-sources.js';
+import { runL5ImportSourcesTests } from './l5-import-sources.js';
+import { runL5IndexVolTests } from './l5-index-vol.js';
+import { runL5IndexTransactionTests } from './l5-index-transaction.js';
+import { runL5IndexStockageTests } from './l5-index-stockage.js';
+import { runL5IndexApplicationTests } from './l5-index-application.js';
+import { runL5ArchivesTests } from './l5-archives.js';
 import { runL1CorbeilleDomaineTests } from './l1-corbeille-domaine.js';
 import { runL1CorbeilleArchiveTests } from './l1-corbeille-archive.js';
 import { runL1CorbeilleSyncTests } from './l1-corbeille-sync.js';
@@ -21,6 +37,9 @@ import { runL3ActionsTests } from './l3-actions.js';
 import { runL4BrouillonsListeTests } from './l4-brouillons-liste.js';
 import { runL4RendementTests } from './l4-rendement.js';
 import { runL4RaccordsTests } from './l4-raccords.js';
+import { runL5RaccordsTests, runL5SourcesLecteursTests } from './l5-raccords.js';
+import { runL5IndexLectureTests } from './l5-index-lecture.js';
+import { runL5SourcesFormatTests } from './l5-sources-format.js';
 import { runL4BrouillonsTests } from './l4-brouillons.js';
 import { runL4PublicationTests } from './l4-publication.js';
 import { runL4EditeurRecetteTests, runL4EditeurRecetteUITests, runL4LectureEditeurTests } from './l4-editeur-recette.js';
@@ -366,11 +385,17 @@ for (const suite of [runL4BrouillonsListeTests, runL4RendementTests, runL4Raccor
   catch (error) { ok(false, `Suite L4 interrompue : ${error?.message || String(error)}`); }
 }
 
+// L5 : une révision source conserve son orientation et les lecteurs distinguent sélection et historique.
+for (const suite of [runL5ComplementsRecetteTests, runL5ComplementsRecetteUiTests, runL5JournalSnapshotTests, runL5PremiereLiaisonTests, runL5ComparaisonSourcesUiTests, runL5ComparaisonSourcesTests, runL5ArchivesTests, runL5IndexApplicationTests, runL5IndexStockageTests, runL5IndexTransactionTests, runL5IndexVolTests, runL5ImportSourcesTests, runL5ReceptionSourcesTests, runL5RevisionsSourceTests, runL5SyncSourcesTests, runL5TransfertsSourceTests, runL5RaccordsTests, runL5SourcesLecteursTests, runL5IndexLectureTests, runL5SourcesFormatTests]) {
+  try { await suite({ eq, ok, close }); }
+  catch (error) { ok(false, `Suite L5 interrompue : ${error?.message || String(error)}`); }
+}
+
 // --- Compte total épinglé (F2). Une assertion qui DISPARAÎT — un bloc supprimé, une boucle qui ne tourne plus, une
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 8879,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 9471,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

@@ -305,7 +305,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
         // La vérification peut durer : bloquer immédiatement les commandes fondées sur l’ancien contexte.
         for (const control of root.querySelectorAll('button, input, select, textarea')) control.disabled = true;
         result.replaceChildren(el('p', { class: 'muted' }, t('Données restaurées. Vérification en cours…')));
-        const check = await verifyRestored(repo.db, insp, { mode, horodate: reHorodatage });
+        const check = await verifyRestored(repo.db, insp, { mode, horodate: reHorodatage, normalisationsSources:bilanRestauration.normalisationsSources });
         result.replaceChildren(check.ok
           ? el('div', { class: 'status ok' }, t('Restauration vérifiée : contenu des fiches, relations et fichiers contrôlés.'))
           : el('div', { class: 'status danger' }, t('La restauration a été écrite, mais des écarts subsistent. Conserve l’archive et ce bilan.')));

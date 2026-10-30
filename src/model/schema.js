@@ -3,11 +3,11 @@
 
 export const DB_NAME = 'cuisine-os';
 export const DB_VERSION = 6;
-export const APP_VERSION = '0.26.0';
+export const APP_VERSION = '0.27.0';
 
 export const ARCHIVE_FORMAT = 'cuisine-os-archive';
-export const ARCHIVE_FORMAT_VERSION = 3;
-export const SUPPORTED_ARCHIVE_VERSIONS = [1, 2, 3];
+export const ARCHIVE_FORMAT_VERSION = 4;
+export const SUPPORTED_ARCHIVE_VERSIONS = [1, 2, 3, 4];
 
 export const STORES = {
   books:               { keyPath: 'id', indexes: [] },
@@ -79,13 +79,19 @@ export const RELATIONS = [
   ['source_documents', 'sha256', 'files'],
   ['source_documents', 'scan_session_id', 'scan_sessions'],
   ['source_documents', 'replaces_document_id', 'source_documents'],
+  ['source_documents', 'source_copy.source_id', 'source_documents'],
   ['source_pages', 'document_id', 'source_documents'],
   ['source_pages', 'edition_id', 'book_editions'],
   ['source_pages', 'sha256', 'files'],
+  ['source_pages', 'source_revision.family_id', 'source_pages'],
+  ['source_pages', 'source_revision.parent_page_id', 'source_pages'],
+  ['source_pages', 'source_copy.source_id', 'source_pages'],
   ['scan_sessions', 'edition_id', 'book_editions'],
   ['scan_sessions', 'page_ids[]', 'source_pages'],
   ['scan_sessions', 'document_ids[]', 'source_documents'],
   ['scan_sessions', 'recipe_ids[]', 'recipes'],
+  ['scan_sessions', 'source_state.active_page_ids[]', 'source_pages'],
+  ['scan_sessions', 'source_copy.source_id', 'scan_sessions'],
 
   ['dish_recipe_links', 'dish_id', 'dishes'],
   ['dish_recipe_links', 'recipe_id', 'recipes'],
@@ -141,6 +147,9 @@ export const RELATIONS = [
   // Journal des imports (spec import-cible § 3.1) : recipe_id et page_ids[] sont VOLONTAIREMENT absents (pointeurs souples).
   ['imports', 'edition_id', 'book_editions'],
   ['imports', 'scan_session_id', 'scan_sessions'],
+  ['imports', 'index_storage.fragments[].id', 'imports'],
+  ['imports', 'index_storage.manifest_id', 'imports'],
+  ['imports', 'index_call.parent_call_id', 'imports'],
 ];
 
 // Vocabulaire fermé des états (libellés visibles dans src/i18n).

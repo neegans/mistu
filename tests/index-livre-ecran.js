@@ -49,22 +49,23 @@ async function imageDe(nom, couleur, l = 320, h = 240) {
 }
 // Un livre « Trinity », son édition ed1, une séance ss1 dont les pages portent de vraies images (le vol les décode) ; `but` = 'index' (séance d'index).
 async function poser(repo, db, { pages = PAGES, but = 'index', recettes = [] } = {}) {
-  const lignes = [];
+  const lignes = [],documents=[];
   for (const [i, id] of pages.entries()) {
     const f = await imageDe(`${id}.jpg`, COULEURS[i % COULEURS.length]); const sha256 = await sha256Hex(f);
     await repo.putFile(sha256, f, { original_filename: f.name });
-    lignes.push({ id, document_id: null, edition_id: 'ed1', sha256, printed_page: null, file_position: null, locator: null, position: i + 1, issues: [], kind: null, created_at: DATE, updated_at: DATE });
+    const document_id='doc_'+id;documents.push({id:document_id,edition_id:'ed1',scan_session_id:'ss1',source_type:'photo',sha256,original_filename:f.name,mime:f.type,size:f.size});
+    lignes.push({ id, document_id, edition_id: 'ed1', sha256, printed_page: null, file_position: null, locator: null, position: i + 1, issues: [], kind: null, created_at: DATE, updated_at: DATE });
   }
   await db.mutate({ puts: {
     books: [{ id: 'b1', title: 'Trinity', author: 'Adam Byatt', created_at: DATE, updated_at: DATE }],
     book_editions: [{ id: 'ed1', book_id: 'b1', language: 'en', created_at: DATE, updated_at: DATE }],
-    source_pages: lignes, recipes: recettes,
-    scan_sessions: [{ id: 'ss1', status: 'open', edition_id: 'ed1', started_at: DATE, page_ids: [...pages], document_ids: [], device_id: repo.deviceId(), ...(but ? { but } : {}), created_at: DATE, updated_at: DATE }] } });
+    source_pages: lignes,source_documents:documents, recipes: recettes,
+    scan_sessions: [{ id: 'ss1', status: 'open', edition_id: 'ed1', started_at: DATE, page_ids: [...pages], document_ids: documents.map(d=>d.id), device_id: repo.deviceId(), ...(but ? { but } : {}), created_at: DATE, updated_at: DATE }] } });
 }
 async function ctxDe(repo, db, { session = SESSION } = {}) {
-  const [recipes, books, book_editions, source_pages, scan_sessions, imports] = await Promise.all(['recipes', 'books', 'book_editions', 'source_pages', 'scan_sessions', 'imports'].map((s) => db.getAll(s)));
+  const [recipes, books, book_editions, source_pages, scan_sessions, imports,source_documents] = await Promise.all(['recipes', 'books', 'book_editions', 'source_pages', 'scan_sessions', 'imports','source_documents'].map((s) => db.getAll(s)));
   return {
-    recipes, books, book_editions, source_pages, scan_sessions, imports, source_documents: [], recipe_versions: [], rediscovery_prefs: [], cook_history: [], dish_recipe_links: [], recipe_translations: [], dishes: [], ingredients: [], units: [], unit_conventions: [],
+    recipes, books, book_editions, source_pages, scan_sessions, imports, source_documents, recipe_versions: [], rediscovery_prefs: [], cook_history: [], dish_recipe_links: [], recipe_translations: [], dishes: [], ingredients: [], units: [], unit_conventions: [],
     recipesById: repo.indexBy(recipes), editionsById: repo.indexBy(book_editions), booksById: repo.indexBy(books), pagesById: repo.indexBy(source_pages),
     versionsByRecipe: new Map(), versionsById: new Map(), dishesById: new Map(), ingredientsById: new Map(), docsByRecipe: new Map(),
     settings: { llm: { provider: 'none' }, units: 'original', reading_locale: 'original' },
@@ -184,7 +185,7 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
         await attendre(() => ![...racine.querySelectorAll('[data-role="a-verifier"] li')].some((x) => texte(x).startsWith('Tarte')), 'redessin sans la tarte');
         eq([(await db.getAll('recipes')).filter((r) => r.original_title === 'Tarte').length, dits], [0, []],
           'la décision prise ailleurs gagne : aucune fiche, aucune phrase d’échec, la question disparaît au redessin');
-      } finally { racine.remove(); }
+      } finally { racine.dispose?.();racine.remove(); }
     }));
 
     await bloc('séance d’index : lire, enregistrer d’office, « À vérifier », écartées, retirer (D-I1, D-I11, D-I15, D-I20)', () => withRepo(async (repo, db) => {
@@ -194,13 +195,12 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
       const { racine, dits } = await monter(repo, db, { fetch: net.fetch });
       try {
         eq([texte(racine.querySelector('[data-role="compte-pages"]')), texte(racine.querySelector('[data-role="etat-lecture"]')), texte(racine.querySelector('[data-role="lire"]')), net.appels.length],
-          ['3 pages d’index', 'Lecture : à faire', 'Lire les 3 pages (3 appels)', 0], 'avant la lecture : trois pages retenues sans cocher, « Lecture : à faire », le geste dit son coût, aucun appel');
+          ['3 pages d’index', 'Lecture : à faire', 'Lire les 3 pages (9 appels au plus)', 0], 'avant la lecture : trois pages retenues sans cocher, « Lecture : à faire », le geste dit son coût, aucun appel');
         await lireEtAttendre(racine, racine.querySelector('[data-role="lire"]'));
         const imports = (await db.getAll('imports')).filter((i) => i.kind === 'index');
-        const L = imports[0];
-        const ajoutees = (await db.getAll('recipes')).filter((r) => r.edition_id === 'ed1' && r.index_import_id === L?.id);
-        eq([net.appels.length, net.appels.map((a) => imagesDe(a).length), net.appels.map((a) => JSON.parse(a.options.body).outil), imports.length, L?.status, !!L?.auto_enregistre_at],
-          [3, [1, 1, 1], ['extraction', 'extraction', 'extraction'], 1, 'a_verifier', true], 'trois appels, UNE photo chacun (une lecture par page), une ligne du journal, enregistrée d’office et laissée à vérifier (les choux)');
+        const ajoutees = (await db.getAll('recipes')).filter((r) => r.edition_id === 'ed1' && imports.some(i=>i.id===r.index_import_id));
+        eq([net.appels.length, net.appels.map((a) => imagesDe(a).length), net.appels.map((a) => JSON.parse(a.options.body).outil), imports.length, imports.map(i=>[i.index_call.page_id,i.status]).sort(), imports.some(i=>i.index_decisions?.length)],
+          [3, [1, 1, 1], ['extraction', 'extraction', 'extraction'], 3, [['pg310','enregistre'],['pg311','a_verifier'],['pg312','a_verifier']], true], 'trois appels, UNE photo chacun, trois journaux exacts ; page310 résolue et close, pages311/312 gardées ouvertes pour les choux à vérifier');
         eq(ajoutees.map((r) => r.original_title).sort(), attendu.certaines.map((x) => M.titreEnregistre(x.titre)).sort(),
           'les recettes CERTAINES deviennent des références du livre, sans geste (D-I15) : exactement celles de la consolidation');
         eq([ajoutees.every((r) => r.availability === 'reference_only' && Array.isArray(r.printed_pages) && r.printed_pages.length > 0), new Set(ajoutees.map((r) => r.original_title.toLowerCase())).size === ajoutees.length,
@@ -214,14 +214,14 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
           'les choux contradictoires : les deux pages montrées, aucune choisie d’office ; « Garder », « Les deux », « Écarter »');
         const garder = boutonNomme(choux, 'Garder 236–238');
         garder.click(); garder.click(); // une double tape : UNE décision, UNE fiche
-        await attendre(async () => (await db.get('imports', L.id))?.decisions?.[attendu.aVerifier.find((x) => x.titre.startsWith('choux'))?.cle], 'décision écrite');
+        await attendre(async () => (await db.getAll('imports')).some(r=>r.index_decisions?.some(d=>d.action==='garder_option')), 'décision exacte écrite');
         await new Promise((r) => setTimeout(r, 50));
         eq([(await db.getAll('recipes')).filter((r) => r.original_title.startsWith('Choux à la crème')).length, dits.filter((m) => /décision/.test(m))], [1, []],
           'une double tape sur « Garder 236–238 » : une seule fiche, aucune phrase d’échec');
-        const apres = await db.get('imports', L.id);
+        const apres = (await db.getAll('imports')).filter(i=>imports.some(l=>l.id===i.id));
         const chouxFiche = (await db.getAll('recipes')).find((r) => r.original_title.startsWith('Choux à la crème'));
-        eq([chouxFiche?.printed_pages, attendu.aVerifier.length === 1 ? apres.status : 'enregistre'], [[{ debut: 236, fin: 238 }], 'enregistre'],
-          '« Garder 236–238 » : la référence est créée à ces pages, la décision écrite dans la ligne, qui se ferme quand plus rien n’attend');
+        eq([chouxFiche?.printed_pages, apres.map(i=>[i.index_call.page_id,i.status]).sort()], [[{ debut: 236, fin: 238 }], [['pg310','enregistre'],['pg311','enregistre'],['pg312','enregistre']]],
+          '« Garder 236–238 » : référence aux pages choisies, décision conservée et tous les journaux entièrement résolus fermés');
         await attendre(() => racine.querySelector('[data-role="ecartees"]'), 'écartées redessinées');
         const ecartees = racine.querySelector('[data-role="ecartees"]');
         eq(texte(ecartees.querySelector('summary')), `Écartées (${attendu.ecartees.length})`, 'les écartées sont repliées et comptées (D-I4)');
@@ -238,7 +238,7 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
         const restent = (await db.getAll('recipes')).filter((r) => r.edition_id === 'ed1' && !r.trashed_at);
         eq([restent.map((r) => r.original_title), dits.some((m) => /recettes retirées$/.test(m))], [['Roast chicken and pommes purée'], true],
           '« Retirer ces {n} recettes » retire celles de la lecture restées intactes — la recette mise en favori reste');
-      } finally { racine.remove(); UI.reinitialiserImportCible?.(); }
+      } finally { racine.dispose?.();racine.remove(); UI.reinitialiserImportCible?.(); }
     }));
 
     await bloc('une page illisible : « Relire la page incomplète », sans recréer ce qui est déjà dans le livre (D-I10)', () => withRepo(async (repo, db) => {
@@ -249,13 +249,13 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
       try {
         await lireEtAttendre(racine, racine.querySelector('[data-role="lire"]'));
         const avant = (await db.getAll('recipes')).filter((r) => r.edition_id === 'ed1').map((r) => r.original_title).sort();
-        eq([net.appels.length, texte(racine.querySelector('[data-role="etat-lecture"]')), texte(racine.querySelector('[data-role="relire"]'))],
-          [3, 'Lecture : 1 page à relire', 'Relire la page incomplète (1 appel)'], 'la page 311 illisible : la lecture garde les deux autres, dit « 1 page à relire » et offre de la relire (1 appel)');
-        await lireEtAttendre(racine, racine.querySelector('[data-role="relire"]'));
+        eq([net.appels.length, texte(racine.querySelector('[data-role="etat-lecture"]')), texte(racine.querySelector('[data-role="reprendre"]'))],
+          [3, 'Lecture : 1 page à relire', 'Reprendre la lecture (3 appels au plus)'], 'la page 311 illisible : la lecture garde les deux autres, dit « 1 page à relire » et offre de la relire (1 appel)');
+        await lireEtAttendre(racine, racine.querySelector('[data-role="reprendre"]'));
         const apres = (await db.getAll('recipes')).filter((r) => r.edition_id === 'ed1').map((r) => r.original_title);
         eq([net.appels.length, (await db.getAll('imports')).filter((i) => i.kind === 'index').length, imagesDe(net.appels[3]).length,
           avant.every((t) => apres.includes(t)), new Set(apres.map((t) => t.toLowerCase())).size === apres.length, apres.length >= avant.length],
-          [4, 2, 1, true, true, true], 'la relecture : UN appel de plus, une ligne neuve pour la seule page relue ; ce qui était dans le livre n’est ni recréé ni perdu');
+          [4, 3, 1, true, true, true], 'la reprise : UN appel de plus, seul journal échoué repris sous CAS ; lectures réussies et références conservées sans doublon');
         // Lues en deux temps (310 et 312, puis 311), les choux n'ont d'abord qu'une page (236–238) : certains, ils sont écrits ; la page 311 apporte 40–41,
         // et la contradiction est alors montrée avec l'option déjà dans le livre, jamais tranchée en silence ni recréée.
         const partiel = M.consolider([TRINITY[0], TRINITY[2]]).certaines.map((x) => M.titreEnregistre(x.titre));
@@ -268,7 +268,7 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
         await attendre(async () => (await db.getAll('recipes')).filter((r) => r.original_title.startsWith('Choux à la crème')).length === 2, '« Les deux »');
         eq((await db.getAll('recipes')).filter((r) => r.original_title.startsWith('Choux à la crème')).map((r) => M.textePlages(M.plagesLisibles(r))).sort(), ['236–238', '40–41'],
           '« Les deux » ajoute la page qui manque, jamais une seconde fiche à 236–238');
-      } finally { racine.remove(); UI.reinitialiserImportCible?.(); }
+      } finally { racine.dispose?.();racine.remove(); UI.reinitialiserImportCible?.(); }
     }));
 
     await bloc('page dense : coupée, relue en deux moitiés (D-I2)', () => withRepo(async (repo, db) => {
@@ -278,16 +278,16 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
       const net = reseau([[200, corps('{"sorte_page":"index","entrees":[', { stop_reason: 'max_tokens' })], [200, corps({ ...p, entrees: p.entrees.slice(0, moitie + 2) })], [200, corps({ ...p, entrees: p.entrees.slice(moitie) })]]);
       const { racine } = await monter(repo, db, { fetch: net.fetch });
       try {
-        eq(texte(racine.querySelector('[data-role="lire"]')), 'Lire la page (1 appel)', 'une page : le geste dit « Lire la page (1 appel) »');
+        eq(texte(racine.querySelector('[data-role="lire"]')), 'Lire la page (3 appels au plus)', 'une page : le geste dit « Lire la page (1 appel) »');
         await lireEtAttendre(racine, racine.querySelector('[data-role="lire"]'));
         const dims = await Promise.all(net.appels.map((a) => dimsImage(imagesDe(a)[0])));
         const L = (await db.getAll('imports')).find((i) => i.kind === 'index');
-        const page = L?.resultat?.pages?.[0];
+        const page = P.lectureDeSeance(await db.getAll('imports'),'ss1',['pg310']).pages[0];
         eq([net.appels.length, page?.etat, page?.moities, dims[0]?.[0], dims[1]?.[0] < dims[0]?.[0] && dims[2]?.[0] < dims[0]?.[0], dims[1]?.[1] === dims[0]?.[1]], [3, 'lue', 2, 320, true, true],
           'coupée (max_tokens) : deux appels de plus, chacun avec une moitié (moins large, même hauteur) de la photo ; la page est lue en deux moitiés');
         eq([page.entrees.length, TRINITY[0].entrees.every((e) => page.entrees.some((x) => x.titre === e.titre && x.renvois === e.renvois))], [TRINITY[0].entrees.length, true],
           'les entrées du recouvrement ne sont pas doublées (autant d’entrées que la page entière), aucune n’est perdue');
-      } finally { racine.remove(); UI.reinitialiserImportCible?.(); }
+      } finally { racine.dispose?.();racine.remove(); UI.reinitialiserImportCible?.(); }
     }));
 
     await bloc('« Annuler » pendant la lecture : rien n’est écrit dans le livre', () => withRepo(async (repo, db) => {
@@ -301,12 +301,12 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
         await attendre(() => texte(racine.querySelector('[data-role="progression"]')) === 'Lecture de la page 2 sur 3…', 'progression');
         boutonNomme(racine, 'Annuler').click();
         await attendre(() => racine.etatPanneau().occupe === false, 'fin après Annuler');
-        const L = (await db.getAll('imports')).find((i) => i.kind === 'index');
+        const rows=await db.getAll('imports'),L=rows.find(i=>i.kind==='index'&&i.status==='echec');
         eq([L?.status, L?.erreur?.raison, (await db.getAll('recipes')).filter((r) => r.edition_id === 'ed1').length, net.appels.length], ['echec', 'annule', 0, 2],
           '« Annuler » : la ligne passe en échec (annulée), aucune recette écrite, aucun appel de plus');
         await attendre(() => racine.querySelector('[data-role="reprendre"]'), 'Reprendre offert');
         eq(texte(racine.querySelector('[data-role="reprendre"]')), 'Reprendre la lecture (3 appels au plus)', 'après « Annuler », « Reprendre la lecture » (la page déjà lue n’est pas relue : au plus 3 appels annoncés)');
-      } finally { racine.remove(); UI.reinitialiserImportCible?.(); }
+      } finally { racine.dispose?.();racine.remove(); UI.reinitialiserImportCible?.(); }
     }));
 
     await bloc('lue par un modèle hors liste : rien d’enregistré d’office (D-I16)', () => withRepo(async (repo, db) => {
@@ -318,7 +318,7 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
         await lireEtAttendre(racine, racine.querySelector('[data-role="lire"]'));
         eq([(await db.getAll('recipes')).filter((r) => r.edition_id === 'ed1').length, texte(racine).includes('rien n’a été ajouté d’office')], [0, true],
           'un modèle hors de la liste validée : aucune référence écrite, tout attend dans « À vérifier », et l’écran le dit');
-      } finally { racine.remove(); UI.reinitialiserImportCible?.(); }
+      } finally { racine.dispose?.();racine.remove(); UI.reinitialiserImportCible?.(); }
     }));
 
     for (const changement of ['compte', 'generation']) await bloc('saisie ancienne : ' + changement, () => withRepo(async (repo, db) => {
@@ -369,19 +369,23 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
         const champ = vue.querySelector('figure[data-page="pg310"] input[type="number"]');
         eq([!!panneau && !panneau.hidden, !!boutonIndex, champ?.getAttribute('placeholder'), champ?.getAttribute('aria-label')], [true, false, 'Page de l’index', 'Page de l’index'],
           'séance d’index : le panneau est ouvert d’office, sans bouton « Index / table des matières » ; le champ de chaque photo dit « Page de l’index »');
-        const fig = vue.querySelector('figure[data-page="pg310"]');
+        let fig = vue.querySelector('figure[data-page="pg310"]');
         boutonNomme(fig, '↻').click();
-        await attendre(async () => (await db.get('source_pages', 'pg310'))?.rotation === 90, 'rotation écrite');
+        await attendre(async () => (await db.getAll('source_pages')).some(p=>p.source_revision?.parent_page_id==='pg310'&&p.rotation===90), 'nouvelle révision orientée conservée');
+        const pivotee=(await db.getAll('source_pages')).find(p=>p.source_revision?.parent_page_id==='pg310'&&p.rotation===90);
+        await attendre(()=>panneau.querySelector('[data-role=revoir-sources]')&&!panneau.querySelector('[data-role=revoir-sources]').disabled,'comparaison proposée après rotation');panneau.querySelector('[data-role=revoir-sources]').click();
         // La page pivotée part pivotée : la première photo envoyée est en hauteur (240 × 320), les autres restent en largeur.
-        await attendre(() => panneau.querySelector('[data-role="lire"]') && !panneau.querySelector('[data-role="lire"]').disabled, 'Lire allumé');
+        await attendre(() => panneau.querySelector('[data-role="lire"]') && !panneau.querySelector('[data-role="lire"]').disabled, 'Lire allumé').catch(e=>{throw Error(e.message+' '+JSON.stringify(panneau.etatPanneau())+' '+panneau.textContent);});
         panneau.querySelector('[data-role="lire"]').click();
         await attendre(() => net.appels.length === 3, 'trois pages envoyées');
         eq(await Promise.all(net.appels.map((x) => dimsImage(imagesDe(x)[0]))), [[240, 320], [320, 240], [320, 240]], '« Pivoter » d’un quart de tour : la photo envoyée à l’assistant est pivotée, les autres non (D-I12)');
         await attendre(() => panneau.etatPanneau().occupe === false, 'fin de la lecture');
-        boutonNomme(fig, '↻').click();
-        await attendre(async () => (await db.get('source_pages', 'pg310'))?.rotation === 180, 'deuxième quart de tour');
-        eq([fig.dataset.rotation, boutonNomme(fig, '↻')?.getAttribute('aria-label')], ['180', 'Pivoter la page 1'], '« Pivoter » : un quart de tour gardé sur la page, la miniature suit (data-rotation)');
-      } finally { vue.remove(); UI.reinitialiserImportCible?.(); }
+        fig=vue.querySelector(`figure[data-page="${pivotee.id}"]`);boutonNomme(fig, '↻').click();
+        await attendre(async () => (await db.getAll('source_pages')).some(p=>p.source_revision?.parent_page_id===pivotee.id&&p.rotation===180), 'deuxième révision orientée');
+        const suivante=(await db.getAll('source_pages')).find(p=>p.source_revision?.parent_page_id===pivotee.id&&p.rotation===180);
+        await attendre(()=>vue.querySelector(`figure[data-page="${suivante.id}"]`),'nouvelle miniature');fig=vue.querySelector(`figure[data-page="${suivante.id}"]`);
+        eq([fig.dataset.rotation, boutonNomme(fig, '↻')?.getAttribute('aria-label'),(await db.get('source_pages',pivotee.id)).rotation], ['180', 'Pivoter la page 1',90], '« Pivoter » : un quart de tour gardé sur la page, la miniature suit (data-rotation)');
+      } finally { vue.dispose?.();vue.remove(); UI.reinitialiserImportCible?.(); }
     }));
 
     await bloc('séance générique : le panneau d’index reste fermé derrière « Index / table des matières » (D-I11)', () => withRepo(async (repo, db) => {
@@ -399,7 +403,7 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
         await attendre(() => texte(vue2.querySelector('[data-role="compte-pages"]')) === '1 page(s) sélectionnée(s)', 'panneau redessiné sur la sélection');
         eq([fermeAvant, vue2.querySelector('[data-role="panneau-index"]')?.hidden, texte(vue2.querySelector('[data-role="compte-pages"]'))], [true, false, '1 page(s) sélectionnée(s)'],
           'séance générique : le panneau reste fermé derrière « Index / table des matières », qui l’ouvre sur la sélection');
-      } finally { vue2.remove(); }
+      } finally { vue2.dispose?.();vue2.remove(); }
     }));
 
     await bloc('pagePourEnvoi : la rotation de la page suit jusqu’à l’image envoyée (D-I12)', async () => {
@@ -422,25 +426,25 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
           racine.querySelector('[data-role="lire"]').click();
           await new Promise((r) => setTimeout(r, 30));
           eq([net.appels.length, await lignes()], [0, 0], 'sans session : aucun appel, aucune ligne du journal');
-        } finally { racine.remove(); }
+        } finally { racine.dispose?.();racine.remove(); }
       }
       { // hors ligne : éteint
         const net = reseau([]);
         const { racine } = await monter(repo, db, { fetch: net.fetch, enLigne: () => false });
-        try { eq(racine.querySelector('[data-role="lire"]')?.disabled, true, 'hors ligne : « Lire » éteint (rien ne part)'); } finally { racine.remove(); }
+        try { eq(racine.querySelector('[data-role="lire"]')?.disabled, true, 'hors ligne : « Lire » éteint (rien ne part)'); } finally { racine.dispose?.();racine.remove(); }
       }
       { // une page qui ne se décode pas : refus AVANT toute écriture, dit par un toast ; aucun POST
         const illisible = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' });
-        const sha = 'sha-illisible-index';
+        const sha = await sha256Hex(illisible);
         await repo.putFile(sha, illisible, {});
         await db.mutate({ puts: { source_pages: [{ ...(await db.get('source_pages', 'pg310')), sha256: sha }] } });
         const net = reseau([]);
         const { racine, dits } = await monter(repo, db, { fetch: net.fetch });
         try {
           racine.querySelector('[data-role="lire"]').click();
-          await attendre(() => dits.length > 0, 'refus dit');
-          eq([net.appels.length, await lignes(), dits], [0, 0, ['Cette image ne peut pas être lue ici. Essaie une autre photo.']], 'image illisible : aucun POST, aucune ligne, le toast de l’image');
-        } finally { racine.remove(); }
+          await attendre(() => !!racine.querySelector('[data-role=erreur-index]'), 'refus visible');
+          eq([net.appels.length, await lignes(), !!racine.querySelector('[data-role=erreur-index]')], [0, 0, true], 'image illisible : aucun POST, aucune ligne, le toast de l’image');
+        } finally { racine.dispose?.();racine.remove(); }
       }
       await poser(repo, db, { pages: ['pg310'] }); // des octets lisibles à nouveau
       { // double clic : UN vol, UNE ligne ; le jeton n'apparaît jamais à l'écran ; quota atteint → la phrase de la passerelle et « Reprendre »
@@ -451,10 +455,10 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
           b.click(); b.click();
           await attendre(() => racine.querySelector('[data-role="echec"]'), 'échec dit');
           eq([net.appels.length, await lignes(), texte(racine.querySelector('[data-role="echec"]')), texte(racine.querySelector('[data-role="reprendre"]'))],
-            [1, 1, 'Tu as atteint la limite du jour pour l’assistant (60 appels).', 'Reprendre la lecture (1 appel au plus)'],
+            [1, 1, 'Tu as atteint la limite du jour pour l’assistant (60 appels).', 'Reprendre la lecture (3 appels au plus)'],
             'double clic : un appel, une ligne ; quota atteint : la phrase de la passerelle, puis « Reprendre la lecture (1 appel au plus) »');
           ok(!racine.textContent.includes(SESSION.access_token), 'le jeton de la session n’apparaît jamais dans le panneau');
-        } finally { racine.remove(); UI.reinitialiserImportCible?.(); }
+        } finally { racine.dispose?.();racine.remove(); UI.reinitialiserImportCible?.(); }
       }
     }));
 

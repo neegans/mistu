@@ -16,7 +16,7 @@ import { mentionCycleRecette } from './corbeille.js';
 // HOSTILE (validée par validateParsedRecipe, revalidée quand elle revient du journal, rendue en nœuds texte). L'état du VOL vit au niveau du
 // module (I-7 : un seul import en vol par document, tenu par DOCUMENT_ID) ; tout le reste est relu dans la base à chaque redessin.
 // Dépendances injectables { repo, navigate, toast, fetch, pickFiles, maintenant, battementMs, veilleMs } : la suite n'ouvre ni sélecteur ni réseau.
-import { el, toast as toastDom, pickFiles as pickDom, formatDate } from '../core/dom.js';
+import { el, toast as toastDom, pickFiles as pickDom, formatDate, confirmDialog } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate as naviguerDom } from '../core/router.js';
 import { logError } from '../core/log.js';
@@ -151,7 +151,7 @@ export async function lancerVol(importId, executer, options = {}) {
 // de la section Imports). Toute autre sorte — classement, couverture (lot E), web (lot B), une sorte future — est refusée `sorte`, rien d'écrit.
 export const SORTES_EXTRACTION = Object.freeze(['recette', 'index']);
 export async function lancerExtraction(importId, options = {}) {
-  return lancerVol(importId, executerExtraction, { ...options, accepte: (l) => SORTES_EXTRACTION.includes(l?.kind) }); // lot D : attendus transmis par options
+  return lancerVol(importId, executerExtraction, { ...options, accepte: (l) => SORTES_EXTRACTION.includes(l?.kind)&&!l.index_call&&!l.index_storage }); // lot D : attendus transmis par options
 }
 // La ligne d'une lecture sans référence, écrite seulement APRÈS les gardes du vol (ronde 1) : reprise dans la transition de départ (a_verifier → a_lancer
 // → en_cours en une transaction, § 3.1), sinon ouverte (repo.ouvrirImport, le mur conditionné de la première photo) puis partie.
@@ -166,6 +166,7 @@ async function partirLecture(repo, lecture, pageIds, enVol, suivi, protections) 
     const reprise = (c) => {
       if(protections.editions[0])verifierCaptureEditionImport(c,protections.editions[0]);
       if (!lectureAdmise(c, kind, {recipeId:lecture.recipeId,baseVersionId:lecture.versionAffichee?.id}) || lecture.recipeId && c.editor_source_signature!==enVol.editor_source_signature) throw new TransitionRefusee('imports', importId, c.status);
+      if (lecture.indexLecture && (cleLecture(c)!==lecture.cle || JSON.stringify(c.source_capture)!==JSON.stringify(lecture.indexLecture.source_capture) || JSON.stringify(c.index_call)!==JSON.stringify(lecture.indexLecture.index_call))) throw new TransitionRefusee('imports',importId,c.status);
       if (garde && c.status === 'a_verifier' && cleLecture(c) !== lecture.cle) { autreLecture = true; throw new TransitionRefusee('imports', importId, c.status); }
       return { ...enVol, page_ids: [...pageIds], resultat: null };
     };
@@ -178,14 +179,14 @@ async function partirLecture(repo, lecture, pageIds, enVol, suivi, protections) 
       if (garde && importOuvert(await repo.get('imports', importId))) throw e;
     } // terminée, d'une autre sorte ou ciblée (l'éditeur, sans `cle`) : une ligne neuve
   }
-  const ligne = await repo.ouvrirImport({ kind, recipe_id:lecture.recipeId??null, edition_id: lecture.editionId ?? null, scan_session_id: lecture.sessionId ?? null, page_ids: [...pageIds],...(lecture.recipeId?{editeur:{base_version_id:enVol.editor_base_version_id,source_signature:enVol.editor_source_signature}}:{}),...protections });
+  const ligne = await repo.ouvrirImport({ kind, ...(lecture.indexLecture ? {indexLecture:lecture.indexLecture}:{}), recipe_id:lecture.recipeId??null, edition_id: lecture.editionId ?? null, scan_session_id: lecture.sessionId ?? null, page_ids: [...pageIds],...(lecture.recipeId?{editeur:{base_version_id:enVol.editor_base_version_id,source_signature:enVol.editor_source_signature}}:{}),...protections });
   suivi.importId = ligne.id;
   await repo.transitionner('imports', ligne.id, { ...protections,attendus: ['a_lancer'], patch: enVol });
   return ligne.id;
 }
 // Lot C, ronde 1 de la tâche 4 : `signal` (facultatif) = l'« Annuler » de l'appelant AVANT que la tenue ait une ligne (gardes : session, réduction des
 // photos). Levé pendant les gardes → refus `annule`, rien n'est parti ni écrit ; levé après le départ → l'appel est abandonné (comme annulerVol).
-async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null, signal = null, attendus = ['a_lancer', 'echec'], accepte = null, preparer = null, contexteEdition = null } = {}, suivi) {
+async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null, signal = null, attendus = ['a_lancer', 'echec'], accepte = null, preparer = null, contexteEdition = null, conditionsLecture = {}, conditionsHistoriqueLecture = {}, conserverReponse = null } = {}, suivi) {
   const tenue = { importId: lecture ? null : importId, controller: new AbortController(), repo };
   if (!prendreVol(tenue)) return refus('vol_tenu'); // AVANT tout await : une seconde tape (ou une lecture web) pendant les gardes voit le vol
   const compte=capturerProprietaire(repo,ctx);
@@ -235,8 +236,9 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
       conditionVersion={recipe_versions:[{key:base.id,fusion:c=>{if(!c||canoniqueEditeur(projectionVersionEditeur(c))!==exacte)throw new TransitionRefusee('recipe_versions',base.id,null);return null;}}]};
     }
     const recettesHistoriques = contexteRecette ? [{...contexteRecette,historique:true}] : [];
-    const protections={recettes:contexteRecette?[contexteRecette]:[],editions:contexteEdition?[contexteEdition]:[],conditions:{...conditionsCompte,...conditionsSourcesImport(sourcesAttendue),...conditionVersion}};
-    const protectionsHistoriques={recettes:recettesHistoriques,editions:contexteEdition?[{...contexteEdition,historique:true}]:[],conditions:conditionsCompte};
+    const reunirGardes=(...listes)=>{const r={};for(const liste of listes)for(const [store,conditions] of Object.entries(liste||{})){r[store]??=[];for(const condition of conditions){const avant=r[store].find(c=>c.key!=null&&c.key===condition.key);if(avant&&typeof avant.fusion==='function'&&typeof condition.fusion==='function'){const a=avant.fusion,b=condition.fusion;avant.fusion=current=>{if(a(current)!=null||b(current)!=null)throw new TypeError('Garde de lecture non pure');return null;};}else r[store].push({...condition});}}return r;};
+    const protections={recettes:contexteRecette?[contexteRecette]:[],editions:contexteEdition?[contexteEdition]:[],conditions:reunirGardes(conditionsCompte,conditionsSourcesImport(sourcesAttendue),conditionVersion,conditionsLecture,conditionsHistoriqueLecture)};
+    const protectionsHistoriques={recettes:recettesHistoriques,editions:contexteEdition?[{...contexteEdition,historique:true}]:[],conditions:reunirGardes(conditionsCompte,conditionsHistoriqueLecture)};
     tenue.recettes = recettesHistoriques;
     tenue.editions=protectionsHistoriques.editions;tenue.conditions=conditionsCompte;
     let envoi; // lot C : { images, pageIds } — les pages EFFECTIVEMENT envoyées, dans l'ordre des images
@@ -250,7 +252,7 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     // de CET appareil, dont le battement est ici ; sinon son appareil d'origine la jugeait à 90 s sur battement_at et l'interrompait pendant le vol.
     // Lot E, ronde 1 de T5 (même règle) : une COUVERTURE d'un autre appareil relancée ici par sa route de reprise (#/add/livre?import=) aussi.
     const ici = (kind === 'classement' || kind === 'couverture') && typeof repo.deviceId === 'function' ? repo.deviceId() : null;
-    const enVol = { ...(contexteRecette ? memoireCycleImport(contexteRecette) : contexteEdition?memoireEditionImport(contexteEdition):{owner_id:(await compte).owner_id}),...(editeur||{}),sources_attendues:sourcesAttendue, status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, ...(ici ? { device_id: ici } : {}), ...(kind === 'index' ? { resultat: null, reponse_brute: null, model: null, duree_ms: null, finished_at: null, ordre_applique_at: null } : {}) };
+    const enVol = { ...(contexteRecette ? memoireCycleImport(contexteRecette) : contexteEdition?memoireEditionImport(contexteEdition):{owner_id:(await compte).owner_id}),...(editeur||{}),...(lecture?.indexLecture||{}),sources_attendues:sourcesAttendue, status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, ...(ici ? { device_id: ici } : {}), ...(kind === 'index' ? { resultat: null, reponse_brute: null, model: null, duree_ms: null, finished_at: null, ordre_applique_at: null } : {}) };
     // Vague finale (m2) : le départ vaut pour les pages LUES — une page retirée, ajoutée ou déplacée pendant la réduction (autre geste, autre onglet)
     // refuse le départ (rien ne part, le redessin montre la ligne) : jamais une page envoyée qui ne serait pas liée, ni une page liée jamais lue.
     const memesPages = (c) => { if (JSON.stringify(Array.isArray(c.page_ids) ? c.page_ids : []) !== JSON.stringify(pageIds)) throw new TransitionRefusee('imports', importId, c.status);if(contexteEdition)verifierCaptureEditionImport(c,contexteEdition); return enVol; };
@@ -289,6 +291,11 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
       return { issue: 'echec', raison };
     }
     const duree_ms = Date.now() - t0;
+    if (conserverReponse) {
+      const patch={status:'a_verifier',resultat:reponse.resultat,reponse_brute:brute(reponse.texteBrut),model:reponse.modele??null,duree_ms,document_id_vol:null,erreur:null};
+      try { await conserverReponse({importId,reponse,patch,protectionsHistoriques}); return {issue:'a_verifier'}; }
+      catch(e) { return {issue:'conservation_echec',raison:e?.name==='QuotaExceededError'?'quota':e?.code??'ecriture',reponseNonConservee:reponse}; }
+    }
     // I-3 : le résultat vit dans le journal AVANT tout rendu ou toute écriture de recette. Patch-OBJET (son statut est lu par les espions des tests).
     try {
       await repo.transitionner('imports', importId, { ...protectionsHistoriques, attendus: ['en_cours'], patch: { status: 'a_verifier', resultat: reponse.resultat, reponse_brute: brute(reponse.texteBrut), model: reponse.modele ?? null, duree_ms, document_id_vol: null, erreur: null } });
@@ -440,7 +447,7 @@ export async function lireDansLeJournal({ kind, importId = null, pageIds = [], e
 
 // --- L'écran ------------------------------------------------------------------------------------------------------------------------------------
 export async function renderImportCible(params, query, ctx, deps = {}) {
-  const { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch: fetchInjecte = undefined, pickFiles = pickDom, maintenant = horloge, battementMs = BATTEMENT_MS, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = deps;
+  const { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch: fetchInjecte = undefined, pickFiles = pickDom, confirmer = confirmDialog, maintenant = horloge, battementMs = BATTEMENT_MS, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = deps;
   const recipe = ctx?.recipesById?.get(params?.id);
   // Une proposition ouverte bloque la même recette : la rendre visible même si cet écran attendait des pages.
   const propositions = recipe && repo.byIndex ? (await repo.byIndex('imports', 'recipe_id', recipe.id))
@@ -467,7 +474,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   // la lecture pour laquelle « Rattacher » a été répondu, sinon null ; verdict : la discordance calculée par decider() ; focus : le bouton à focaliser
   // après un déplacement ; occupe : une écriture est en cours (aucune double pose) ; ecriteMain : la question « Remplacer ? » vient d'une version écrite à
   // la main (I-5), et non de la seule couverture des pages (ronde finale 2) — la phrase qui le dit n'est montrée que dans ce cas.
-  const etat = { ligne: null, pages: new Map(), question: null, cleQuestion: null, rattache: null, verdict: null, focus: null, occupe: false, ecriteMain: false, seanceRefusee: null, bilan: null };
+  const etat = { ligne: null, pages: new Map(), question: null, cleQuestion: null, rattache: null, verdict: null, focus: null, occupe: false, ecriteMain: false, seanceRefusee: null, bilan: null, ajout: null, erreurAjout: null };
   const oublierQuestion = () => { etat.question = null; etat.cleQuestion = null; etat.rattache = null; etat.verdict = null; etat.ecriteMain = false; };
   root.etatRoute = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, pageIds: [...(Array.isArray(etat.ligne?.page_ids) ? etat.ligne.page_ids : [])], vol: !!etat.ligne && volEnCours()?.importId === etat.ligne.id, discordance: etat.verdict });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
@@ -538,20 +545,41 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     const ici = await Promise.all(pages.map(octetsIci));
     return ids.filter((_, i) => ici[i]);
   }
-  // Chaque ajout passe par repo.ajouterPages : persistant AVANT tout appel (spec § 4.2.2). Première photo → la ligne a_lancer naît (une visite sans
-  // photo n'écrit rien, § 4.1) ; ensuite les pages s'ajoutent EN FIN de la même ligne (un seul import ouvert par recette, I-2).
+  const lecturePayee = ligne => !!ligne && (ligne.status === 'a_verifier' || ligne.resultat != null || ligne.reponse_brute != null);
+  // Le geste et les fichiers restent réservés jusqu’à leur conservation confirmée. Une réponse payée
+  // garde ses pages : le dépôt ouvre un autre journal après confirmation, sans appel automatique.
+  async function conserverAjoutPhotos() {
+    const ajout=etat.ajout;if(!ajout)return;
+    const result=await repo.ajouterPages(ajout.files,ajout.args);
+    if(result.importId)etat.ligne=await repo.get('imports',result.importId);
+    etat.ajout=null;etat.erreurAjout=null;
+  }
+  function erreurAjoutPhotos(e) {
+    etat.erreurAjout=['lecture_changee','source_changed','cycle_change','contexte_change','compte_change','import_ouvert'].includes(e?.code)||estRefus(e)
+      ? t('La recette ou la lecture a changé. Les photos n’ont pas été ajoutées. Rouvre la recette avant de continuer.')
+      : t('Ces photos n’ont pas pu être ajoutées. Réessaie.');
+    if(!estRefus(e)&&!e?.code)logError('import_cible.ajout',{error:e});
+  }
+  async function reessayerAjoutPhotos() {
+    if(etat.occupe||!etat.ajout)return;
+    etat.occupe=true;dessiner();
+    try{await conserverAjoutPhotos();}catch(e){erreurAjoutPhotos(e);}finally{etat.occupe=false;await redessiner();}
+  }
   async function ajouterPhotos(options) {
-    if (etat.occupe) return;
-    const files = await pickFiles(options);
-    if (!files?.length) return;
-    etat.occupe = true;
+    if (etat.occupe||etat.ajout) return;
+    const attendue=etat.ligne?structuredClone(etat.ligne):null;
+    etat.occupe = true;etat.erreurAjout=null;dessiner();
     try {
-      if (etat.ligne) await repo.ajouterPages(files, { import_id: etat.ligne.id, recettes:[contexteRecette] });
-      else await repo.ajouterPages(files, { recettes:[contexteRecette], edition_id: recipe.edition_id ?? null, import: { id: repo.newId('imp'), kind: 'recette', recipe_id: recipe.id, edition_id: recipe.edition_id ?? null, page_ids: await pagesDejaLiees() } });
+      const payee=lecturePayee(attendue);
+      if(payee&&!(await confirmer(t('Préparer une nouvelle lecture avec ces pages et de nouvelles photos ? La réponse déjà reçue reste conservée à part. Aucun appel ne sera lancé avant ton prochain choix.'),{okLabel:t('Préparer une nouvelle lecture')})))return;
+      const args={intention_id:repo.newId('complement'),recettes:[contexteRecette]};
+      if(attendue){args.import_id=attendue.id;if(payee)args.nouvelleLecture={id:repo.newId('imp'),attendue};}
+      else Object.assign(args,{edition_id:recipe.edition_id??null,import:{id:repo.newId('imp'),kind:'recette',recipe_id:recipe.id,edition_id:recipe.edition_id??null,page_ids:await pagesDejaLiees()}});
+      const files=await pickFiles(options);if(!files?.length)return;
+      etat.ajout={files,args};await conserverAjoutPhotos();
     } catch (e) {
-      if (!estRefus(e)) { logError('import_cible.ajout', { error: e }); toast(t('Ces photos n’ont pas pu être ajoutées. Réessaie.')); }
-    } finally { etat.occupe = false; }
-    await redessiner();
+      erreurAjoutPhotos(e);
+    } finally { etat.occupe = false;await redessiner(); }
   }
   async function bougerPage(id, sens, role) {
     const L = etat.ligne; if (!L) return;
@@ -772,7 +800,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
       el('div', null, el('h1', null, recipe.original_title), sousTitre() ? el('p', { class: 'muted' }, sousTitre()) : null),
       availabilityBadge({ ...recipe, printed_page: null }))); // D-UI-10 : LE badge (T5 ronde 1 : plus de seconde source de ses textes) ; le sous-titre porte déjà la page
 
-  function sectionPages(pageIds, figees) {
+  function sectionPages(pageIds, figees, nouvelAjout = false) {
     const n = pageIds.length;
     const vignettes = el('div', { class: 'thumbs' });
     pageIds.forEach((id, i) => {
@@ -781,11 +809,11 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
       const rang = i + 1;
       const img = el('img', { alt: t('Page {n}', { n: rang }), loading: 'lazy' });
       poserImage(img, p.sha256);
-      const bouton = (role, libelle, onClick) => el('button', { type: 'button', class: 'btn', dataset: { role, page: id }, onClick }, libelle);
+      const bouton = (role, libelle, onClick) => el('button', { type: 'button', class: 'btn', disabled: etat.occupe, dataset: { role, page: id }, onClick }, libelle);
       // Lot UI-1 « Carnet » (§ 4.5, maquette 04) : le × en coin de la vignette EST le bouton « Retirer » d'avant (même data-role, même nom accessible par
       // aria-label, cible 44 × 44 par .thumbs .btn.retirer), absent quand les pages sont figées ; la légende « Page 1 · p. 76 » est un bouton qui OUVRE le
       // champ « p. imprimée », né hidden (une saisie valide le referme : ecrirePageImprimee) ; Monter / Descendre restent le chemin garanti (§ 8 : pas de glisser).
-      const croix = figees ? null : el('button', { type: 'button', class: 'btn retirer', 'aria-label': t('Retirer la page {n}', { n: rang }), dataset: { role: 'retirer', page: id }, onClick: () => retirerLaPage(id) }, '×');
+      const croix = figees ? null : el('button', { type: 'button', class: 'btn retirer', disabled: etat.occupe, 'aria-label': t('Retirer la page {n}', { n: rang }), dataset: { role: 'retirer', page: id }, onClick: () => retirerLaPage(id) }, '×');
       const champ = el('input', { type: 'number', id: `page-imprimee-${(numeroChampPage += 1)}`, min: 1, max: 9999, hidden: true, placeholder: t('p. imprimée'), 'aria-label': t('p. imprimée'), value: p.printed_page ?? '' });
       // T5 ronde 1 (I-UI-4) : la légende est une VRAIE bascule — aria-controls nomme son champ ; une seconde tape ou Échap le referme sans rien écrire (la valeur
       // courante est remise) et rend le focus à la légende.
@@ -803,9 +831,14 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     return section(t('Pages de la recette'),
       el('p', { class: 'muted', style: { margin: 0 } }, n <= 1 ? t('{n} photo ajoutée', { n }) : t('{n} photos ajoutées', { n })),
       n ? vignettes : null,
-      figees ? null : el('div', { class: 'row' },
-        el('button', { type: 'button', class: 'btn', disabled: etat.occupe, onClick: () => ajouterPhotos({ accept: 'image/*', capture: 'environment', multiple: true }) }, t('Photographier')),
-        el('button', { type: 'button', class: 'btn', disabled: etat.occupe, onClick: () => ajouterPhotos({ accept: 'image/*', multiple: true }) }, t('Choisir des photos'))));
+      nouvelAjout ? el('p',{class:'muted'},t('Ces pages appartiennent à la réponse conservée. Ajouter des photos préparera une nouvelle lecture.')) : null,
+      figees&&!nouvelAjout ? null : el('div', { class: 'row' },
+        el('button', { type: 'button', class: 'btn', disabled: etat.occupe||!!etat.ajout, onClick: () => ajouterPhotos({ accept: 'image/*', capture: 'environment', multiple: true }) }, t('Photographier')),
+        el('button', { type: 'button', class: 'btn', disabled: etat.occupe||!!etat.ajout, onClick: () => ajouterPhotos({ accept: 'image/*', multiple: true }) }, t('Choisir des photos'))),
+      etat.erreurAjout ? el('p',{role:'status',class:'status warn',dataset:{role:'erreur-ajout-photos'}},etat.erreurAjout) : null,
+      etat.ajout ? el('div',{class:'row'},
+        el('button',{type:'button',class:'btn',disabled:etat.occupe,dataset:{role:'reessayer-ajout-photos'},onClick:reessayerAjoutPhotos},t('Réessayer l’ajout de ces photos')),
+        el('button',{type:'button',class:'btn',disabled:etat.occupe,onClick:()=>{etat.ajout=null;etat.erreurAjout=null;dessiner();}},t('Annuler cet ajout'))) : null);
   }
 
   function sectionPhoto(L, figee) {
@@ -944,7 +977,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     const pageIds = Array.isArray(L?.page_ids) ? L.page_ids : [];
     const enVol = !!L && volEnCours()?.importId === L.id;
     // Vague finale (m2) : figées dès que CE document tient le vol de cette ligne, avant même en_cours (gardes et réduction des pages).
-    root.replaceChildren(enTete(), sectionPages(pageIds, enVol || statut === 'en_cours' || statut === 'a_verifier'), sectionPhoto(L, enVol || statut === 'en_cours'), zoneAction(L, statut, enVol));
+    root.replaceChildren(enTete(), sectionPages(pageIds, enVol || statut === 'en_cours' || lecturePayee(L), lecturePayee(L)&&!enVol&&statut!=='en_cours'), sectionPhoto(L, enVol || statut === 'en_cours'), zoneAction(L, statut, enVol));
     majEnLigne();
     veiller();
     if (etat.focus) { const { role, page } = etat.focus; etat.focus = null; root.querySelector(`button[data-role="${role}"][data-page="${CSS.escape(page)}"]`)?.focus(); }

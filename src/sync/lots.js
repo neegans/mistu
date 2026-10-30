@@ -1,3 +1,5 @@
+import {estCommandeSources,ciblesCommandeSources} from './commandes-sources.js';
+import {verifierEmpreinteCommandeSources} from '../domain/sources-format.js';
 // Composition des lots d'envoi (spec § 5.3) : pur, sans base ni réseau. L'ordre est celui de la file (seq), chaque
 // (store, id) part une fois (la version la plus récente), un put est RELU au moment de l'envoi (la file ne garde
 // pas la fiche), une suppression part avec son payload. Bornes du serveur appliquées avec une marge pour le lot ;
@@ -7,8 +9,10 @@ import { projectionFichier, remoteDeCeCompte } from './tables.js';
 import { commandeCycle, recettesDe } from './cycle.js';
 import { commandeEdition, editionsDe, cibleCommune } from './cycle-edition.js';
 
+export const estLectureSourceSignee=(store,row)=>store==='imports'&&!!row&&(row.source_capture!==undefined||row.index_call!==undefined||row.index_storage!==undefined);
+
 export const LIMITES = { elements: 500, lot: 921600, element: 524288 };
-const evenement = e => commandeCycle(e) || estLotSources(e);
+const evenement = e => commandeCycle(e) || estLotSources(e) || estCommandeSources(e);
 const CONTROLE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g;
 const encodeur = new TextEncoder();
 
@@ -69,7 +73,7 @@ const tombaleDe = (entree) => ({
   element: {
     store: entree.store,
     id: entree.id,
-    data: entree.payload ? nettoyerChaines(entree.payload) : null,
+    data: entree.payload ? (estLectureSourceSignee(entree.store,entree.payload)?structuredClone(entree.payload):nettoyerChaines(entree.payload)) : null,
     updated_at: entree.updated_at,
     deleted: true,
     ...contexteCycle(entree),
@@ -87,6 +91,7 @@ async function elementFichier(entree, relire) {
 }
 
 async function elementDe(entree, relire) {
+  if(estCommandeSources(entree)){await verifierEmpreinteCommandeSources(entree.payload);return{element:structuredClone(entree.payload)};}
   if (estLotSources(entree)) return { element: nettoyerChaines(entree.payload) };
   if (commandeCycle(entree)) return {element:{store:entree.store,id:entree.id,op:'lifecycle',...nettoyerChaines(entree.payload)}};
   if (entree.store === 'files') return elementFichier(entree, relire);
@@ -101,9 +106,25 @@ async function elementDe(entree, relire) {
     // modifiée depuis, cette tombale plus ancienne revenait en conflit à trancher pour rien.
     return { abandonnee: true };
   }
-  const data = nettoyerChaines(fiche);
+  // Un ancien put sans copie ne peut adopter les décisions appliquées depuis sa capture.
+  if(estLectureSourceSignee(entree.store,fiche)&&!entree.snapshot)return{retenue:true,raison:'copie de lecture absente'};
+  const data = estLectureSourceSignee(entree.store,fiche)?structuredClone(fiche):nettoyerChaines(fiche);
   return { element: { store: entree.store, id: entree.id, data, updated_at: data.updated_at || entree.updated_at, deleted: false,
     ...contexteCycle(entree) } };
+}
+
+const clesSources=e=>estCommandeSources(e)?[...ciblesCommandeSources(e.payload),...(e.payload.base_sources||[])].map(r=>r.store+':'+r.id):[cleDe(e)];
+// Les préconditions de lecture d'un transfert sont portées par ses octets immuables,
+// même quand begin/part n'embarquent pas encore la cible. Elles attendent aussi son finish accusé.
+function lecturesSources(file){
+ const groupes=new Map(),parEntree=new Map();
+ const lire=(store,row,keys)=>{if(!row)return;if(row.source_copy?.source_id)keys.add(store+':'+row.source_copy.source_id);if(row.scan_session_id)keys.add('scan_sessions:'+row.scan_session_id);if(store==='imports')for(const id of row.page_ids||[])keys.add('source_pages:'+id);};
+ for(const e of file){const c=e.payload,keys=c?.op==='source_transfer'?(groupes.get(c.transfer_id)||new Set()):new Set();
+  if(c?.op==='source_transfer'){groupes.set(c.transfer_id,keys);lire(c.store,c.target,keys);for(const r of c.rows||[])lire(r.store,r.data,keys);}
+  else if(c?.op==='index_apply'){keys.add('scan_sessions:'+c.session_id);for(const r of c.read_set||[])keys.add('imports:'+r.journal_id);}
+  else if(estLectureSourceSignee(e.store,e.snapshot))lire(e.store,e.snapshot,keys);
+  parEntree.set(e,keys);
+ }return parEntree;
 }
 
 export async function composerLots(entrees, relire) {
@@ -126,12 +147,22 @@ export async function composerLots(entrees, relire) {
     return e;
   };
   const file=[];for(const e of ordonnee)file.push(await preparer(e));
+  const lectures=lecturesSources(file),cles=new Map(file.map(e=>[e,clesSources(e)]));
+  // Une archive contient des transferts dont les lectures désignent d'autres graphes.
+  // Le sens de cette dépendance prime leur ordre matériel dans la file, jamais l'inverse.
+  const transferts=new Map();for(const e of file)if(e.payload?.op==='source_transfer'){const id=e.payload.transfer_id,g=transferts.get(id)||{writes:new Set(),reads:new Set()};for(const k of cles.get(e))g.writes.add(k);for(const k of lectures.get(e)||[])g.reads.add(k);transferts.set(id,g);}
+  const dependances=new Map();for(const[id,g]of transferts){const deps=new Set();for(const[other,h]of transferts)if(other!==id&&[...g.reads].some(k=>!g.writes.has(k)&&h.writes.has(k)))deps.add(other);dependances.set(id,deps);}
+  // Fermeture transitive pour ne pas bloquer l'origine derrière une copie de copie.
+  for(const[id,deps]of dependances){const pend=[...deps];for(let n=0;n<pend.length;n++)for(const next of dependances.get(pend[n])||[])if(!deps.has(next)){deps.add(next);pend.push(next);}}
+  const transfertId=e=>e.payload?.op==='source_transfer'?e.payload.transfer_id:null;
+  const dependDe=(a,b)=>{const x=transfertId(a),y=transfertId(b);return !!x&&!!y&&x!==y&&dependances.get(x)?.has(y);};
+  const communeSources=(a,b)=>{if(cibleCommune(a,b))return true;if(!estCommandeSources(a)&&!estCommandeSources(b))return false;const ca=cles.get(a)||clesSources(a),cb=cles.get(b)||clesSources(b),la=lectures.get(a)||new Set(),lb=lectures.get(b)||new Set();return ca.some(k=>cb.includes(k)||lb.has(k))||cb.some(k=>la.has(k));};
   const admissibles=[];
   for (const e of file) {
-    const first=[...commandes.values()].filter(c=>cibleCommune(c,e)).sort((a,b)=>a.seq-b.seq)[0];
+    const first=[...commandes.values()].filter(c=>communeSources(c,e)).sort((a,b)=>a.seq-b.seq)[0];
     const avant=file.filter(x=>x.seq<e.seq);
-    const attendCommande=avant.some(x=>evenement(x)&&cibleCommune(x,e));
-    const attendContenu=(commandeEdition(e)||estLotSources(e))&&avant.some(x=>!evenement(x)&&cibleCommune(x,e));
+    const attendCommande=file.some(x=>dependDe(e,x))||avant.some(x=>evenement(x)&&communeSources(x,e)&&!dependDe(x,e));
+    const attendContenu=(commandeEdition(e)||estLotSources(e)||estCommandeSources(e))&&avant.some(x=>!evenement(x)&&communeSources(x,e));
     const attendParent=editionsDe(e).some(id=>file.some(x=>x.op==='put'&&x.store==='book_editions'&&x.id===id&&x.seq!==e.seq&&(!commandeCycle(e)||x.seq<e.seq)))&&!['book_editions','books'].includes(e.store);
     const bookId=e.store==='book_editions'?(e.snapshot||e.payload?.seed)?.book_id:null;
     const attendLivre=!!bookId&&file.some(x=>x.store==='books'&&x.id===bookId&&x.op==='put');
@@ -145,7 +176,7 @@ export async function composerLots(entrees, relire) {
   groupes.sort((a,b)=>ordre(a)-ordre(b));
   for (const { entree, seqs } of groupes) {
     const r = await elementDe(entree, relire);
-    if (r.retenue) { retenues.push({ seq: entree.seq, seqs, raison: 'fichier en attente' }); continue; }
+    if (r.retenue) { retenues.push({ seq: entree.seq, seqs, raison: r.raison||'fichier en attente' }); continue; }
     if (r.abandonnee) { abandonnees.push({ seq: entree.seq, seqs, raison: 'fiche disparue' }); continue; }
     if (evenement(entree)) {fermer();lots.push({elements:[r.element],seqs});continue;}
     const taille = tailleJson(r.element) + 1;

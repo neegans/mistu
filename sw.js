@@ -1,15 +1,19 @@
 // Service worker : coquille applicative en cache pour consultation hors connexion des recettes déjà chargées.
 // Les nouvelles demandes IA et les recherches de métadonnées ne fonctionnent pas hors connexion (spec §15).
 importScripts('./sw-rules.js');
-const VERSION = 'cuisine-os-v0.26.0-1';
+const VERSION = 'cuisine-os-v0.27.0-1';
 // Tous les modules de production sont inclus ; tests/ reste chargé à la demande.
 // La complétude de cette liste est vérifiée par tests/sync.js (graphe d'imports depuis src/app.js) : un chemin
 // manquant ferait répondre 404 à cache.addAll et l'installation entière échouerait.
 const SHELL = [
+  './src/domain/comparaison-sources.js', './src/domain/transfert-premiere-liaison.js',
+  './src/domain/index-application.js', './src/domain/index-stockage.js', './src/domain/revisions-source.js', './src/domain/sources-locaux.js', './src/domain/transferts-source.js', './src/sync/commandes-sources.js', './src/ui/index-vol.js',
   './src/domain/brouillons-editeur.js', './src/domain/brouillons-format.js', './src/domain/editeur-recette.js', './src/domain/edition-livre.js', './src/ui/brouillon-editeur.js', './src/ui/livre-editeur.js', './src/ui/recette-editeur.js', './src/ui/sortie-editeur.js',
   './src/domain/rendement.js', './src/ui/brouillons-liste.js',
   './src/domain/bibliotheque.js', './src/ui/navigation-contexte.js', './src/ui/actions-contenu.js', './src/ui/bibliotheque-liste.js',
   './src/domain/cycle-edition.js', './src/domain/corbeille-livres.js', './src/sync/cycle-edition.js', './src/sync/contexte-initial.js', './src/sync/lot-sources.js', './src/domain/sources-import.js',
+  './src/domain/index-lecture.js',
+  './src/domain/sources-format.js', './src/ui/revisions-source.js',
   './src/domain/cycle-recette.js', './src/domain/corbeille.js', './src/domain/contexte-import.js',
   './src/sync/cycle.js', './src/ui/corbeille.js', './src/ui/recette-garde.js',
   './', './index.html', './styles.css', './manifest.webmanifest', './icons/icon.svg', './icons/apple-touch-icon.png', './sw-rules.js',

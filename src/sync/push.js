@@ -1,3 +1,4 @@
+import {estCommandeSources,ciblesCommandeSources,CLE_SOURCE_CONFIRMEE} from './commandes-sources.js';
 // Envoi d'une passe (spec § 5.3) : la file est lue, dédoublonnée, relue, envoyée par lots ; chaque réponse est
 // appliquée en UNE transaction (retraits, réécritures non capturées, conflits, quarantaine). I5 : une fiche n'est
 // « envoyée » que par l'absence d'entrée la concernant.
@@ -44,9 +45,11 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
   // avec les compteurs du moteur et « À envoyer » de Réglages). Puis les deux retenues de l'envoi : la quarantaine
   // attend un geste de la personne, une heure de reprise pas encore venue attend son heure.
   async function lireFile() {
-    const miennes = await fileDe(db, getUserId());
-    return miennes.filter((e) => commandeCycle(e)||e.lifecycle_blocked||((!e.quarantined_at || e.last_error==='cycle') && prete(e)))
-      .map(e=>commandeCycle(e)&&!prete(e)?{...e,lifecycle_waiting:true}:e).sort((a, b) => a.seq - b.seq);
+    const miennes = await fileDe(db, getUserId()),sources=miennes.some(estCommandeSources);
+    // Une phase en recul reste visible au composeur : ni ses suivantes, ni les lecteurs
+    // de ses sources ne peuvent dépasser un accusé perdu. Cela inclut leurs bases ordinaires.
+    return miennes.filter((e) => sources||commandeCycle(e)||e.lifecycle_blocked||((!e.quarantined_at || e.last_error==='cycle') && prete(e)))
+      .map(e=>(sources||commandeCycle(e))&&!prete(e)?{...e,lifecycle_waiting:true}:e).sort((a, b) => a.seq - b.seq);
   }
 
   // R-L3-5 : une ligne retenue (files, tant que L4 n'a pas confirmé l'empreinte) n'est ni envoyée ni retirée —
@@ -73,6 +76,7 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
   }
 
   async function appliquer(lot, reponse, entreesParSeq) {
+    if(estCommandeSources(lot.elements[0]))return appliquerSourcesL5(lot,reponse,entreesParSeq);
     if (estLotSources(lot.elements[0])) return appliquerSources(lot, reponse, entreesParSeq);
     if(lot.elements[0]?.op==='lifecycle') return appliquerCommande(lot,reponse,entreesParSeq);
     const owner=getUserId();
@@ -132,6 +136,26 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     conditions={...(conditions||{}),sync_state:[gardeCompteCycle(owner,getUserId)]};
     await db.mutate({ puts, deletes, origin: 'remote', conditions });
     return effets;
+  }
+
+  async function appliquerSourcesL5(lot,reponse,entreesParSeq){
+    const c=lot.elements[0],owner=getUserId(),entree=lot.seqs.map(s=>entreesParSeq.get(s)).find(e=>estCommandeSources(e)&&e.payload.operation_id===c.operation_id);
+    const effets={retirer:[],reecrire:{},conflits:[],quarantaine:[],retirerConflits:[]};if(!entree)return effets;
+    const match=r=>r.store===c.store&&r.id===c.id&&r.operation_id===c.operation_id&&r.payload_sha256===c.payload_sha256;
+    const ack=(reponse.accepted||[]).find(match),refus=(reponse.rejected||[]).find(match);if(!ack&&!refus)return effets;
+    const puts={},deletes={},conditions={sync_state:[gardeCompteCycle(owner,getUserId)],outbox:[{key:entree.seq,fusion:r=>{if(JSON.stringify(r)!==JSON.stringify(entree))throw Error('Intention source modifiée pendant envoi');return null;}}]};
+    if(ack){
+      const attendus=c.op==='source_transfer'?(c.phase==='part'?c.rows.map(r=>({store:r.store,id:r.id})):c.phase==='finish'?[{store:c.store,id:c.id}]:[]):ciblesCommandeSources(c),rows=ack.server_rows;
+      if(!Array.isArray(rows)||rows.length!==attendus.length||new Set(rows.map(cleDe)).size!==rows.length||rows.some(r=>!attendus.some(a=>cleDe(a)===cleDe(r))||r.deleted_at||r.data?.id!==r.id||!Number.isFinite(Date.parse(r.updated_at))||!Number.isFinite(r.server_seq)))return effets;
+      for(const r of rows){const key=CLE_SOURCE_CONFIRMEE(r.store,r.id);conditions.sync_state.push({key,fusion:current=>current?.value?.user_id===owner&&current.value.server_seq>r.server_seq?null:{key,value:{user_id:owner,data:r.data,server_seq:r.server_seq,updated_at:r.updated_at,deleted_at:null}}});}
+      deletes.outbox=[entree.seq];effets.retirer=[entree.seq];
+    }else{
+      const file=await fileDe(db,owner),cles=new Set(ciblesCommandeSources(c).map(cleDe));
+      puts.outbox=file.filter(e=>e.seq>=entree.seq&&(e.seq===entree.seq||estCommandeSources(e)&&ciblesCommandeSources(e.payload).some(r=>cles.has(cleDe(r))))).map(e=>({...e,lifecycle_blocked:true,last_error:refus.reason||'source_changed'}));
+      const conflit={id:'source:'+c.operation_id,store:c.store,record_id:c.id,operation_id:c.operation_id,user_id:owner,local:c,server:refus.server||null,reason:refus.reason||'source_changed',at:reponse.server_time||new Date().toISOString(),kind:'source'};puts.sync_conflicts=[conflit];effets.conflits=[conflit];
+      const serveur=refus.server;if(serveur?.data?.id===c.id&&Number.isFinite(serveur.server_seq)){const key=CLE_SOURCE_CONFIRMEE(c.store,c.id);conditions.sync_state.push({key,fusion:current=>current?.value?.user_id===owner&&current.value.server_seq>serveur.server_seq?null:{key,value:{user_id:owner,data:serveur.data,server_seq:serveur.server_seq,updated_at:serveur.updated_at,deleted_at:serveur.deleted_at??null}}});}
+    }
+    await db.mutate({puts,deletes,conditions,origin:'remote'});return effets;
   }
 
   async function appliquerSources(lot, reponse, entreesParSeq) {
@@ -338,6 +362,10 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     const bilan = { envoyes: 0, ajustes: 0, conflits: 0, quarantaine: 0, retenues: 0, abandonnees: 0, recul: null, erreur: null, pause: false, attenteConnexion: false };
     const file = await lireFile();
     if (!file.length) return bilan;
+    if(file.some(estCommandeSources)){
+      const owner=getUserId(),key='source-capability:'+owner,cached=await db.get('sync_state',key);
+      if(cached?.value?.protocol!==1){const r=typeof transport.capacites==='function'?await transport.capacites():null;if(r?.erreur||r?.capacites?.source_revisions!==1){bilan.erreur=r?.erreur||{type:'incompatible'};return bilan;}await db.mutate({origin:'remote',puts:{sync_state:[{key,value:{protocol:1}}]},conditions:{sync_state:[gardeCompteCycle(owner,getUserId)]}});}
+    }
     const entreesParSeq = new Map(file.map((e) => [e.seq, e]));
     const { lots, retenues, abandonnees } = await composerLots(file, (store, id) => db.get(store, id));
     bilan.retenues = retenues.length;

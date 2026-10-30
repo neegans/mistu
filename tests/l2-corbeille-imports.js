@@ -43,7 +43,10 @@ export async function runL2CorbeilleImportsTests({eq,ok}) {
     await run('rotation après restauration',async(repo,db)=>{
       const base=await seed(repo,db,edition('cycle-restaure'));const root=await renderImport({}, {session:base.session.id},await getData(true));scene.append(root);
       bouton(root,'↻ Pivoter').click();await new Promise(r=>setTimeout(r,80));
-      eq((await repo.get('source_pages',base.page.id)).rotation,90,'L2 sources : nouvelle rotation sur édition restaurée autorisée');
+      const seance=await repo.get('scan_sessions',base.session.id),active=await repo.get('source_pages',seance.source_state.active_page_ids[0]);
+      eq(active.rotation,90,'L2 sources : nouvelle rotation sur édition restaurée autorisée');
+      ok(active.id!==base.page.id,'L5 sources restaurées : rotation dans une nouvelle révision active');
+      eq((await repo.get('source_pages',base.page.id)).rotation,0,'L5 sources restaurées : ancienne révision préservée');
     });
     await run('remplacement tardif sans octet orphelin',async(repo,db)=>{
       const base=await seed(repo,db),root=await renderImport({}, {session:base.session.id},await getData(true));scene.append(root);
@@ -97,8 +100,9 @@ export async function runL2CorbeilleImportsTests({eq,ok}) {
       await attendre(()=>root.querySelector('[data-role=relecture-index]'));
       eq((await repo.all('recipes')).length,0,'L2 index écran : ancien résultat montré sans application');
       ok(root.querySelector('[data-role=relecture-index]').textContent.includes('Soupe attendue'),'L2 index écran : résultat payé lisible avant adoption');
+      eq(bouton(root,'Réutiliser ce résultat après relecture').disabled,false,'L2 index écran : changement de cycle autorise la relecture explicite du journal ancien de ce propriétaire');
       bouton(root,'Réutiliser ce résultat après relecture').click();await attendre(async()=>(await repo.all('recipes')).length===1);
-      eq([(await repo.get('imports','index-l2')).expected_edition_cycle_id,messages],['cycle-restaure',[]],'L2 index écran : geste explicite réutilise le résultat sans erreur');
+      eq([(await repo.get('imports','index-l2')).expected_edition_cycle_id,(await repo.get('imports','index-l2')).resultat,(await repo.all('imports')).length,messages],['cycle-restaure',resultatIndex(base.page.id),1,[]],'L2 index écran : geste explicite réutilise le résultat exact sans erreur ni nouveau journal');
     });
     await run('relecture classement visible',async(repo,db)=>{
       const base=await seed(repo,db,edition('cycle-restaure')),page2={...base.page,id:'pg2-import-l2',position:2},session={...base.session,page_ids:[base.page.id,page2.id]};
@@ -111,6 +115,24 @@ export async function runL2CorbeilleImportsTests({eq,ok}) {
       eq([root.querySelector('[data-role=lire-recettes]').disabled,root.textContent.includes('Soupe classée')],[true,true],'L2 classement : ancien résultat visible mais départ payé bloqué');
       bouton(root,'Réutiliser ce résultat après relecture').click();await attendre(()=>!root.querySelector('[data-role=relecture-classement]'));
       eq([(await repo.get('imports',ligne.id)).expected_edition_cycle_id,(await repo.get('imports',ligne.id)).resultat,(await repo.all('imports')).length],['cycle-restaure',resultat,1],'L2 classement : relecture explicite conserve résultat et ne crée aucune lecture payée');
+    });
+    await run('relecture index autre propriétaire',async(repo,db)=>{
+      const base=await seed(repo,db,edition('cycle-restaure')),ligne=await indexLu(repo,db,base);
+      await db.mutate({origin:'remote',puts:{imports:[{...ligne,owner_id:'autre-proprietaire'}]}});
+      const root=panneauIndex(base.session,await getData(true),()=>base.session.page_ids,{repo,seanceIndex:true});scene.append(root);
+      await attendre(()=>root.querySelector('[data-role=relecture-index]'));
+      eq([bouton(root,'Réutiliser ce résultat après relecture').disabled,(await repo.all('recipes')).length],[true,0],'L2 index écran : relecture explicite ne peut adopter le journal d’un autre propriétaire');
+      root.dispose?.();
+    });
+    await run('relecture index refusée à la transaction',async(repo,db)=>{
+      const base=await seed(repo,db,edition('cycle-restaure')),ligne=await indexLu(repo,db,base),messages=[];
+      const concurrente={...ligne,resultat:resultatIndex(base.page.id)};concurrente.resultat.pages[0].entrees[0].titre='Autre lecture arrivée';
+      const espion={...repo,transitionner:async(store,id,options)=>{await db.mutate({origin:'remote',puts:{imports:[concurrente]}});return repo.transitionner(store,id,options);}};
+      const root=panneauIndex(base.session,await getData(true),()=>base.session.page_ids,{repo:espion,seanceIndex:true,toast:m=>messages.push(m)});scene.append(root);
+      await attendre(()=>root.querySelector('[data-role=relecture-index]'));const geste=bouton(root,'Réutiliser ce résultat après relecture');geste.click();
+      await attendre(()=>messages.length>0);
+      eq([geste.disabled,(await repo.all('recipes')).length,(await repo.get('imports',ligne.id)).resultat],[false,0,concurrente.resultat],'L2 index écran : refus concurrent rend le bouton disponible sans appliquer ni écraser la réponse arrivée');
+      root.dispose?.();
     });
     for(const changement of ['aucun','parent','compte','fiche'])await run('retrait index '+changement,async(repo,db)=>{
       const base=await seed(repo,db);await indexLu(repo,db,base);await enregistrerAuto('index-l2',{repo,ctx:await getData(true),session:base.session});

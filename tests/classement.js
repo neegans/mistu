@@ -99,7 +99,7 @@ const panneau = (racine) => racine.querySelector('[data-role="classement"]');
 const raisonPanneau = (racine) => panneau(racine)?.querySelector('[data-role="raison-classer"]')?.textContent ?? null;
 // Ronde 1 de T2 : la barre de sélection de sessionView (la rangée de son bouton « Retirer ») et ses nœuds texte NUS (un null passé à append natif s'y
 // écrirait « null », écart E-7).
-const barre = (racine) => [...racine.querySelectorAll('button.btn.danger')].find((b) => b.textContent === 'Retirer')?.parentElement ?? null;
+const barre = (racine) => [...racine.querySelectorAll('button.btn')].find((b) => b.textContent === 'Retirer de la séance')?.parentElement ?? null;
 const texteNuDeBarre = (racine) => [...(barre(racine)?.childNodes ?? [])].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.data);
 // Une lecture de recette (forme validée par validateParsedRecipe) que la fausse fetch rend pour une ligne du lot.
 const RECETTE_LUE = (title = 'Soupe de courge', printed_page = 132, over = {}) => ({ title, servings: null, prep_minutes: null, cook_minutes: null, ingredients: [{ source_text: '1 courge', uncertain: false }], steps: [{ text: 'Cuire.' }], printed_page, sub_recipes: [], uncertain_fields: [], notes: null, incomplete: false, missing_page: false, ...over });
@@ -2091,7 +2091,7 @@ export async function runClassementTests({ eq, ok }) {
       eq([[...fi.querySelectorAll('section')].some((s) => s.querySelector('h2')?.textContent === 'Sources'), fi.textContent.includes('Original : page 123 du livre (pages non photographiées).')], [false, true], 'T-D18 (e) (ronde 1, doute 3) : une fiche lue dont la seule page est sa photo d’index → aucun bloc « Original » ; « Original : page 123 du livre (pages non photographiées). » (branche existante)');
     });
 
-    await ecranT5('T-D18 (ronde 1) séance : « Retirer » refuse la photo d’index d’une référence lue et une page citée par une version', async (repo, db) => {
+    await ecranT5('T-D18 et L5 séance : retirer de la sélection conserve les photos liées aux recettes', async (repo, db) => {
       // B-7 retire la photo d'index de l'union d'une fiche lue : « Retirer » la protège désormais par index_page_id, et toute page citée par une version
       // (provenance.source_page_ids, relation d'archive dure) ; une page libre ouvre toujours la question (témoin).
       const versionDe = (id, recipe_id, pages) => ({ id, recipe_id, kind: 'extraction', parent_version_id: null, status: null, servings: null, prep_minutes: null, cook_minutes: null, active_minutes: null, total_minutes: null, ingredients: [], steps: [{ id: 'st' + id, position: 1, text: 'Cuire.' }], constraints: {}, changes: '', notes: '', provenance: { source_page_ids: pages, generated_by: 'ai' }, verification_state: 'to_verify', created_at: DATE, updated_at: DATE });
@@ -2102,16 +2102,16 @@ export async function runClassementTests({ eq, ok }) {
       const retirer = async (ids) => {
         if (toastEl()) toastEl().textContent = '';
         cocher(racine, ids);
-        [...racine.querySelectorAll('button.btn.danger')].find((b) => b.textContent === 'Retirer').click();
+        [...racine.querySelectorAll('button.btn')].find((b) => b.textContent === 'Retirer de la séance').click();
         await attendre(()=>toastEl()?.textContent || document.querySelector('dialog[open]'),'retrait répondu');
         const vu = [toastEl()?.textContent ?? '', !!document.querySelector('dialog[open]')];
         document.querySelectorAll('dialog[open]').forEach((d) => d.close()); // « non » : rien n'est retiré
+        await attendre(()=>!racine.querySelector('figure[data-page] input[type=checkbox]').disabled,'retrait annulé, gestes disponibles');
         cocher(racine, ids);
         return vu;
       };
       try {
-        const LIEE = '1 page(s) déjà liée(s) à une recette : retire d’abord la recette.';
-        eq([await retirer(['p1']), await retirer(['p3']), await retirer(['p4']), (await db.getMany('source_pages', ['p1', 'p3', 'p4'])).map((p) => !!p)], [[LIEE, false], [LIEE, false], ['', true], [true, true, true]], 'T-D18 (ronde 1) : « Retirer » la photo d’index d’une référence lue (index_page_id) ou une page citée par une version → refusé et dit, aucune question ; une page libre ouvre la question (témoin) ; rien n’est retiré');
+        eq([await retirer(['p1']), await retirer(['p3']), await retirer(['p4']), (await db.getMany('source_pages', ['p1', 'p3', 'p4'])).map((p) => !!p)], [['', true], ['', true], ['', true], [true, true, true]], 'L5 T-D18 : toute photo peut quitter la sélection après confirmation ; annuler conserve les pages d’index, les sources de versions et les pages libres');
       } finally { document.querySelectorAll('dialog[open]').forEach((d) => d.close()); }
     });
 
@@ -2568,7 +2568,7 @@ export async function runClassementTests({ eq, ok }) {
       eq(['Monter la page {n}', 'Descendre la page {n}', 'Retirer la page {n}', 'incertain', 'Incertain : {t}', 'Annuler', 'Ignorer', 'Reprendre', 'Relancer', 'Tu es hors ligne.', 'En cours sur un autre écran', 'Une lecture est déjà en cours : annule-la d’abord.', 'Code : {c}', 'L’assistant n’a pas répondu lisiblement. Réessaie.', 'Connecte-toi pour utiliser l’assistant.', '{n} photo ajoutée', '{n} photos ajoutées', 'p.', 'Sans livre', 'La recette n’a pas pu être enregistrée. Réessaie.', 'Une lecture = un appel à l’assistant, compté dans ton quota du jour.', 'Les photos de cette séance ne sont pas sur cet appareil.', 'Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.', 'La lecture a été interrompue. L’appel a peut-être été compté ; relancer en coûtera un autre.', 'L’appel a peut-être été compté ; relancer en coûtera un autre.', 'Page {n}', 'Une erreur est survenue', 'La demande est trop lourde : choisis moins de pages.'].filter((k) => typeof EN[k] !== 'string'), [], 'T-D20 : les clés existantes que le lot réemploie sont toujours là (ronde 1 de T6 : les trois phrases I-4 du lot A et les trois clés anciennes de regroupement.js comprises)');
       const sw = await lire('../sw.js');
       ok(sw.includes("'./src/domain/classement.js'") && sw.includes("'./src/ui/regroupement.js'"), 'T-D20 : SHELL contient les deux modules neufs du lot');
-      eq([APP_VERSION, sw.includes(`VERSION = 'cuisine-os-v${APP_VERSION}-`), MODULES_NEUFS.includes('../src/ui/regroupement.js')], ['0.26.0', true, true], 'T-D20 : APP_VERSION 0.26.0 (fixée par le chef d’orchestre : R-D-12 au lot D, R-E-18 au lot E, Global Constraints au lot F, I-UI-7 au lot UI-1), VERSION du service worker sur elle, regroupement.js dans le filet i18n');
+      eq([APP_VERSION, sw.includes(`VERSION = 'cuisine-os-v${APP_VERSION}-`), MODULES_NEUFS.includes('../src/ui/regroupement.js')], ['0.27.0', true, true], 'T-D20 : APP_VERSION 0.27.0 (fixée par le chef d’orchestre : R-D-12 au lot D, R-E-18 au lot E, Global Constraints au lot F, I-UI-7 au lot UI-1), VERSION du service worker sur elle, regroupement.js dans le filet i18n');
       const sources = await Promise.all(['../src/ui/regroupement.js', '../src/domain/classement.js'].map(lire));
       ok(sources.every((x) => x.length > 1000) && /export function panneauClassement/.test(sources[0]) && /export function proposerAppariements/.test(sources[1]), 'T-D20 : les deux modules neufs sont lus (garde contre un source vide)');
       eq(sources.map((x) => /anthropic|supabase/i.test(x)), [false, false], 'T-D20 : aucun texte ne nomme le fournisseur ni la base dans les deux modules neufs (toute casse, ronde 1 de T6)');
@@ -2600,10 +2600,10 @@ export async function runClassementTests({ eq, ok }) {
         choisirSelect(panneau(r1), 'p3', 'g2');
         await attendre(async () => (await brouillonEn(db, 'imp_rt'))?.groupes?.find((g) => g.cle === 'g2')?.page_ids?.join() === 'p2,p3', 'brouillon écrit (p3 dans g2)');
         cocher(r1, ['p5']);
-        [...r1.querySelectorAll('button.btn.danger')].find((b) => b.textContent === 'Retirer').click(); // « Retirer » de la séance : la vraie question
+        [...r1.querySelectorAll('button.btn')].find((b) => b.textContent === 'Retirer de la séance').click(); // « Retirer » de la séance : la vraie question
         await attendre(() => !!document.querySelector('dialog[open]'), 'question « Retirer »');
-        [...document.querySelector('dialog[open]').querySelectorAll('button')].find((b) => b.textContent === 'Retirer').click();
-        await attendre(async () => !(await db.get('scan_sessions', 'ss1')).page_ids.includes('p5'), 'p5 détachée de la séance');
+        [...document.querySelector('dialog[open]').querySelectorAll('button')].find((b) => b.textContent === 'Retirer de la séance').click();
+        await attendre(async () => (await db.get('scan_sessions', 'ss1')).source_state?.active_page_ids.includes('p5') === false, 'p5 retirée de la sélection active');
         ok(!!await db.get('source_pages','p5'),'L2 classement : la page retirée de la séance reste conservée pour le journal payé');
         const r2 = await monter('remontage après « Retirer » (le refresh() de la séance)');
         const apresRetrait = groupesDe(r2);
@@ -2611,7 +2611,7 @@ export async function runClassementTests({ eq, ok }) {
         await attendre(async () => !!(await brouillonEn(db, 'imp_rt'))?.groupes?.some((g) => g.cle === 'n1'), 'brouillon écrit sans p5');
         const ecrit = await brouillonEn(db, 'imp_rt');
         const r3 = await monter('second remontage');
-        eq([apresRetrait, ecrit.groupes.flatMap((g) => g.page_ids).includes('p5'), groupesDe(r3), panneau(r3).etatClassement().aPart], [[['g1', ['p1']], ['g2', ['p2', 'p3']]], false, [['g1', ['p1']], ['g2', ['p2', 'p3']], ['n1', ['p4']]], []], 'T-D4 (écran, M-couverture, vague finale, constat 1) : « Retirer » une photo classée (p5), puis un geste (brouillon écrit sans p5), puis un remontage → les groupes corrigés sont GARDÉS (p3 dans g2, p4 en recette neuve) ; jamais le regroupement initial en silence');
+        eq([apresRetrait, ecrit.groupes.flatMap((g) => g.page_ids).includes('p5'), groupesDe(r3), panneau(r3).etatClassement().aPart], [[['g1', ['p1']], ['g2', ['p2', 'p3']], ['g3', ['p5']]], true, [['g1', ['p1']], ['g2', ['p2', 'p3']], ['g3', ['p5']], ['n1', ['p4']]], []], 'L5 T-D4 : retirer p5 de la sélection puis corriger et rouvrir conserve tout le classement payé, y compris p5 et les groupes corrigés');
       } finally { document.querySelectorAll('dialog[open]').forEach((d) => d.close()); }
     });
 

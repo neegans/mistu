@@ -3694,3 +3694,19 @@ Pas d’appareil physique iPhone/Safari ni compte privé/appel assistant réel. 
 
 
 **L4 publié et reçu.** Code39a890a poussé dans main, Pages construit le29octobre20 h10 HAE (30octobre00:10:04UTC).61 fichiers publics identiques, suite publique8880/8880 sans erreur JavaScript/requête extérieure. Parcours publics28+12 mesures ; dix modules en cache0.26.0-1, création/photo/note après rechargement hors ligne. Reçu dans le rapport L4. L5 reprend ensuite, sans être inclus dans cette livraison.
+
+
+### L5 du plan directeur — sources immuables et index reprenable (29 octobre 2026)
+
+Réception locale de0.27.0 sur `l5-sources-index`, base publique db085ee, contrat7c34255.
+[Spec](docs/superpowers/specs/2026-10-29-l5-sources-index-design.md), [rapport](docs/superpowers/plans/2026-10-29-l5-sources-index.md).
+Révisions d’image séparées de la sélection ; anciennes pages/recettes/lectures conservées, copie de graphe avec provenance vérifiée.
+Résultats payés durables inline ou fragmentés ;1200 entrées consolidées, portions bornées, clôture par occurrences, reprise sans appel.
+Comparaison et récupération après refus, complément payé explicite dans une nouvelle lecture, transfert historique à la première liaison.
+Archive4, DB6, migration0010 additive et cache0.27.0-1. Les anciennes migrations restent identiques.
+**9472/9472** navigateur (épingle9471,+592), Node232/232, générateur0, syntaxe91/diff propres.
+PostgreSQL neufUTF8 :327 assertions,10 contrôles de concurrence réelle ;369 vecteurs JS/SQL concordants.
+Deux moteurs réels avec RPC locale :1002 pages/deux séances, file inversée, confirmation perdue et rejeu exact ; second moteur1009 réceptions puis aucun effet/écho.
+Parcours Chrome16+12 mesures,12 modules en cache unique, photos et historique après rechargement hors ligne.
+Aucun appel assistant réel, compte privé, recette serveur ou JWT utilisateur consulté ; aucune preuve physique iPhone/Safari/TM7.
+Publication autorisée mais pas encore effectuée dans ce reçu local. L6–L10/E1 restent à réaliser.

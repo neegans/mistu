@@ -104,6 +104,7 @@ export function createMoteur({
   // ne fait aucun appel, et une passe entièrement hors ligne ne doit pas dater un échange qui n'a pas eu lieu.
   // Sans ce compteur, un envoi sans rien à envoyer suivi d'une réception en panne afficherait « à l'instant ».
   const compte = {
+    ...(typeof transport.capacites==='function'?{capacites:()=>transport.capacites()}:{}),
     async pousser(elements) {
       const r = await transport.pousser(elements);
       // Une réponse absente sans erreur n'est pas un échange : l'envoi la traite déjà en « inconnu ».
@@ -267,7 +268,7 @@ export function createMoteur({
         for (let phase = 0; phase < 32; phase += 1) {
           if (arrete || getUserId() !== ownerPasse || bilanEnvoi.erreur || bilanEnvoi.pause || bilanEnvoi.attenteConnexion) break;
           const restants = await fileDe(db, ownerPasse);
-          const lies = restants.some(e => e.edition_contexts?.length || e.payload?.edition_id || e.store === 'book_editions');
+          const lies = restants.some(e => ['source_revision','index_apply','source_transfer'].includes(e.op) || e.edition_contexts?.length || e.payload?.edition_id || e.store === 'book_editions');
           if (!lies || !(bilanEnvoi.envoyes + bilanEnvoi.ajustes + bilanEnvoi.abandonnees > 0)) break;
           const suivant = await push.envoyer();
           const avance = suivant.envoyes + suivant.ajustes + suivant.abandonnees > 0;

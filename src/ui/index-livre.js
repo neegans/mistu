@@ -20,6 +20,13 @@ import { mettreALaCorbeille } from '../domain/corbeille.js';
 import { lireCycleRecette, ErreurCycleRecette } from '../domain/cycle-recette.js';
 import { lireCycleEdition } from '../domain/cycle-edition.js';
 import { conditionsSourcesImport, revoirLectureEditionImport, signaturePageImport } from '../domain/sources-import.js';
+import { reconstruirePageIndex, maximumAppelsIndex } from '../domain/index-lecture.js';
+import { reconstruireResultatIndex } from '../domain/index-stockage.js';
+import { projeterIndexAffiche, unitesApplicationIndex, creerServiceApplicationIndex } from '../domain/index-application.js';
+import { creerServiceRevisionsSource } from '../domain/revisions-source.js';
+import { pagesActivesSeance, empreinteSources, projectionIdentitePage, projectionAnnotationPage } from '../domain/sources-format.js';
+import { creerLectureIndexCapturee } from './index-vol.js';
+import { getSyncGeneration } from './state.js';
 
 const horloge = () => new Date().toISOString();
 const liste = (v) => (Array.isArray(v) ? v : []);
@@ -32,11 +39,18 @@ export function lectureDeSeance(imports, sessionId, pageIdsSeance = null) {
   // Rangées par l'heure de DÉPART de la lecture (started_at, sinon created_at) : updated_at bouge quand une décision s'écrit dans la ligne, et une
   // vieille lecture repasserait alors devant une relecture plus récente de la même page.
   const quand = (L) => String(L.started_at || L.created_at || L.updated_at || '');
-  const lignes = liste(imports).filter((i) => i?.kind === 'index' && i.scan_session_id === sessionId).sort((a, b) => quand(a).localeCompare(quand(b)));
+  const lignes = liste(imports).filter((i) => i?.kind === 'index' && i.scan_session_id === sessionId && i.index_storage?.role!=='result_fragment').sort((a, b) => quand(a).localeCompare(quand(b)));
   const parPage = new Map();
   const decisions = {};
   for (const L of lignes) {
     Object.assign(decisions, L.decisions && typeof L.decisions === 'object' ? L.decisions : {});
+    if(L.index_call){
+      if(L.index_call.kind!=='full')continue;
+      const famille=lignes.filter(r=>r.index_call?.series_id===L.index_call.series_id&&r.index_call?.page_id===L.index_call.page_id);
+      const vue={format:1,page_id:L.index_call.page_id,full_call_id:L.id,left_call_id:famille.find(r=>r.index_call.kind==='left_half')?.id??null,right_call_id:famille.find(r=>r.index_call.kind==='right_half')?.id??null};
+      try{const p=reconstruirePageIndex(vue,famille),avant=parPage.get(p.page_id);if(p.etat!=='echec'||!avant||avant.etat==='echec')parPage.set(p.page_id,p);}catch{}
+      continue;
+    }
     if (L.status !== 'a_verifier' && L.status !== 'enregistre') continue;
     let r;
     try { r = relireResultatIndex(L.resultat, L.page_ids, { modeleLigne: L.model ?? null }); } catch { continue; }
@@ -57,7 +71,7 @@ export function lectureDeSeance(imports, sessionId, pageIdsSeance = null) {
 export async function enregistrerAuto(ligneId, { ctx, session, repo = repoModule, maintenant = horloge, newId = nouvelId, compte = null, contexteEdition = null } = {}) {
   const proprietaire = await (compte || capturerProprietaire(repo, ctx));
   const L = await repo.get('imports', ligneId);
-  if (!L || L.kind !== 'index' || L.status !== 'a_verifier' || L.auto_enregistre_at) return null;
+  if (!L || L.index_call || L.kind !== 'index' || L.status !== 'a_verifier' || L.auto_enregistre_at) return null;
   const edition = session?.edition_id ? (ctx?.editionsById?.get(session.edition_id) ?? await repo.get('book_editions', session.edition_id)) : null;
   if (!edition) return null;
   const capture=contexteEdition || await capturerEdition(repo,edition,{ctx});
@@ -101,6 +115,7 @@ export async function enregistrerAuto(ligneId, { ctx, session, repo = repoModule
 export async function decider(ligneId, cle, choix, fiches, { repo = repoModule, maintenant = horloge, resteApres = 0, compte = null, ctx = null, contexteEdition = null, attendu = null } = {}) {
   const proprietaire = await (compte || capturerProprietaire(repo, ctx));
   const ligne=await repo.get('imports',ligneId),editionId=ligne?.edition_id;
+  if(ligne?.index_call)throw new TransitionRefusee('imports',ligneId,ligne.status);
   const edition=ctx?.editionsById?.get(editionId)||await repo.get('book_editions',editionId);
   const capture=contexteEdition||await capturerEdition(repo,edition,{ctx});verifierCaptureEditionImport(ligne,capture);
   const recettes=await Promise.all(fiches.map(r=>capturerRecette(repo,r,{ctx,edition,creation:true})));
@@ -189,30 +204,101 @@ const sourcesTexte = (sources) => liste(sources).map((s) => [s.rubrique, Number.
 // Le panneau. `getPageIds()` : les pages à lire (toutes les pages d'une séance d'index, sinon la sélection). `seanceIndex` : la séance est un index.
 export function panneauIndex(session, ctx, getPageIds, {
   seanceIndex = false, repo = repoModule, toast = toastDom, confirmer = confirmDialog, fetch: fetchInjecte = undefined, maintenant = horloge,
-  battementMs = BATTEMENT_MS, enLigne = estEnLigne, newId = nouvelId, executant = null, connecter = null, ajouterPage = null, contexteEdition = null,
+  battementMs = BATTEMENT_MS, enLigne = estEnLigne, newId = nouvelId, executant = null, connecter = null, ajouterPage = null, contexteEdition = null, lirePage = undefined, getGeneration = getSyncGeneration,
 } = {}) {
   const compte = capturerProprietaire(repo, ctx);
   const captureEdition=contexteEdition?Promise.resolve(contexteEdition):session.edition_id?capturerEdition(repo,ctx.editionsById?.get(session.edition_id),{ctx}):Promise.resolve(null);captureEdition.catch(()=>{});
   const racine = el('section', { class: 'card stack', dataset: { role: 'panneau-index' } });
-  const etat = { progression: null, occupe: false, retrait:false, abandon: null, seq: 0 };
-  const lecture = () => lectureDeSeance(ctx.imports, session.id, session.page_ids);
-  const relireImports = async () => { ctx.imports = await repo.all('imports'); ctx.recipes = await repo.all('recipes'); };
+  const lecturesRelues=new Set();
+  let detruit=false, sourcesEnAttente=null, pagesAffichees=liste(session.page_ids).map(id=>ctx.pagesById?.get(id)).filter(Boolean);
+  const etat = { progression: null, occupe: false, retrait:false, abandon: null, seq: 0, sourcesChangees:false, reception:null, application:null, erreur:null };
+  const serviceSources=creerServiceRevisionsSource({repo,getGeneration,maintenant,newId});
+  const applications=creerServiceApplicationIndex({repo,serviceSources,maintenant,newId});
   const edition = () => (session.edition_id ? ctx.editionsById?.get(session.edition_id) ?? null : null);
+  const capturerSources=async()=>serviceSources.capturerSources({session,pages:pagesAffichees,documents:liste(ctx.source_documents).filter(d=>liste(session.document_ids).includes(d.id)),contexte:{owner_id:(await compte).owner_id,edition:edition()}});
+  let captureSources=capturerSources();captureSources.catch(()=>{});
+  let importsLogiques=null, applicationChargee=false;
+  const lecture = () => lectureDeSeance(importsLogiques??ctx.imports, session.id, session.page_ids);
+  const relireImports = async () => {
+    ctx.imports = await repo.all('imports'); ctx.recipes = await repo.all('recipes');
+    importsLogiques=await Promise.all(ctx.imports.filter(r=>r.index_storage?.role!=='result_fragment').map(async r=>{
+      if(!r.index_storage)return r;
+      try{return{...r,resultat:await reconstruireResultatIndex({journal:r,imports:ctx.imports})};}catch(e){return{...r,resultat:null,lecture_incomplete:e.code||'result_incomplete'};}
+    }));
+    if(!applicationChargee){applicationChargee=true;const owner=(await compte).owner_id;
+      const row=(await repo.all('sync_state')).find(r=>r.key?.startsWith('index_application:v1:')&&r.value?.owner_id===owner&&r.value.payload?.session_id===session.id&&r.value.state!=='complete');
+      if(row)etat.application={id:row.value.id,plan:null,resultat:{issue:'interrompu',application:row.value.payload}};
+    }
+  };
   const pagesPositions = () => new Map(liste(session.page_ids).map((id, i) => [id, ctx.pagesById?.get(id)?.position ?? i + 1]));
-
-  async function lire(pageIds, { importId = null } = {}) {
-    if (etat.occupe || !pageIds.length) return;
-    etat.occupe = true; etat.abandon = new AbortController(); etat.progression = { page: 0, total: pageIds.length };
-    const L = importId ? await repo.get('imports', importId) : null;
-    const exec = executant || executantIndexParPage({ onPage: (p) => { etat.progression = p; dessiner(); } });
-    try {
-      const r = await lancerVol(importId, exec, { ctx, repo, fetch: fetchInjecte, maintenant, battementMs, enLigne, signal: etat.abandon.signal,contexteEdition:await captureEdition,
-        lecture: { kind: 'index', importId, pageIds, editionId: session.edition_id ?? null, sessionId: session.id, cle: L ? cleLecture(L) : null } });
-      if (r.issue === 'refuse') toast(texteRefus(r));
+  async function lectureAdmissible(lu,capture){
+    const admis=[];
+    for(const L of lu.lignes){
+      if(!memeEdition(L,capture)||!memesSources(L,ctx.pagesById))continue;
+      if(L.source_capture){if((L.source_capture.source_state_revision??null)!==(session.source_state?.revision??null)&&!lecturesRelues.has(L.id))continue;let valide=true;for(const p of L.source_capture.pages){const current=pagesAffichees.find(x=>x.id===p.id);if(!current||!pagesActivesSeance(session).includes(p.id)||await empreinteSources(projectionIdentitePage(current))!==p.identity_sha256||await empreinteSources(projectionAnnotationPage(current))!==p.annotation_sha256){valide=false;break;}}if(!valide)continue;}
+      admis.push(L);
+    }
+    return lectureDeSeance(admis,session.id,session.page_ids);
+  }
+  async function appliquerProjection(projection,decisions=[],automatique=true){
+    if(etat.sourcesChangees||etat.reception||etat.application)return null;
+    const cap=await captureSources;if(cap.issue!=='ok'){etat.erreur=cap.raison;return null;}
+    const unites=await unitesApplicationIndex({projection,decisions,automatique},{newId});if(!unites.length&&!projection.lecture.lignes.some(r=>r.status==='a_verifier'&&r.resultat?.pages?.[0]?.etat==='lue'&&r.resultat.pages[0].entrees.every((e,i)=>e.sorte==='autre'||r.index_resolved_occurrences?.includes(i))))return null;
+    const p=await applications.preparerApplicationIndex({edition:projection.edition,journaux:projection.lecture.lignes,recettes:projection.recettes,unites,session,pages:pagesAffichees,captureSources:cap.capture});
+    if(p.issue!=='ok'){etat.erreur=p.raison;return p;}
+    etat.application={id:p.id,plan:p.plan,resultat:null};
+    const result=await applications.appliquerIndex({plan:p.plan});etat.application.resultat=result;
+    if(result.issue==='complete')etat.application=null;else etat.erreur=result.raison;
+    await relireImports();return result;
+  }
+  async function comparerApplication(){
+    if(etat.occupe||etat.sourcesChangees||!etat.application)return;
+    etat.occupe=true;
+    try{
+      if(!etat.comparaison){await relireImports();const lu=await lectureAdmissible(lecture(),await captureEdition);etat.comparaison={projection:await projeterIndexAffiche({lecture:lu,edition:edition(),recettes:liste(ctx.recipes).filter(r=>r.edition_id===session.edition_id)}),decisions:[],conflits:[]};}
+      const cap=await captureSources,result=await applications.preparerRepriseApplicationIndex({id:etat.application.id,projection:etat.comparaison.projection,session,pages:pagesAffichees,captureSources:cap.capture,decisions:etat.comparaison.decisions});
+      if(result.issue==='a_comparer'){etat.comparaison.conflits=result.conflits;return;}
+      if(result.issue!=='ok'){etat.erreur=result.raison;return;}
+      etat.application={id:result.id,plan:result.plan,resultat:null};
+      const r=await applications.appliquerIndex({plan:result.plan});etat.application.resultat=r;
+      if(r.issue==='complete'){etat.application=null;etat.comparaison=null;etat.erreur=null;}else etat.erreur=r.raison;
       await relireImports();
-      const id = r.importId ?? importId;
-      if (r.issue === 'a_verifier' && id) { await enregistrerAuto(id, { ctx, session, repo, maintenant, newId, compte,contexteEdition:await captureEdition }); await relireImports(); }
-    } catch (e) { logError('index_livre.lire', { error: e }); }
+    }catch(e){etat.erreur=e.code||'ecriture';}finally{etat.occupe=false;await dessiner();}
+  }
+  function retenirDecision(projection,x,decision){
+    const g=projection.groupes.find(g=>g.candidate===x),d={unit_sha256:g.unit_sha256,...decision};
+    if(!etat.comparaison)return appliquerProjection(projection,[d],false);
+    etat.comparaison.decisions=etat.comparaison.decisions.filter(v=>v.unit_sha256!==d.unit_sha256);etat.comparaison.decisions.push(d);
+    etat.comparaison.conflits=etat.comparaison.conflits.filter(v=>v.unit_sha256!==d.unit_sha256);
+  }
+  async function appliquerCertaines(){
+    const lu=await lectureAdmissible(lecture(),await captureEdition);
+    const projection=await projeterIndexAffiche({lecture:lu,edition:edition(),recettes:liste(ctx.recipes).filter(r=>r.edition_id===session.edition_id)});
+    return appliquerProjection(projection);
+  }
+  async function lire(pageIds, { importId = null } = {}) {
+    if (etat.occupe || !pageIds.length || etat.sourcesChangees || etat.reception || etat.application) return;
+    etat.occupe = true; etat.autoInterrompu=false;etat.erreur=null;etat.abandon = new AbortController(); etat.progression = { page: 0, total: pageIds.length };
+    try {
+      const cap=await captureSources;if(cap.issue!=='ok'){etat.erreur=cap.raison;return;}
+      await relireImports();
+      for(const [i,id] of pageIds.entries()){
+        if(etat.abandon.signal.aborted)break;
+        const source=pagesAffichees.find(p=>p.id===id);if(!source||!pagesActivesSeance(session).includes(id)){etat.erreur='source_changed';break;}
+        const lu=lecture(),vue=lu.pages.find(p=>p.page_id===id)?.vue;
+        const demande=importId?lu.lignes.find(r=>r.id===importId):null;
+        const full=vue?lu.lignes.find(r=>r.id===vue.full_call_id):demande?.index_call?lu.lignes.find(r=>r.index_call?.series_id===demande.index_call.series_id&&r.index_call.kind==='full'):null;
+        const series_id=full?.index_call.series_id??newId('index'),appels=full?lu.lignes.filter(r=>r.index_call?.series_id===series_id):[];
+        const service=creerLectureIndexCapturee({repo,ctx,edition:edition(),session,page:source,serviceSources,captureSources:cap.capture,lire:lirePage,fetch:fetchInjecte,maintenant,enLigne,battementMs,contexteEdition:await captureEdition,estCourante:()=>!detruit});
+        etat.progression={page:i+1,total:pageIds.length};await dessiner();
+        const result=await service.lire({series_id,appels,signal:etat.abandon.signal});
+        if(result.issue==='conservation_echec'){etat.reception=service;etat.erreur=result.raison;break;}
+        await relireImports();
+        if(result.issue!=='termine'){etat.erreur=result.raison||'interne';if(!['illisible','hors_bornes','coupe'].includes(result.raison))break;}
+      }
+      if(etat.abandon.signal.aborted)etat.autoInterrompu=true;
+      if(!etat.reception&&!etat.autoInterrompu)await appliquerCertaines();
+    } catch (e) { etat.erreur=e.code||'ecriture';logError('index_livre.lire', { error: e }); }
     finally { etat.occupe = false; etat.abandon = null; etat.progression = null; await dessiner(); }
   }
 
@@ -221,13 +307,18 @@ export function panneauIndex(session, ctx, getPageIds, {
     const pageIds = liste(getPageIds());
     const capture=await captureEdition;
     const toutes=lecture();
-    const anciennes=toutes.lignes.filter(L=>L.status==='a_verifier'&&L.resultat&&(!memeEdition(L,capture)||!memesSources(L,ctx.pagesById)));
-    const lu=lectureDeSeance(toutes.lignes.filter(L=>memeEdition(L,capture)&&memesSources(L,ctx.pagesById)),session.id,session.page_ids);
+    const admissible=await lectureAdmissible(toutes,capture),idsAdmis=new Set(admissible.lignes.map(L=>L.id));
+    const anciennes=toutes.lignes.filter(L=>['a_verifier','enregistre'].includes(L.status)&&L.resultat&&!idsAdmis.has(L.id));
+    const lu=etat.sourcesChangees?toutes:admissible;
     // Une ligne a_verifier pas encore enregistrée (app fermée entre la réponse et l'enregistrement, autre onglet) : l'enregistrement se fait au rendu.
-    const enAttente = lu.lignes.find((L) => L.status === 'a_verifier' && !L.auto_enregistre_at);
-    if (enAttente && !etat.occupe && edition()) {
+    const enAttente = lu.lignes.find((L) => !L.index_call && L.status === 'a_verifier' && !L.auto_enregistre_at);
+    if (enAttente && !etat.occupe && !etat.sourcesChangees && edition()) {
       try { const fait = await enregistrerAuto(enAttente.id, { ctx, session, repo, maintenant, newId, compte,contexteEdition:await captureEdition }); if (fait) { await relireImports(); return dessiner(); } }
       catch (e) { logError('index_livre.enregistrer', { error: e, id: enAttente.id }); }
+    }
+    if(!etat.occupe&&!etat.autoInterrompu&&!etat.sourcesChangees&&!etat.application&&!etat.reception&&edition()&&lu.lignes.some(L=>L.index_call&&L.resultat)){
+      const key=JSON.stringify(lu.lignes.map(L=>[L.id,L.started_at,L.index_decision_revision??null]));
+      if(etat.autoCle!==key){etat.autoCle=key;try{const fait=await appliquerCertaines();if(fait?.issue==='complete')return dessiner();}catch(e){etat.erreur=e.code||'ecriture';}}
     }
     if (seq !== etat.seq) return;
     const vol = volEnCours();
@@ -239,14 +330,23 @@ export function panneauIndex(session, ctx, getPageIds, {
     const ed = edition();
     const livre = ed ? ctx.booksById?.get(ed.book_id) : null;
     const contenu = [];
+    if(etat.sourcesChangees)contenu.push(el('div',{class:'status warn'},el('p',null,t('Les pages ont changé. Les lectures et tes choix sont conservés.')),el('button',{class:'btn',type:'button',dataset:{role:'revoir-sources'},onClick:async()=>{if(etat.occupe)return;session=structuredClone(sourcesEnAttente.session);pagesAffichees=structuredClone(sourcesEnAttente.pages);ctx.source_documents=await repo.all('source_documents');for(const p of pagesAffichees)ctx.pagesById.set(p.id,p);etat.sourcesChangees=false;lecturesRelues.clear();captureSources=capturerSources();await relireImports();await dessiner();}},t('Revoir les pages sélectionnées'))));
+    if(etat.reception)contenu.push(el('div',{class:'status warn',dataset:{role:'reponse-non-conservee'}},el('p',null,t('La réponse est arrivée mais cet appareil ne l’a pas conservée. Garde cet écran ouvert.')),el('button',{class:'btn',type:'button',onClick:async()=>{const r=await etat.reception.reessayerConservation();if(r.issue==='conserve'){etat.reception=null;etat.erreur=null;await relireImports();await appliquerCertaines();}else etat.erreur=r.raison;await dessiner();}},t('Réessayer de conserver sans nouvel appel')),el('details',null,el('summary',null,t('Voir et copier la réponse')),el('textarea',{readOnly:true,rows:6,'aria-label':t('Réponse à conserver')},JSON.stringify(etat.reception.reponseNonConservee(),null,2)))));
+    if(etat.application){const compte=etat.application.resultat?.application?.local_counts;contenu.push(el('div',{class:'status warn',dataset:{role:'application-index'}},el('p',null,t('{n} recettes conservées sur cet appareil. Les décisions restantes sont gardées.',{n:compte?.creates??0})),el('button',{class:'btn',type:'button',disabled:etat.occupe||etat.sourcesChangees,onClick:async()=>{if(etat.occupe)return;etat.occupe=true;try{const cap=await captureSources;if(!etat.application.plan){const p=await applications.reprendreApplicationIndex({id:etat.application.id,captureSources:cap.capture,session,pages:pagesAffichees,edition:edition()});if(p.issue!=='ok'){etat.erreur=p.raison;return;}etat.application.plan=p.plan;}const r=await applications.appliquerIndex({plan:etat.application.plan});etat.application.resultat=r;if(r.issue==='complete'){etat.application=null;etat.erreur=null;}else etat.erreur=r.raison;await relireImports();}finally{etat.occupe=false;await dessiner();}}},t('Reprendre l’enregistrement sans nouvel appel')),el('button',{class:'btn',type:'button',disabled:etat.occupe||etat.sourcesChangees,onClick:comparerApplication},t('Comparer et reprendre sans nouvel appel'))));}
+    if(etat.comparaison)contenu.push(el('div',{class:'status warn',dataset:{role:'comparaison-index'}},el('p',null,t('Les choix encore valables sont conservés. Revois les autres décisions ci-dessous.')),...etat.comparaison.conflits.map(c=>el('p',null,c.titre||t('Le résultat de cette décision a changé. La décision précédente reste conservée.')))));
+    if(etat.erreur)contenu.push(el('p',{class:'status warn',dataset:{role:'erreur-index'}},['source_changed','session_changed','capture_changee','result_changed','index_changed','owner_changed','compte_change','contexte_change'].includes(etat.erreur)?t('Le livre ou ses pages ont changé. Rouvre la séance avant de continuer.'):t('L’enregistrement ou la lecture a été interrompu. Tes réponses déjà conservées restent disponibles.')));
     for(const L of anciennes) {
       const zone=el('div',{class:'card stack',dataset:{role:'relecture-index'}},el('p',null,t('Ce résultat a été conservé. Relis-le avant de l’utiliser sur ce livre.')));
       try { const r=relireResultatIndex(L.resultat,L.page_ids,{modeleLigne:L.model??null});
         zone.append(el('ul',null,...r.pages.flatMap(p=>p.entrees.map(e=>el('li',null,`${e.titre} · ${e.renvois}`))))); } catch {}
-      zone.append(el('button',{class:'btn',type:'button',disabled:etat.occupe,onClick:async ev=>{
-        if(ev.currentTarget.disabled)return;ev.currentTarget.disabled=true;
-        try { await revoirLectureEditionImport(L.id,{repo,contexte:capture,attendu:L});await relireImports();await dessiner(); }
-        catch(e){logError('index_livre.relecture',{error:e});toast(t('Le livre ou ses pages ont changé. Rouvre la séance avant de continuer.'));ev.currentTarget.disabled=false;}
+      // Le journal historique L2 peut adopter un cycle restauré par ce geste explicite.
+      // Les nouveaux appels capturés L5 restent liés à leurs cycles exacts.
+      const relecturePermise=L.index_call?memeEdition(L,capture):L.status==='a_verifier'&&L.recipe_id==null&&!!capture
+        &&L.edition_id===capture.edition_id&&(L.owner_id??null)===(capture.owner_id??null)&&(!capture.contexteValide||capture.contexteValide());
+      zone.append(el('button',{class:'btn',type:'button',disabled:etat.occupe||etat.sourcesChangees||!relecturePermise,onClick:async ev=>{
+        const bouton=ev.currentTarget;if(bouton.disabled)return;bouton.disabled=true;
+        try { if(L.index_call){const famille=toutes.lignes.filter(r=>r.index_call?.series_id===L.index_call.series_id);for(const row of famille){for(const p of row.source_capture.pages){const current=pagesAffichees.find(x=>x.id===p.id);if(!current||!pagesActivesSeance(session).includes(p.id)||await empreinteSources(projectionIdentitePage(current))!==p.identity_sha256||await empreinteSources(projectionAnnotationPage(current))!==p.annotation_sha256)throw Error('source_changed');}}for(const row of famille)lecturesRelues.add(row.id);await appliquerCertaines();}else await revoirLectureEditionImport(L.id,{repo,contexte:capture,attendu:L});await relireImports();await dessiner(); }
+        catch(e){logError('index_livre.relecture',{error:e});toast(t('Le livre ou ses pages ont changé. Rouvre la séance avant de continuer.'));bouton.disabled=false;}
       }},t('Réutiliser ce résultat après relecture')));contenu.push(zone);
     }
     contenu.push(el('h2', null, seanceIndex ? (livre?.title ? t('Index de {t}', { t: livre.title }) : t('Index du livre')) : t('Index / table des matières')));
@@ -277,19 +377,20 @@ export function panneauIndex(session, ctx, getPageIds, {
     } else {
       if (!session_) contenu.push(carteConnexion(connecter, ctx));
       const gestes = el('div', { class: 'row' });
-      const bouton = (texte, ids, opts = {}) => el('button', { class: opts.primaire ? 'btn primary' : 'btn', type: 'button', disabled: !session_ || !enLigne() || !ed, dataset: { role: opts.role || 'lire' }, onClick: () => lire(ids, opts) }, texte);
+      const bouton = (texte, ids, opts = {}) => el('button', { class: opts.primaire ? 'btn primary' : 'btn', type: 'button', disabled: !session_ || !enLigne() || !ed || etat.sourcesChangees || !!etat.reception || !!etat.application, dataset: { role: opts.role || 'lire' }, onClick: () => lire(ids, opts) }, texte);
+      const cout=ids=>ids.reduce((n,id)=>{const vue=parPage.get(id)?.vue,full=vue&&lu.lignes.find(r=>r.id===vue.full_call_id);try{return n+(full?maximumAppelsIndex({page_id:id,series_id:full.index_call.series_id,appels:lu.lignes}):3);}catch{return n+3;}},0);
+      const coutTexte=(verbe,ids)=>t('{action} ({n} appels au plus)',{action:verbe,n:cout(ids)});
       if (echec) {
         const { texte } = texteEchecIndex(echec.erreur);
         contenu.push(el('p', { class: 'status warn', dataset: { role: 'echec' } }, texte));
         const reste = liste(echec.page_ids).filter((id) => pageIds.includes(id));
-        gestes.append(bouton(reste.length === 1 ? t('Reprendre la lecture (1 appel au plus)') : t('Reprendre la lecture ({n} appels au plus)', { n: reste.length }), reste, { primaire: true, importId: echec.id, role: 'reprendre' }));
+        gestes.append(bouton(coutTexte(t('Reprendre la lecture'),reste), reste, { primaire: true, importId: echec.id, role: 'reprendre' }));
       } else if (nonLues.length) {
         const toutes = nonLues.length === pageIds.length;
-        const texte = nonLues.length === 1 ? (toutes ? t('Lire la page (1 appel)') : t('Lire la page non lue (1 appel)'))
-          : (toutes ? t('Lire les {n} pages ({n} appels)', { n: nonLues.length }) : t('Lire les {n} pages non lues ({n} appels)', { n: nonLues.length }));
+        const texte = coutTexte(nonLues.length===1?t('Lire la page'):t('Lire les {n} pages',{n:nonLues.length}),nonLues);
         gestes.append(bouton(texte, nonLues, { primaire: true }));
       }
-      if (!echec && incompletes.length) gestes.append(bouton(incompletes.length === 1 ? t('Relire la page incomplète (1 appel)') : t('Relire les {n} pages incomplètes ({n} appels)', { n: incompletes.length }), incompletes, { role: 'relire' }));
+      if (!echec && incompletes.length) gestes.append(bouton(coutTexte(t('Reprendre les pages incomplètes'),incompletes), incompletes, { role: 'relire' }));
       if (seanceIndex && typeof ajouterPage === 'function') gestes.append(el('button', { class: 'btn', type: 'button', dataset: { role: 'ajouter-page' }, onClick: () => ajouterPage() }, t('Ajouter une page d’index')));
       if (gestes.querySelector('[data-role="lire"], [data-role="reprendre"], [data-role="relire"]')) {
         contenu.push(gestes, el('p', { class: 'muted' }, t('Une page trop dense est relue en deux moitiés : jusqu’à 2 appels de plus pour cette page. Chaque appel compte dans ton quota du jour.')));
@@ -303,11 +404,12 @@ export function panneauIndex(session, ctx, getPageIds, {
 
   async function resultat(lu, ed) {
     const recettes = liste(ctx.recipes).filter((r) => r.edition_id === ed.id);
-    const c = consolider(lu.pages, { existantes: recettes, modeleValide: lu.modeleValide });
+    const projection=etat.comparaison?.projection??(lu.lignes.some(L=>L.index_call)?await projeterIndexAffiche({lecture:lu,edition:ed,recettes}):null);
+    const c = projection?projection.consolidation:consolider(lu.pages, { existantes: recettes, modeleValide: lu.modeleValide });
     const ids = new Set(lu.lignes.map((L) => L.id));
     const ajoutees = recettes.filter((r) => ids.has(r.index_import_id));
-    const restantes = c.aVerifier.filter((x) => !lu.decisions[x.cle]);
-    const ecartees = c.ecartees.filter((x) => !lu.decisions[`ecartee:${cleTitre(x.titre)}`]);
+    const restantes = projection?projection.groupes.filter(g=>g.categorie==='a_verifier'&&!g.decidee).map(g=>g.candidate):c.aVerifier.filter((x) => !lu.decisions[x.cle]);
+    const ecartees = projection?projection.groupes.filter(g=>g.categorie==='ecartee'&&!g.decidee).map(g=>g.candidate):c.ecartees.filter((x) => !lu.decisions[`ecartee:${cleTitre(x.titre)}`]);
     const ligneDecision = lu.lignes.filter((L) => L.status === 'a_verifier' || L.status === 'enregistre').at(-1);
     const bloc = el('div', { class: 'stack', dataset: { role: 'resultat-index' } });
     bloc.append(el('p', { class: 'status ok', dataset: { role: 'bilan' } }, t('{n} recettes dans le livre · {m} à vérifier · {k} écartées', { n: ajoutees.length, m: restantes.length, k: ecartees.length })));
@@ -321,24 +423,24 @@ export function panneauIndex(session, ctx, getPageIds, {
         const li = el('li', { class: 'stack', dataset: { cle: x.cle } }, el('strong', null, x.titre), el('span', { class: 'muted' }, raisons[x.raison] || ''));
         const row = el('div', { class: 'row' });
         const creer = (plages) => fabriquerReferenceIndex(x, { edition: ed, newId, importId: ligneDecision.id, plages });
-        const geste = (texte, choix, fiches) => el('button', { class: 'btn small', type: 'button', onClick: async (ev) => {
+        const geste = (texte, choix, fiches, decision=null) => el('button', { class: 'btn small', type: 'button', disabled:etat.sourcesChangees||!!etat.application&&!etat.comparaison||!!etat.reception, onClick: async (ev) => {
           if (ev.currentTarget.disabled) return;
           for (const b of row.querySelectorAll('button')) b.disabled = true; // une décision à la fois, jamais deux fiches pour une tape doublée
-          try { await decider(ligneDecision.id, x.cle, choix, fiches(), { repo, maintenant, resteApres: restantes.length - 1, compte,ctx,contexteEdition:await captureEdition,attendu:ligneDecision }); }
+          try { if(projection){await retenirDecision(projection,x,decision);}else await decider(ligneDecision.id, x.cle, choix, fiches(), { repo, maintenant, resteApres: restantes.length - 1, compte,ctx,contexteEdition:await captureEdition,attendu:ligneDecision }); }
           catch (e) { if (!(e instanceof TransitionRefusee)) { logError('index_livre.decider', { error: e }); toast(t('La décision n’a pas pu être enregistrée. Réessaie.')); } }
           await relireImports(); await dessiner();
         } }, texte);
         if (x.options) {
           for (const o of x.options) {
             li.append(el('span', { class: 'muted' }, `${textePlages(o.plages)} · ${o.existanteId ? t('déjà dans le livre') : sourcesTexte(o.sources)}`));
-            if (!o.existanteId) row.append(geste(t('Garder {p}', { p: textePlages(o.plages) }), `garder:${textePlages(o.plages)}`, () => [creer(o.plages)]));
+            if (!o.existanteId) row.append(geste(t('Garder {p}', { p: textePlages(o.plages) }), `garder:${textePlages(o.plages)}`, () => [creer(o.plages)],{action:'garder_option',option_sha256:o.option_sha256}));
           }
-          if (x.raison === 'contradiction') row.append(geste(t('Les deux'), 'les_deux', () => x.options.filter((o) => !o.existanteId).map((o) => creer(o.plages))));
+          if (x.raison === 'contradiction') row.append(geste(t('Les deux'), 'les_deux', () => x.options.filter((o) => !o.existanteId).map((o) => creer(o.plages)),{action:'garder_toutes',option_sha256:null}));
         } else {
           li.append(el('span', { class: 'muted' }, `${x.plages.length ? textePlages(x.plages) : t('page inconnue')} · ${sourcesTexte(x.sources)}`));
-          row.append(geste(t('Ajouter au livre'), 'ajoutee', () => [creer(x.plages)]));
+          row.append(geste(t('Ajouter au livre'), 'ajoutee', () => [creer(x.plages)],{action:'ajouter',option_sha256:null}));
         }
-        row.append(geste(t('Écarter'), 'ecartee', () => []));
+        row.append(geste(t('Écarter'), 'ecartee', () => [],{action:'ecarter',option_sha256:null}));
         li.append(row); ul.append(li);
       }
       bloc.append(el('h3', null, t('À vérifier')), ul);
@@ -346,12 +448,12 @@ export function panneauIndex(session, ctx, getPageIds, {
     if (ecartees.length && ligneDecision) {
       const d = el('details', { dataset: { role: 'ecartees' } }, el('summary', null, t('Écartées ({n})', { n: ecartees.length })));
       for (const x of ecartees) {
-        d.append(el('div', { class: 'row' }, el('span', null, `${x.titre} · ${x.renvois}`), el('button', { class: 'btn small', type: 'button', onClick: async (ev) => {
+        d.append(el('div', { class: 'row' }, el('span', null, `${x.titre} · ${x.renvois}`), el('button', { class: 'btn small', type: 'button',disabled:etat.sourcesChangees||!!etat.application&&!etat.comparaison||!!etat.reception, onClick: async (ev) => {
           if (ev.currentTarget.disabled) return;
           ev.currentTarget.disabled = true;
           const { plages } = renvoisDe(x.renvois);
           const fiche = fabriquerReferenceIndex({ titre: x.titre, renvois: x.renvois, rubriques: x.rubrique ? [x.rubrique] : [], section: null, sources: [{ page_id: x.page_id, page_imprimee: x.page_imprimee, rubrique: x.rubrique }] }, { edition: ed, newId, importId: ligneDecision.id, plages });
-          try { await decider(ligneDecision.id, `ecartee:${cleTitre(x.titre)}`, 'recette', [fiche], { repo, maintenant, resteApres: restantes.length, compte,ctx,contexteEdition:await captureEdition,attendu:ligneDecision }); }
+          try { if(projection){await retenirDecision(projection,x,{action:'est_recette',option_sha256:null});}else await decider(ligneDecision.id, `ecartee:${cleTitre(x.titre)}`, 'recette', [fiche], { repo, maintenant, resteApres: restantes.length, compte,ctx,contexteEdition:await captureEdition,attendu:ligneDecision }); }
           catch (e) { if (!(e instanceof TransitionRefusee)) { logError('index_livre.ecartee', { error: e }); toast(t('La décision n’a pas pu être enregistrée. Réessaie.')); } }
           await relireImports(); await dessiner();
         } }, t('C’est une recette'))));
@@ -391,8 +493,10 @@ export function panneauIndex(session, ctx, getPageIds, {
   const observer = new MutationObserver(() => { if (racine.isConnected && !offs.length) { offs.push(on('change', (d) => { if (['imports', 'recipes'].includes(d?.store)) redessinerSiMonte(); }), ecouterVol(() => { if (!etat.occupe) redessinerSiMonte(); })); observer.disconnect(); } });
   observer.observe(document, { childList: true, subtree: true });
   setTimeout(() => { if (!offs.length) observer.disconnect(); }, 30000); // un panneau jamais monté ne garde pas l'observateur du document
+  racine.actualiserSources=({session:suivante,pages,selectedPageIds})=>{sourcesEnAttente={session:structuredClone(suivante),pages:structuredClone(pages),selectedPageIds:[...(selectedPageIds||[])]};etat.sourcesChangees=true;dessiner();};
+  racine.dispose=()=>{detruit=true;etat.abandon?.abort();observer.disconnect();offs.splice(0).forEach(f=>f());};
   racine.dessiner = dessiner;
   racine.etatPanneau = () => ({ ...etat, abandon: !!etat.abandon });
-  dessiner();
+  relireImports().then(dessiner).catch(e=>{logError('index_livre.monter',{error:e});etat.erreur='ecriture';dessiner();});
   return racine;
 }

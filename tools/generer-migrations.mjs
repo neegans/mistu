@@ -13,6 +13,7 @@ import { SYNC_STORES } from '../src/model/schema.js';
 import { ALLOWED_MIME } from '../src/sync/mime.js';
 import { corbeilleSQL } from './corbeille-sql.mjs';
 import { corbeilleLivresSQL } from './corbeille-livres-sql.mjs';
+import { sourcesSQL } from './sources-sql.mjs';
 
 // En-tête volontairement sans date : la sortie doit être déterministe (le test le vérifie, et --check sert de garde).
 // La spec par défaut est celle de 0001 et 0002 : leurs octets ne bougent pas (empreintes épinglées dans le test).
@@ -347,7 +348,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const dir = dossierDemande(args);
   if (!dir) { console.error('--dir : chemin du répertoire des migrations manquant.'); process.exit(2); }
   const { tables, storage, delta, imports } = renderMigrations();
-  const targets = [['0001_tables_et_regles.sql', tables], ['0002_stockage.sql', storage], ['0003_assistant_config.sql', delta], ['0005_imports.sql', imports], ['0008_corbeille_recettes.sql', corbeilleSQL()], ['0009_corbeille_livres.sql', corbeilleLivresSQL()]];
+  const targets = [['0001_tables_et_regles.sql', tables], ['0002_stockage.sql', storage], ['0003_assistant_config.sql', delta], ['0005_imports.sql', imports], ['0008_corbeille_recettes.sql', corbeilleSQL()], ['0009_corbeille_livres.sql', corbeilleLivresSQL()], ['0010_sources_index.sql', sourcesSQL()]];
   if (args.includes('--check')) {
     let differ = false;
     for (const [name, content] of targets) {

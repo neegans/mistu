@@ -3,6 +3,7 @@
 // Aucun accès à la base, aucun réseau, aucun texte d'écran : l'écran (src/ui/import-cible.js, tâche 4) traduit et écrit par repo.transitionner.
 // La sortie du modèle est une DONNÉE HOSTILE déjà validée et bornée par validateParsedRecipe (llm.js) : ici elle est seulement assemblée.
 import { normalizeText } from './units.js';
+import { pagesActivesSeance } from './sources-format.js';
 import { parseIngredientLine, detectTimers } from './lines.js';
 import { assertVocabulaire, originePhotoAdmise } from './vocabulaire.js';
 import { newId } from '../core/ids.js';
@@ -344,12 +345,13 @@ export const lotDeRecette = (ligne) => (ligne?.kind === 'recette' ? lotDe(ligne)
 // N-1 (§ 3.6) : une lecture ISSUE D'UNE SÉANCE — ligne de lot, « Regrouper en recette », photo seule, lecture rattachée (D-D19) ET ligne ciblée du lot A
 // (sa séance naît avec la première photo, RV-1). Seul critère des amendements d'enregistrement : jamais `lot`.
 export const issueDUneSeance = (ligne) => typeof ligne?.scan_session_id === 'string' && ligne.scan_session_id.length > 0;
-// N-1 : le statut d'une séance APRÈS l'enregistrement d'une de ses lectures — 'done' si CHAQUE photo de seance.page_ids est écrite par la transaction
+// N-1 : le statut d'une séance APRÈS l'enregistrement d'une de ses lectures — 'done' si CHAQUE photo active est écrite par la transaction
 // (`ecrites`, avec kind recipe et role recette) ou porte déjà un role ou un kind (chaîne non vide) dans `pagesParId` (les pages relues juste avant) ;
 // sinon le statut INCHANGÉ. Une page absente de la Map (ajoutée entre-temps) compte comme sans rôle : jamais fermée trop tôt. `seance` = la séance
 // relue DANS la transaction (patch-fonction du sac conditions) ; page_ids absent → [] → 'done'.
 export function statutSeanceApres(seance, pagesParId, ecrites) {
-  const ids = Array.isArray(seance?.page_ids) ? seance.page_ids : [];
+  let ids;
+  try { ids = pagesActivesSeance(seance||{}); } catch { return seance?.status; }
   const pages = pagesParId instanceof Map ? pagesParId : new Map();
   const ecr = ecrites instanceof Set ? ecrites : new Set(Array.isArray(ecrites) ? ecrites : []);
   const nonVide = (v) => typeof v === 'string' && v !== '';

@@ -686,9 +686,14 @@ export function gesteTelechargement({ moteur, redessiner = async () => {}, dire 
 // et n'offre que le geste qui a un sens — « Télécharger » (distante, compte) ou « Réessayer » (erreur, compte : sans compte, la tape effaçait le
 // diagnostic sans rien retenter — ronde 1). `alt` : celui de l'écran (« Page {position} » en séance, « Page originale » sur la fiche recette).
 export function vignettePage(page, fichier, { connecte = false, uid = null, erreurs = new Map(), telecharger = null, alt = t('Page'), moteur = null, courant = null } = {}) {
-  if (moteur && (typeAffichage(fichier)?.startsWith('image/') || fichier?.remote?.mime?.startsWith('image/'))) return photoVisible(page?.sha256, { fichier, ctxF: { connecte, uid, erreurs, moteur, courant }, alt, classe: 'page-photo' });
+  const rotation = [90, 180, 270].includes(page?.rotation) ? page.rotation : 0;
+  if (moteur && (typeAffichage(fichier)?.startsWith('image/') || fichier?.remote?.mime?.startsWith('image/'))) {
+    const vue = photoVisible(page?.sha256, { fichier, ctxF: { connecte, uid, erreurs, moteur, courant }, alt, classe: 'page-photo' });
+    vue?.style.setProperty('--page-rotation', `${rotation}deg`);
+    return vue;
+  }
   if (fichier?.blob instanceof Blob) {
-    const img = el('img', { alt, loading: 'lazy' });
+    const img = el('img', { alt, loading: 'lazy', style: { transform: `rotate(${rotation}deg)` } });
     const u = displayUrl(fichier);
     if (u) img.src = u;
     return img;

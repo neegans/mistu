@@ -2,6 +2,7 @@
 import { renderListeBibliotheque, texteCompteurs } from './bibliotheque-liste.js';
 import { renderLivreEditeur } from './livre-editeur.js';
 import { projeterBibliotheque } from '../domain/bibliotheque.js';
+import { pagesActivesSeance, validerEtatSources } from '../domain/sources-format.js';
 import { actionsLivre, boutonsActions, menuActions } from './actions-contenu.js';
 import { lireContexteListe, porteeNavigation, retourConnu, memoriserListe, capturerVue, restaurerVue } from './navigation-contexte.js';
 import { el, toast, pickFiles, confirmDialog, promptDialog } from '../core/dom.js';
@@ -122,15 +123,22 @@ async function livreConserve(edition,book,ctx,deps){
 const rangPosition = (p) => (Number.isInteger(p?.position) ? p.position : Infinity);
 const parPositionPuisPage = (a, b) => (rangPosition(a) - rangPosition(b)) || ((a.printed_page ?? 9999) - (b.printed_page ?? 9999));
 const chaine = (v) => (typeof v === 'string' ? v : '');
+const selectionSourceConnue = (session, ctx) => {
+  try {
+    if (session.source_state !== undefined) validerEtatSources(session, ctx.pagesById);
+    return pagesActivesSeance(session);
+  } catch { return null; }
+};
 const parSeancePuisPosition = (ctx) => {
   const documents = new Map((ctx.source_documents || []).filter((d) => typeof d?.id === 'string').map((d) => [d.id, d]));
   const seances = new Map((ctx.scan_sessions || []).filter((s) => typeof s?.id === 'string').map((s) => [s.id, s]));
-  const seanceDe = (p) => { const d = documents.get(p?.document_id); const cle = chaine(d?.scan_session_id); return { cle, quand: chaine(seances.get(cle)?.started_at) || chaine(d?.captured_at) }; };
+  const ordres = new Map([...seances].filter(([,s]) => s.source_state !== undefined).map(([id,s]) => [id,new Map((selectionSourceConnue(s,ctx)||[]).map((p,i)=>[p,i]))]));
+  const seanceDe = (p) => { const d = documents.get(p?.document_id); const cle = chaine(d?.scan_session_id); return { cle, quand: chaine(seances.get(cle)?.started_at) || chaine(d?.captured_at), rang: ordres.get(cle)?.get(p.id) ?? rangPosition(p) }; };
   return (a, b) => {
     const [x, y] = [seanceDe(a), seanceDe(b)];
     if (x.quand !== y.quand) return !x.quand ? 1 : !y.quand ? -1 : x.quand < y.quand ? -1 : 1;
     if (x.cle !== y.cle) return x.cle < y.cle ? -1 : 1;
-    return parPositionPuisPage(a, b);
+    return (x.rang-y.rang) || parPositionPuisPage(a, b);
   };
 };
 
@@ -149,7 +157,11 @@ export async function renderBook(params, query, ctx, deps = {}) {
   if (!accueil.afficher) await repo.recordActivity(edition.id, 'open_book');
   const recipes = ctx.recipes.filter((r) => r.edition_id === edition.id);
   const docs = ctx.source_documents.filter((d) => d.edition_id === edition.id);
-  const pages = ctx.source_pages.filter((p) => p.edition_id === edition.id);
+  const seancesSources = ctx.scan_sessions.filter(s => s.edition_id === edition.id);
+  const sourcesGerees = new Set(seancesSources.filter(s => s.source_state !== undefined).flatMap(s => Array.isArray(s.page_ids)?s.page_ids:[]));
+  const selections = seancesSources.map(s => selectionSourceConnue(s,ctx));
+  const sourcesActives = new Set(selections.flatMap(ids => ids||[]));
+  const pages = ctx.source_pages.filter((p) => p.edition_id === edition.id && (!sourcesGerees.has(p.id)||sourcesActives.has(p.id)));
   const pref = ctx.rediscovery_prefs.find((p) => p.edition_id === edition.id);
   // Une empreinte de couverture sans ligne files est un état NORMAL (fiche reçue d'un autre appareil, octets en L4) :
   // ici ça se dit, parce que la personne peut agir ; dans la grille de Mes livres, la vignette reste muette (§ 6).
@@ -211,6 +223,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
   const gauche = el('div', { class: 'stack', dataset: { role: 'colonne-livre' } });
   const droite = el('div', { dataset: { role: 'colonne-recettes' } });
   root.append(el('div', { class: 'two-col livre' }, gauche, droite));
+  if (selections.some(ids => ids===null)) gauche.append(el('p',{class:'status info',role:'status'},t('Sources en cours de réception')));
   // La couverture ouvre la colonne de gauche (≈ 200 px, la largeur de la colonne) : c'est le livre qu'on reconnaît, avant de lire son nom (F15).
   gauche.append(bookCover(edition, book, { fichier: fichierCouverture, ctxF }));
   gauche.append(el('a', { class: 'btn', href: `#/add/livre?edition=${encodeURIComponent(edition.id)}` }, t('Compléter les informations')));
@@ -233,7 +246,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
     el('a', { class: 'btn small', href: '#/add?section=imports' }, aReprendre === 1 ? t('{n} import à reprendre', { n: aReprendre }) : t('{n} imports à reprendre', { n: aReprendre }))));
   const ouvertes = seancesOuvertes(ctx, edition.id);
   if (ouvertes.length) droite.append(el('div', { class: 'card flat row between' },
-    el('span', null, t('Séance en cours : {n} page(s)', { n: (ouvertes[0].page_ids || []).length })),
+    el('span', null, selectionSourceConnue(ouvertes[0],ctx)===null?t('Sources en cours de réception'):t('Séance en cours : {n} page(s)', { n: pagesActivesSeance(ouvertes[0]).length })),
     el('a', { class: 'btn small', href: `#/import?session=${encodeURIComponent(ouvertes[0].id)}` }, t('Reprendre'))));
 
   const usesCups = ctx.recipe_versions.some((v) => recipes.some((r) => r.id === v.recipe_id) && (v.ingredients || []).some((i) => ['cup', 'tbsp', 'tsp', 'fl_oz'].includes(i.unit_id)));
@@ -348,7 +361,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
   // Vague finale : l'intention d'une séance n'est pas stockée (import.js) — une séance ouverte n'est rappelée ICI que si elle porte une page d'index ou une
   // lecture d'index ouverte (ligneOuverteDeSeance, la règle du panneau d'index) ; une séance de recettes reste rappelée à droite seulement (« Reprendre »).
   const idsIndex = new Set(pagesIndex.map((p) => p.id));
-  const seanceSommaire = ouvertes.find((s) => (Array.isArray(s.page_ids) ? s.page_ids : []).some((id) => idsIndex.has(id)) || ligneOuverteDeSeance(ctx.imports, s.id));
+  const seanceSommaire = ouvertes.find((s) => (selectionSourceConnue(s,ctx)||[]).some((id) => idsIndex.has(id)) || ligneOuverteDeSeance(ctx.imports, s.id));
   const sources = el('section', { class: 'pages-source stack', hidden: true, dataset: { role: 'pages-source' } },
     el('h2', null, t('Pages source')),
     el('p', { class: 'muted' }, t('{n} page(s) photographiée(s)', { n: pages.length })),

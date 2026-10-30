@@ -1,0 +1,19 @@
+// Intentions locales L5 : jamais exportées ni synchronisées comme données métier.
+import {canoniqueSources,identifiantSource,validerCommandeSources,ErreurSources} from './sources-format.js';
+import {CLE_EPOQUE_EDITEUR,validerLigneEditeur} from './brouillons-format.js';
+export const PREFIXE_APPLICATION_INDEX='index_application:v1:';
+export const PREFIXE_TRANSFERT_SOURCE='source_transfer:v1:';
+export const LIMITES_INTENTIONS_SOURCES=Object.freeze({ligne:2097152,total:8388608,nombre:32});
+const objet=x=>x&&typeof x==='object'&&!Array.isArray(x),ferme=(x,ks)=>objet(x)&&Object.keys(x).every(k=>ks.includes(k)),entier=x=>Number.isSafeInteger(x)&&x>=0;
+export const estCleSources=k=>k===CLE_EPOQUE_EDITEUR||typeof k==='string'&&[PREFIXE_APPLICATION_INDEX,PREFIXE_TRANSFERT_SOURCE].some(p=>k.startsWith(p)&&identifiantSource(k.slice(p.length)));
+export const octetsIntentionsSources=x=>new TextEncoder().encode(JSON.stringify(x)).length;
+export function validerLigneSources(row){
+ if(row?.key===CLE_EPOQUE_EDITEUR)return validerLigneEditeur(row);
+ const d=row?.value,p=d?.payload;if(!ferme(row,['key','value'])||!estCleSources(row.key)||!ferme(d,['format','id','owner_id','database_name','library_epoch','revision','state','created_at','saved_at','payload'])||d.format!==1||!identifiantSource(d.id)||![PREFIXE_APPLICATION_INDEX,PREFIXE_TRANSFERT_SOURCE].some(pre=>row.key===pre+d.id)||!(d.owner_id===null||identifiantSource(d.owner_id))||!identifiantSource(d.database_name)||!identifiantSource(d.library_epoch)||!entier(d.revision)||!['ready','applying','blocked','complete'].includes(d.state)||![d.created_at,d.saved_at].every(x=>typeof x==='string'&&Number.isFinite(Date.parse(x))))throw new ErreurSources('invalid_shape');
+ if(row.key.startsWith(PREFIXE_APPLICATION_INDEX)){
+  if(!ferme(p,['session_id','edition_id','base_edition_cycle_id','read_set','initial_recipe_scope_sha256','commands','next_portion','local_counts','last_issue'])||!identifiantSource(p.session_id)||!Array.isArray(p.commands)||p.commands.length<1||p.commands.length>128||!entier(p.next_portion)||p.next_portion>p.commands.length||!ferme(p.local_counts,['creates','patches','decisions'])||!Object.values(p.local_counts).every(entier)||!Array.isArray(p.read_set)||!/^[a-f0-9]{64}$/.test(p.initial_recipe_scope_sha256)||![null,'source_changed','index_changed','cycle_change','compte_change','bibliotheque_remplacee','contexte_change','quota_stockage','too_large','stockage_indisponible','network','conflict','session_changed','edition_cycle','owner_changed','result_changed','id_collision','capability_missing','invalid_shape','quota','ecriture'].includes(p.last_issue))throw new ErreurSources('invalid_shape');
+  for(const c of p.commands){validerCommandeSources(c);if(c.op!=='index_apply'||c.edition_id!==p.edition_id||c.base_edition_cycle_id!==p.base_edition_cycle_id||canoniqueSources(c.read_set)!==canoniqueSources(p.read_set))throw new ErreurSources('invalid_shape');}
+ }else if(!ferme(p,['commands','next_part','last_issue'])||!Array.isArray(p.commands)||p.commands.length<2||p.commands.length>4098||!entier(p.next_part)||p.next_part>p.commands.length)throw new ErreurSources('invalid_shape');else for(const c of p.commands){validerCommandeSources(c);if(c.op!=='source_transfer')throw new ErreurSources('invalid_shape');}
+ canoniqueSources(row);if(octetsIntentionsSources(row)>LIMITES_INTENTIONS_SOURCES.ligne)throw new ErreurSources('too_large');return row;
+}
+export function verifierQuotaSources(rows,puts,deletes=[]){const m=new Map(rows.filter(r=>estCleSources(r.key)&&r.key!==CLE_EPOQUE_EDITEUR&&!deletes.includes(r.key)).map(r=>[r.key,r]));for(const r of puts)if(r.key!==CLE_EPOQUE_EDITEUR)m.set(r.key,r);const actifs=[...m.values()].filter(r=>r.value?.state!=='complete');if(actifs.length>32||[...m.values()].reduce((n,r)=>n+octetsIntentionsSources(r),0)>8388608)throw new ErreurSources('quota_stockage');}

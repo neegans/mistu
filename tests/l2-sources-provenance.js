@@ -40,8 +40,11 @@ export async function runL2SourcesProvenanceTests({eq,ok}) {
  await scenario('Correction ordinaire sous mêmes parents',async(repo,db)=>{
   const donnees=fixture(active.id);await db.mutate({puts:donnees,origin:'remote'});
   await repo.save('source_pages',{...donnees.source_pages[0],printed_page:11});
-  await repo.saveBatch({},{conditions:{source_documents:[{key:'document-source',fusion:r=>({...r,original_filename:'photo corrigée.jpg'})}]}});
-  eq([(await repo.get('source_pages','page-source')).printed_page,(await repo.get('source_documents','document-source')).original_filename],[11,'photo corrigée.jpg'],'L2 provenance : correction active conservant ses parents autorisée');
+  await repo.saveBatch({},{conditions:{source_documents:[{key:'document-source',fusion:r=>({...r,note:'photo annotée'})}]}});
+  eq([(await repo.get('source_pages','page-source')).printed_page,(await repo.get('source_documents','document-source')).note],[11,'photo annotée'],'L2 provenance : annotations actives conservant leurs parents autorisées');
+  const avant=await db.getSnapshot(magasins);let motif=null;try{await repo.saveBatch({},{conditions:{source_documents:[{key:'document-source',fusion:r=>({...r,original_filename:'identité réécrite.jpg'})}]}});}catch(e){motif=e.code;}
+  eq(motif,'source_changed','L5 provenance : original_filename appartient désormais à identité immuable, refus exact');
+  eq(await db.getSnapshot(magasins),avant,'L5 provenance : refus identité ne modifie ni sources ni file');
  });
  for(const store of Object.keys(associations))await scenario('Création par fusion seule '+store,async(repo,db)=>{
   const donnees=fixture(retiree.id);await db.mutate({puts:donnees,origin:'remote'});const avant=await db.getSnapshot(magasins);let type=null;

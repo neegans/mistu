@@ -376,13 +376,13 @@ export async function runTableMatieresTests({ eq, ok }) {
       await db.put('book_editions',{id:'ed1',book_id:'b1'});
       const page = (id) => ({ id, document_id: null, edition_id: 'ed1', sha256: 'sha-' + id, printed_page: null, position: 1, issues: [], kind: null, created_at: DATE, updated_at: DATE });
       await db.mutate({ puts: { imports: [{ ...ligneJournal({ id: 'imp_f' }), created_at: DATE, updated_at: DATE }], source_pages: ['f1', 'f2', 'f3', 'f4'].map(page) }, origin: 'device' });
-      await repo.transitionner('imports', 'imp_f', { attendus: ['a_lancer'], patch: { status: 'ignore' }, conditions: { source_pages: [{ key: 'f1', fusion: (c) => ({ ...c, kind: 'index', locator: 'a\u0007b' }) }, { key: 'f2', fusion: () => null }] } });
+      await repo.transitionner('imports', 'imp_f', { attendus: ['a_lancer'], patch: { status: 'ignore' }, conditions: { source_pages: [{ key: 'f1', fusion: (c) => ({ ...c, kind: 'index', issues: ['a\u0007b'] }) }, { key: 'f2', fusion: () => null }] } });
       const notifs = []; const off = on('change', (p) => notifs.push(p.store));
       try {
-        await repo.saveBatch({}, { conditions: { source_pages: [{ key: 'f3', fusion: (c) => ({ ...c, kind: 'index', locator: 'c\u0007d' }) }, { key: 'f4', fusion: () => null }] } });
+        await repo.saveBatch({}, { conditions: { source_pages: [{ key: 'f3', fusion: (c) => ({ ...c, kind: 'index', issues: ['c\u0007d'] }) }, { key: 'f4', fusion: () => null }] } });
       } finally { off(); }
       const [f1, f2, f3, f4] = await db.getMany('source_pages', ['f1', 'f2', 'f3', 'f4']);
-      eq([[f1.kind, f1.locator, f1.created_at, f1.updated_at > DATE], f2, [f3.kind, f3.locator, f3.created_at, f3.updated_at > DATE], f4], [['index', 'ab', DATE, true], page('f2'), ['index', 'cd', DATE, true], page('f4')], 'T-C24 (ronde 1 de T2) : une condition { key, fusion } portée par transitionner (sac conditions) ou par saveBatch est enveloppée comme un patch — contrôles retirés (R61), created_at gardé, updated_at neuf ; null : rien d’écrit');
+      eq([[f1.kind, f1.issues, f1.created_at, f1.updated_at > DATE], f2, [f3.kind, f3.issues, f3.created_at, f3.updated_at > DATE], f4], [['index', ['ab'], DATE, true], page('f2'), ['index', ['cd'], DATE, true], page('f4')], 'T-C24 (ronde 1 de T2) : une condition { key, fusion } portée par transitionner (sac conditions) ou par saveBatch est enveloppée comme un patch — contrôles retirés (R61), created_at gardé, updated_at neuf ; null : rien d’écrit');
       eq([...notifs], ['source_pages'], 'T-C24 (ronde 1 de T2) : saveBatch émet un change pour le magasin qu’une condition de fusion a écrit (rien dans puts), comme transitionner');
     }));
 

@@ -360,10 +360,29 @@ label.check { display: inline-flex; gap: .45rem; align-items: center; font-size:
 .thumbs figure { margin: 0; position: relative; }
 .thumbs img { width: 100%; height: 140px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
 .thumbs figcaption { font-size: .75rem; color: var(--muted); margin-top: .2rem; }
-/* Lot I1 (D-I12) : « Pivoter » (quart de tour) gardé sur la page ; la miniature suit (la photo envoyée à l'assistant est pivotée par pagePourEnvoi). */
-.thumbs figure[data-rotation="90"] img { transform: rotate(90deg); }
-.thumbs figure[data-rotation="180"] img { transform: rotate(180deg); }
-.thumbs figure[data-rotation="270"] img { transform: rotate(270deg); }
+/* L5 : l’orientation appartient à la révision, également après réception des octets. */
+.page-photo img { transform: rotate(var(--page-rotation, 0deg)); }
+.source-session { min-width: 0; }
+.source-session-summary { gap: .75rem; align-items: end; }
+.source-session-summary > * { min-width: 0; }
+.source-session .thumbs { grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 1fr)); }
+.source-session .thumbs figure { padding: .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
+.source-session .thumbs figure .btn { max-width: 100%; white-space: normal; }
+.source-session .thumbs .page-photo { aspect-ratio: 1; }
+.source-session .thumbs .page-photo img { height: 100%; max-height: none !important; }
+.source-action-status { margin-block: .7rem; }
+.source-action-status > p:empty { margin: 0; }
+.source-revision-panel, .source-comparison { max-width: 62rem; max-height: calc(100dvh - 2rem); overflow: auto; }
+.source-revision-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 1rem; }
+.source-revision-item { display: flex; flex-direction: column; gap: .6rem; min-width: 0; margin: 0; }
+.source-revision-item .vignette-page, .source-comparison-choice .vignette-page { min-width: 0; overflow: hidden; }
+.source-revision-item img, .source-comparison-choice img { display: block; width: 100%; height: 14rem; object-fit: contain; }
+.source-revision-item figcaption { color: var(--muted); }
+.source-comparison-choice { min-width: 0; padding: .75rem; border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: .75rem; }
+@media (min-width: 48rem) {
+  .source-comparison[open] { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .source-comparison > :not(.source-comparison-choice) { grid-column: 1 / -1; }
+}
 .thumbs .num { position: absolute; top: 4px; left: 4px; background: var(--green); color: var(--cream); border-radius: 6px; font-size: .75rem; padding: .05rem .4rem; }
 .thumbs .fichier-absent { margin: 0; min-height: 140px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: .3rem; padding: .4rem; border: 1px dashed var(--line); border-radius: 8px; font-size: .75rem; color: var(--muted); }
 /* Lot UI-1 « Carnet » (§ 4.5) : sur une vignette de l'import ciblé, le × « Retirer la page n » en coin (cible 44 × 44, I-UI-4 ; la figure est relative) et la

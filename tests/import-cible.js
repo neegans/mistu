@@ -47,7 +47,7 @@ export async function runImportCibleTests({ eq, ok }) {
   eq([noms[noms.indexOf('assistant_config') + 1], noms[noms.indexOf('imports') + 1]], ['imports', 'settings'], 'schéma : imports juste après assistant_config, avant settings');
   eq(S.STORES.imports, { keyPath: 'id', indexes: [['edition_id', 'edition_id'], ['recipe_id', 'recipe_id'], ['status', 'status']] }, 'schéma : clé et index d’imports');
   eq([S.SYNC_STORES.at(-1), S.SYNC_STORES.length, S.ARCHIVE_DATA_STORES.includes('imports')], ['imports', 27, true], 'schéma : [dernier synchronisé, nombre de synchronisés, imports archivé]');
-  eq(S.RELATIONS.filter(([c]) => c === 'imports').map(([, p, m]) => [p, m]).sort(), [['edition_id', 'book_editions'], ['scan_session_id', 'scan_sessions']], 'schéma : recipe_id et page_ids sont des pointeurs souples (hors RELATIONS)');
+  eq(S.RELATIONS.filter(([c]) => c === 'imports').map(([, p, m]) => [p, m]).sort(), [['edition_id', 'book_editions'], ['index_call.parent_call_id', 'imports'], ['index_storage.fragments[].id', 'imports'], ['index_storage.manifest_id', 'imports'], ['scan_session_id', 'scan_sessions']], 'schéma : dépendances de fragments et de lectures gardées ; recipe_id et page_ids restent des pointeurs souples');
   eq(S.MAGASINS_AJOUTES_APRES_V1, ['imports'], 'schéma : magasins ajoutés après le format 1');
   eq(S.STATUTS_IMPORT, ['a_lancer', 'en_cours', 'a_verifier', 'enregistre', 'echec', 'ignore'], 'schéma : statuts du journal');
 
@@ -501,6 +501,14 @@ export async function runImportCibleTests({ eq, ok }) {
       let diverge = null; try { await repo.ajouterPages([fichier('f.jpg', 142)], { session_id: r2.session.id, import_id: 'imp_d' }); } catch (e) { diverge = e; }
       eq([diverge?.name, (await db.get('imports', 'imp_d')).page_ids, (await db.get('imports', 'imp_d')).scan_session_id, await db.count('source_pages'), await db.count('files')], ['TypeError', ['pg_d'], 'ss_autre', avantD.pages, avantD.files], 'avec import_id (ronde 1) : une séance qui n’est pas celle de la ligne (scan_session_id ss_autre) est refusée par TypeError avant tout octet \u2014 journal et séance ne divergent jamais'); }
     for (const statut of ['a_verifier', 'echec']) {
+      if (statut === 'a_verifier') {
+        const payee = { ...(await db.get('imports', 'imp_n')), id: 'imp_payee', recipe_id: 'rc9', status: statut, resultat: { title: 'Lecture conservée' } };
+        await db.put('imports', payee);
+        const contexte = await repo.capturerContexteRecette(await db.get('recipes', 'rc9'), { edition: await db.get('book_editions', 'ed1') });
+        const r = await repo.ajouterPages([fichier(`${statut}.jpg`, 150)], { session_id: r2.session.id, import_id: payee.id, recettes: [contexte], intention_id: 'geste_payee', nouvelleLecture: { id: 'imp_payee_suivante', attendue: payee } });
+        eq([(await db.get('imports', payee.id)).status, (await db.get('imports', payee.id)).page_ids, (await db.get('imports', r.importId)).status, (await db.get('imports', r.importId)).page_ids.at(-1), r.session.id !== r2.session.id], ['ignore', payee.page_ids, 'a_lancer', r.pages[0].id, true], 'avec import payé : geste explicite ouvre une nouvelle lecture et une nouvelle séance, pages de la réponse précédente intactes');
+        continue;
+      }
       await db.put('imports', { ...(await db.get('imports', 'imp_n')), status: statut });
       const r = await repo.ajouterPages([fichier(`${statut}.jpg`, 150)], { session_id: r2.session.id, import_id: 'imp_n' });
       eq([(await db.get('imports', 'imp_n')).status, (await db.get('imports', 'imp_n')).page_ids.at(-1)], [statut, r.pages[0].id], `avec import_id : un import ${statut} accepte des pages, son statut ne change pas`);
@@ -551,8 +559,8 @@ export async function runImportCibleTests({ eq, ok }) {
     const navs = [], toasts = [];
     const vus5 = []; espionner(vus5);
     let s; try { s = await I.startScanSession([fichier('g.jpg', 190)], { session_id: r2.session.id, naviguer: (p) => navs.push(p), notifier: (m) => toasts.push(m) }); } finally { db.onMutate = capture; }
-    eq([s.id, s.page_ids.length, [...navs], toasts.length, horsFiles(vus5)], [r2.session.id, 7, [`/import?session=${encodeURIComponent(r2.session.id)}`], 1, [[['files', 'scan_sessions', 'source_documents', 'source_pages'], null]]], 'startScanSession : même lot de séance qu’ajouterPages (une transaction pour les trois magasins), puis UNE navigation vers la séance et un toast');
-    eq([(await db.get('scan_sessions', r2.session.id)).page_ids.length, location.hash], [7, hashAvant], 'startScanSession : la séance est complétée (b, c, d, a_verifier, echec, e, g) ; la navigation injectée n’a pas touché l’adresse de la page de tests');
+    eq([s.id, s.page_ids.length, [...navs], toasts.length, horsFiles(vus5)], [r2.session.id, 6, [`/import?session=${encodeURIComponent(r2.session.id)}`], 1, [[['files', 'scan_sessions', 'source_documents', 'source_pages'], null]]], 'startScanSession : même lot de séance qu’ajouterPages (une transaction pour les trois magasins), puis UNE navigation vers la séance et un toast');
+    eq([(await db.get('scan_sessions', r2.session.id)).page_ids.length, location.hash], [6, hashAvant], 'startScanSession : la séance est complétée (b, c, d, echec, e, g), le complément payé reste dans sa nouvelle séance ; la navigation injectée n’a pas touché l’adresse');
     const s2 = await I.startScanSession([fichier('h.jpg', 200)], { edition_id: 'ed1', intention: 'index', naviguer: (p) => navs.push(p), notifier: () => {} });
     eq([s2.edition_id, s2.page_ids.length, navs.at(-1)], ['ed1', 1, `/import?session=${encodeURIComponent(s2.id)}&intention=index`], 'startScanSession : séance neuve, l’intention voyage dans l’adresse comme avant');
   }));
@@ -718,7 +726,7 @@ export async function runImportCibleTests({ eq, ok }) {
         eq(root.querySelectorAll('.thumbs figure').length, 2, 'pages : deux vignettes, dans l’ordre');
         pick.suivant.push([]);
         bouton(root, 'Photographier').click();
-        await attendre(() => pick.appels.length >= 2, 'pickFiles appelé');
+        await attendre(() => pick.appels.length >= 2 && !bouton(root, 'Photographier')?.disabled, 'pickFiles refermé, gestes de pages disponibles');
         eq(pick.appels.at(-1), { accept: 'image/*', capture: 'environment', multiple: true }, 'pages : « Photographier » appelle pickFiles avec capture environment et multiple');
         eq(root.etatRoute().pageIds, [p1, p2], 'pages : un sélecteur refermé sans fichier n’écrit rien');
         bouton(root, 'Descendre la page 1').click();
@@ -930,7 +938,7 @@ export async function runImportCibleTests({ eq, ok }) {
         bouton(root, 'Extraire et enregistrer').click();
         // T4-R2 : attendre le panneau DESSINÉ (le verdict est posé deux lectures avant le dessin : un faux rouge a été vu dans cette fenêtre).
         await attendre(() => root.etatRoute().status === 'a_verifier' && !!root.querySelector('[data-role="discordance"]'), 'a_verifier avec le panneau de discordance');
-        eq([root.querySelectorAll('[data-role="monter"], [data-role="descendre"], [data-role="retirer"]').length, bouton(root, 'Photographier'), bouton(root, 'Choisir des photos'), bouton(root, 'Prendre une photo')?.disabled], [0, null, null, false], 'discordance (T4-R1, décision 5) : en a_verifier les pages sont figées (ni Monter/Descendre/Retirer, ni ajout) ; la photo du plat reste modifiable (lue à l’enregistrement)');
+        eq([root.querySelectorAll('[data-role="monter"], [data-role="descendre"], [data-role="retirer"]').length, !!bouton(root, 'Photographier'), !!bouton(root, 'Choisir des photos'), root.textContent.includes('Ajouter des photos préparera une nouvelle lecture.'), bouton(root, 'Prendre une photo')?.disabled], [0, true, true, true, false], 'discordance : en a_verifier les pages payées restent figées ; photos proposées uniquement pour préparer une nouvelle lecture explicite, photo du plat toujours modifiable');
         const l = await db.get('imports', impB);
         eq([l.status, Array.from(l.reponse_brute).length, l.resultat?.title, l.resultat?.ingredients?.length, JSON.stringify(l).length < 512 * 1024], ['a_verifier', 16000, 'Tarte aux poires', 2, true], 'reponse_brute : coupée à 16 000 points de code, resultat intact, la ligne tient sous 512 Kio');
         eq(root.etatRoute().discordance, { ok: false, raison: 'titre', titreLu: 'Tarte aux poires', pageLue: 133 }, 'discordance (Review Focus 2) : « Tarte aux poires » lue pour « Tarte aux pommes » → verdict titre, avant toute écriture');

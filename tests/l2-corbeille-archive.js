@@ -13,7 +13,7 @@ const seed = db => db.putBatch({ books: [{ id: 'l2-book', title: 'Cuisine' }], b
 export async function runL2CorbeilleArchiveTests({ eq, ok }) {
   let archive;
   await withDatabase(async db => { await seed(db); archive = await createArchive(db); });
-  eq(archive.manifest.format_version, 3, 'L2 archive : format3 protège anciens lecteurs');
+  eq(archive.manifest.format_version, 4, 'L2 archive : format4 conserve les protections des cycles et annonce les révisions de sources');
   const inspection = await inspectArchive(await archive.blob.arrayBuffer());
   ok(inspection.ok, 'L2 archive : groupe retiré et exception valides');
   await withDatabase(async db => {
@@ -96,7 +96,7 @@ export async function runL2CorbeilleArchiveTests({ eq, ok }) {
       eq(await db.getSnapshot(),concurrent,`L2 archive ${store} : graphe concurrent intégralement conservé`);
     });
     const initiale=await archiveDe(nouveau,false);
-    await withDatabase(async db=>{await db.putBatch(graphe(ancien,false));await applyArchive(db,initiale);eq((await db.get(store,store==='source_pages'?'page-source':'doc-a'))[champ],nouveau,`L2 archive ${store} : archive initiale active reste restaurable`);});
+    await withDatabase(async db=>{await db.putBatch(graphe(ancien,false));const avant=await db.getSnapshot();ok(await refuse(()=>applyArchive(db,initiale)),`L5 archive ${store} : une collision d’identité est aussi refusée sans cycle de corbeille`);eq(await db.getSnapshot(),avant,`L5 archive ${store} : l’ancien parent actif et ses données restent intacts`);});
   }
   for (const mode of ['keep_recipes', 'with_recipes']) await withDatabase(async source => {
     const parent = { ...edition, trash_mode: mode };

@@ -1,3 +1,6 @@
+import {selectionRepriseConfirmee} from '../domain/comparaison-sources.js';
+import {canoniqueSources,empreinteSources,projectionSessionSources,projectionIdentitePage,projectionIdentiteDocument,verifierEmpreinteCommandeSources,octetsJsonbSources,LIMITES_SOURCES,validerCaptureSources,validerAppelIndex,ErreurSources} from '../domain/sources-format.js';
+import {estCleSources,validerLigneSources,verifierQuotaSources} from '../domain/sources-locaux.js';
 // Accès aux données : base unique, amorçage des références, réglages et journal d'activité.
 import { Database, TransitionRefusee } from '../core/db.js';
 import { DB_NAME, DB_VERSION, STORES, SYNC_STORES, SECRET_SETTING_KEYS, IMPORTS_TERMINES } from './schema.js';
@@ -427,7 +430,7 @@ function lireCondition(c, courant, store, key, lecture) {
 
 // Tous les chemins du dépôt passent cette garde, y compris un lot n'écrivant que des enfants.
 // Les lectures préparatoires résolvent les parents ; les associations et cycles sont revalidés dans la transaction finale.
-async function protegerMutationRecettes(puts, conditionsInitiales, recettesInitiales, { origin = 'local', deletes = {}, editions: editionsInitiales = [] } = {}) {
+async function protegerMutationRecettes(puts, conditionsInitiales, recettesInitiales, { origin = 'local', deletes = {}, editions: editionsInitiales = [], source_commands = [] } = {}) {
   const conditions = Object.fromEntries(Object.entries(conditionsInitiales || {}).map(([s, xs]) => [s, [...xs]]));
   if (origin !== 'local') return { conditions, recettes: [], editions: [] };
   if (!Array.isArray(recettesInitiales)) throw new TypeError('Les contextes de recette sont un tableau');
@@ -576,11 +579,18 @@ async function protegerMutationRecettes(puts, conditionsInitiales, recettesIniti
       if (parents) {
         const entree = (puts[store] || []).find(r => r[STORES[store].keyPath] === key);
         const memeProvenance = (a,b) => parents.every(champ => (a?.[champ] ?? null) === (b?.[champ] ?? null));
+        const sourceAutorisee=source_commands.some(c=>c.store===store&&c.id===key||c.op==='source_revision'&&(store==='source_pages'?c.new_pages:store==='source_documents'?c.new_documents:[]).some(r=>r.id===key)||c.op==='source_transfer'&&c.phase==='part'&&c.rows.some(r=>r.store===store&&r.id===key));
+        const verifierIdentite=(avant,apres)=>{if(!apres)return;
+          if(avant&&['source_pages','source_documents'].includes(store)&&canoniqueSources(store==='source_pages'?projectionIdentitePage(avant):projectionIdentiteDocument(avant))!==canoniqueSources(store==='source_pages'?projectionIdentitePage(apres):projectionIdentiteDocument(apres)))throw new ErreurSources('source_changed');
+          if(!sourceAutorisee){for(const k of store==='scan_sessions'?['source_state','source_receipts','source_copy']:['source_revision','source_copy'])if(canoniqueSources(avant?.[k]??null)!==canoniqueSources(apres?.[k]??null))throw new ErreurSources('source_reserved');}
+        };
         if (actuelle && entree && !memeProvenance(actuelle,entree)) throw new ErreurCycleRecette('source_modifiee');
+        verifierIdentite(actuelle,entree);
         conditionUnique(conditions, store, key, ancienne => ({ key, fusion: (courant,lecture) => {
           if (!!courant !== !!actuelle || (courant && !memeProvenance(courant,actuelle))) throw new ErreurCycleRecette('source_modifiee');
           const fusion=lireCondition(ancienne,courant,store,key,lecture), ecrite=fusion || entree;
           if (ecrite && !memeProvenance(actuelle || entree,ecrite)) throw new ErreurCycleRecette('source_modifiee');
+          verifierIdentite(courant,ecrite);
           return fusion;
         }}));
       }
@@ -802,6 +812,72 @@ export async function muterEditeur({metier={},internes={}}={}, {origin,baseAtten
   verifierContexte();
   const sorties={};for(const s of new Set([...Object.keys(stamped),...Object.keys(ecrites||{})]))if(s!=='sync_state'){sorties[s]=[...(stamped[s]||[]),...(ecrites?.[s]||[])];emit('change',{store:s});}
   return {metier:sorties,internes:[...locaux,...(ecrites?.sync_state||[])]};
+}
+
+// Porte L5 : commandes immuables, fichiers et intention interne partagent le commit.
+// Porte fermée de résolution L5 : aucune confirmation ne peut devenir un put ordinaire.
+async function preparerReconciliationSources(r,{metier,internes,fichiers,commandes,conditions,verifier,now}){
+ const fail=c=>{throw new ErreurSources(c);},egal=(a,b)=>canoniqueSources(a??null)===canoniqueSources(b??null);
+ const keys=['session_id','owner_id','library_epoch','attendue','file','conflit','conflits','confirmations','locale','decision','operation_id'];
+ if(!r||Object.keys(r).length!==keys.length||Object.keys(r).some(k=>!keys.includes(k))||!['reprendre','garder_serveur'].includes(r.decision)||!r.owner_id||!r.library_epoch||r.attendue?.op!=='source_revision'||r.attendue.user_id!=null&&r.attendue.user_id!==r.owner_id||r.attendue.id!==r.session_id||r.attendue.store!=='scan_sessions'||!r.attendue.lifecycle_blocked||r.conflit?.kind!=='source'||r.conflit.user_id!==r.owner_id||r.conflit.id!=='source:'+r.attendue.payload?.operation_id||r.conflit.resolution||!egal(r.conflit.local,r.attendue.payload)||r.locale?.session?.id!==r.session_id||!Array.isArray(r.file)||!r.file.length||!r.file.some(e=>egal(e,r.attendue))||r.file.some(e=>e.op!=='source_revision'||e.store!=='scan_sessions'||e.id!==r.session_id||e.user_id!=null&&e.user_id!==r.owner_id)||!Array.isArray(r.conflits)||r.conflits.length!==r.file.length||r.conflits.some((c,i)=>c.id!=='source:'+r.file[i].payload?.operation_id||c.row&&(c.row.id!==c.id||c.row.user_id!==r.owner_id||c.row.kind!=='source'||c.row.resolution))||!Array.isArray(r.confirmations)||fichiers.length||(internes.puts||[]).length||(internes.deletes||[]).length)fail('invalid_shape');
+ for(const e of r.file)await verifierEmpreinteCommandeSources(e.payload);verifier();
+ const confirmations=new Map();for(const c of r.confirmations){const data=c?.value?.data;if(!data?.id||c.value.user_id!==r.owner_id||c.value.deleted_at||!Number.isSafeInteger(c.value.server_seq)||c.value.server_seq<0||!['scan_sessions','source_pages','source_documents'].some(s=>c.key==='source_confirmed:'+s+':'+data.id)||confirmations.has(c.key))fail('invalid_shape');confirmations.set(c.key,c);}
+ const cible=confirmations.get('source_confirmed:scan_sessions:'+r.session_id)?.value.data;if(!cible||cible.edition_id!==r.locale.session.edition_id)fail('invalid_shape');
+ for(const [store,ids]of [['source_pages',cible.page_ids||[]],['source_documents',cible.document_ids||[]]])for(const id of ids)if(!confirmations.has('source_confirmed:'+store+':'+id))fail('reception_incomplete');
+ const locales={scan_sessions:[r.locale.session],source_pages:r.locale.pages,source_documents:r.locale.documents,book_editions:r.locale.edition?[r.locale.edition]:[]};
+ if((r.locale.edition?.id??null)!==(cible.edition_id??null)||!Array.isArray(r.locale.pages)||!Array.isArray(r.locale.documents)||!egal(r.locale.pages.map(p=>p.id),r.locale.session.page_ids)||!egal(r.locale.documents.map(p=>p.id),r.locale.session.document_ids))fail('invalid_shape');
+ for(const [store,cs]of Object.entries(metier.conditions||{}))for(const c of cs)if(!locales[store]?.some(x=>x.id===c.key)||Object.keys(c).some(k=>!['key','fusion'].includes(k))||typeof c.fusion!=='function')fail('invalid_shape');
+ const admet=['scan_sessions','source_pages','source_documents','book_editions'];if([...Object.keys(metier.puts||{}),...Object.keys(metier.conditions||{})].some(s=>!admet.includes(s)))fail('invalid_shape');
+ if(r.decision==='garder_serveur'){if(r.operation_id!==null||commandes.length||Object.values(metier.puts||{}).some(xs=>xs.length))fail('invalid_shape');}
+ else{const c=commandes[0];if(r.file.length!==1||commandes.length!==1||c.op!=='source_revision'||c.action!=='select'||c.id!==r.session_id||c.operation_id!==r.operation_id||c.edition_id!==cible.edition_id||c.base_source_revision!==(cible.source_state?.revision??null)||c.base_session_sha256!==await empreinteSources(projectionSessionSources(cible,c.base_sources))||!egal(c.active_page_ids,selectionRepriseConfirmee(r.attendue.payload,cible,new Map([...r.locale.pages,...[...confirmations.values()].filter(x=>x.key.startsWith('source_confirmed:source_pages:')).map(x=>x.value.data)].map(p=>[p.id,p])))))fail('invalid_shape');
+  for(const [xs,anciens]of [[c.new_pages,r.attendue.payload.new_pages],[c.new_documents,r.attendue.payload.new_documents]])for(const x of xs){const ancien=anciens.find(a=>a.id===x.id);if(!ancien||!egal({...x.data,created_at:null,updated_at:null},{...ancien.data,created_at:null,updated_at:null}))fail('source_changed');}
+ }
+ const scope=[{key:'user_id',fusion:x=>{verifier();if(x?.value!==r.owner_id)fail('compte_change');return null;}},{key:'editor_library_epoch:v1',fusion:x=>{if(x?.value!==r.library_epoch)fail('bibliotheque_remplacee');return null;}}];
+ for(const c of confirmations.values())scope.push({key:c.key,fusion:x=>{if(!egal(x,c))fail('source_changed');return null;}});
+ conditions.sync_state.push(...scope);
+ conditions.outbox=[{toutes:true,verifier:rows=>{verifier();const file=rows.filter(e=>(e.user_id==null||e.user_id===r.owner_id)&&['source_revision','source_transfer','index_apply'].includes(e.op)&&e.store==='scan_sessions'&&e.id===r.session_id).sort((a,b)=>a.seq-b.seq);if(!egal(file,r.file))fail('source_changed');}}];
+ const resolution={choix:r.decision,at:now,operation_id:r.operation_id},recovery={session:structuredClone(r.locale.session)};
+ conditions.sync_conflicts=r.conflits.map((c,i)=>({key:c.id,fusion:x=>{if(!egal(x,c.row))fail('source_changed');const base=x||{id:c.id,kind:'source',operation_id:r.file[i].payload.operation_id,user_id:r.owner_id,store:'scan_sessions',record_id:r.session_id,local:structuredClone(r.file[i].payload),server:null,reason:'dependency_changed',at:now};return{...base,resolution,...(c.id===r.conflit.id?{recovery}:{})};}}));
+ // Vérifier les sources et le cycle même si un appelant ne fournit pas de condition métier.
+ for(const [store,rows]of [['scan_sessions',[r.locale.session]],['source_pages',r.locale.pages],['source_documents',r.locale.documents],['book_editions',r.locale.edition?[r.locale.edition]:[]]]){
+  if(!Array.isArray(rows))fail('invalid_shape');for(const row of rows)conditionUnique(conditions,store,row.id,ancienne=>({key:row.id,fusion:(courant,lecture)=>{if(!egal(courant,row))fail(store==='book_editions'?'edition_retiree':'source_changed');const next=lireCondition(ancienne,courant,store,row.id,lecture);if(r.decision==='garder_serveur'&&next&&(store!=='scan_sessions'||!egal(next,cible)))fail('invalid_shape');return next;}}));
+ }
+ for(const [store,ids,projection]of [['source_pages',cible.page_ids||[],projectionIdentitePage],['source_documents',cible.document_ids||[],projectionIdentiteDocument]])for(const id of ids){const data=confirmations.get('source_confirmed:'+store+':'+id).value.data;conditionUnique(conditions,store,id,ancienne=>({key:id,fusion:(courant,lecture)=>{if(!courant||!egal(projection(courant),projection(data)))fail('source_changed');return lireCondition(ancienne,courant,store,id,lecture);}}));}
+ if(r.locale.edition&&(lireCycleEdition(r.locale.edition).etat!=='active'||(r.locale.edition.lifecycle_id??null)!==r.attendue.payload.base_edition_cycle_id))fail('edition_retiree');
+ if(!r.locale.edition&&cible.edition_id!==null)fail('edition_retiree');
+ return{deletes:{outbox:r.file.map(e=>e.seq)},origin:r.decision==='garder_serveur'?'remote':'local'};
+}
+
+export async function muterSources({metier={},internes={},fichiers=[],commandes=[],reconciliation=null}={}, {origin='local',baseAttendue,contexteValide}={}) {
+ const base=db,verifier=()=>{if(base!==db||base!==baseAttendue||typeof contexteValide!=='function'||!contexteValide())throw new ErreurSources('contexte_change');};verifier();
+ if(!['device','local'].includes(origin)||Object.keys(metier).some(k=>!['puts','conditions','recettes','editions'].includes(k))||Object.keys(internes).some(k=>!['puts','conditions','deletes'].includes(k)))throw new ErreurSources('invalid_shape');
+ if(origin==='device'&&(Object.keys(metier.puts||{}).length||Object.keys(metier.conditions||{}).length||commandes.length||fichiers.length))throw new ErreurSources('invalid_shape');
+ const commandesCopie=structuredClone(commandes);for(const c of commandesCopie)await verifierEmpreinteCommandeSources(c);verifier();
+ const stores=new Set(['recipes','imports','source_pages','source_documents','scan_sessions','book_editions']),conditions=Object.fromEntries(Object.entries(metier.conditions||{}).map(([s,cs])=>[s,[...cs]])),batch=metier.puts||{};
+ if([...Object.keys(batch),...Object.keys(conditions)].some(s=>!stores.has(s)))throw new ErreurSources('invalid_shape');
+ const locaux=structuredClone(internes.puts||[]),deletes=[...(internes.deletes||[])],fusions=new Map(),locConditions=[];for(const row of locaux)validerLigneSources(row);
+ if(new Set(locaux.map(r=>r.key)).size!==locaux.length||new Set(deletes).size!==deletes.length||deletes.some(k=>!estCleSources(k)||k==='editor_library_epoch:v1'))throw new ErreurSources('invalid_shape');
+ let verifierToutes=null;
+ for(const c of internes.conditions||[]){if(c.toutes===true){if(verifierToutes||typeof c.verifier!=='function')throw new ErreurSources('invalid_shape');verifierToutes=c.verifier;continue;}
+  if(c.key!=='user_id'&&!estCleSources(c.key)||c.index!=null||c.patch!=null||c.attendus!=null||c.key==='user_id'&&typeof c.fusion!=='function')throw new ErreurSources('invalid_shape');
+  locConditions.push(c.fusion?{...c,fusion:(r,l)=>{const next=c.fusion(r,l);if(next?.then)throw new ErreurSources('invalid_shape');if(next){if(c.key==='user_id'||next.key!==c.key||locaux.some(r=>r.key===c.key))throw new ErreurSources('invalid_shape');validerLigneSources(next);fusions.set(next.key,next);}return next;}}:c);
+ }
+ locConditions.push({toutes:true,verifier:rows=>{verifier();const v=verifierToutes?.(rows);if(v?.then)throw new ErreurSources('invalid_shape');verifierQuotaSources(rows,[...locaux,...fusions.values()],deletes);}});conditions.sync_state=locConditions;
+ const now=syncNow(),taille=r=>{if(octetsJsonbSources(r)>LIMITES_SOURCES.ligne)throw new ErreurSources('too_large');return r;};
+ const stamped=Object.fromEntries(Object.entries(batch).map(([s,rs])=>[s,rs.map(r=>taille({...structuredClone(r),created_at:r.created_at||now,updated_at:now}))]));
+ const rapprochement=reconciliation?await preparerReconciliationSources(reconciliation,{metier,internes,fichiers,commandes:commandesCopie,conditions,verifier,now}):null;
+ const protection=await protegerMutationRecettes(stamped,conditions,metier.recettes||[],{origin:rapprochement?.origin||origin,editions:metier.editions||[],source_commands:commandesCopie});verifier();conditionsFichiers(fichiers,protection.conditions,now);
+ const finales=Object.fromEntries(Object.entries(protection.conditions).map(([s,cs])=>[s,s==='sync_state'||s==='files'?cs:cs.map(c=>{return c.fusion?{...c,fusion:(...a)=>{const r=c.fusion(...a);return r?taille({...r,created_at:r.created_at||now,updated_at:now}):r;}}:c;})]));
+ // Les anciennes captures sans snapshot doivent garder la base antérieure, jamais relire la sélection après ce geste.
+ if(commandesCopie.length){const file=await base.getAll('outbox'),keys=new Set(commandesCopie.flatMap(c=>[c.store+':'+c.id,...(c.base_sources||[]).map(r=>r.store+':'+r.id)]));
+  for(const e of file)if(e.op==='put'&&!e.snapshot&&keys.has(e.store+':'+e.id)&&['source_pages','source_documents','scan_sessions'].includes(e.store)){
+   const ancienne=await base.get(e.store,e.id);if(!ancienne||ancienne.updated_at!==e.updated_at)continue;
+   (finales.outbox||=[]).push({key:e.seq,fusion:r=>{if(JSON.stringify(r)!==JSON.stringify(e))throw new ErreurSources('source_changed');return{...r,snapshot:structuredClone(ancienne)};}});
+  }
+ }
+
+ const result=await base.mutate({origin:rapprochement?.origin||origin,puts:{...stamped,...(locaux.length?{sync_state:locaux}:{})},deletes:{sync_state:deletes,...(rapprochement?.deletes||{})},conditions:finales,recettes:protection.recettes,editions:protection.editions,source_commands:commandesCopie});verifier();
+ const sorties={};for(const s of new Set([...Object.keys(stamped),...Object.keys(result||{})]))if(!['sync_state','files'].includes(s)){sorties[s]=[...(stamped[s]||[]),...(result?.[s]||[])];emit('change',{store:s});}return{metier:sorties,internes:[...locaux,...(result?.sync_state||[])]};
 }
 
 // Transition conditionnée (spec import-cible § 3.6, I-10) : la fiche `key` de `store` est lue, son statut vérifié parmi `attendus`,
@@ -1034,7 +1110,7 @@ function memoriserBaseImport(ligne, recettes, editions) {
     expected_edition_cycle_id: capture.expected_edition_cycle_id ?? null, owner_id: capture.owner_id });
   else if (parent) Object.assign(ligne, { expected_edition_id: parent.edition_id, expected_edition_cycle_id: parent.expected_cycle_id ?? null, owner_id: parent.owner_id });
 }
-export async function ouvrirImport({ id = newId('imp'), kind, recipe_id = null, edition_id = null, scan_session_id = null, page_ids = [], recettes = [], editions = [], conditions = {}, editeur = null } = {}) {
+export async function ouvrirImport({ id = newId('imp'), kind, recipe_id = null, edition_id = null, scan_session_id = null, page_ids = [], recettes = [], editions = [], conditions = {}, editeur = null, indexLecture = null } = {}) {
   if (!KINDS_PAGES.includes(kind)) throw new TypeError('ouvrirImport : kind d’import inconnu (' + String(kind) + ')');
   if (!Array.isArray(page_ids) || page_ids.some((p) => typeof p !== 'string' || !p)) throw new TypeError('ouvrirImport : page_ids doit être une liste d’identifiants');
   const { ligne, conditions: ouverture } = nouvelleLigneImport({ id, kind, recipe_id, edition_id, scan_session_id, page_ids });
@@ -1042,12 +1118,64 @@ export async function ouvrirImport({ id = newId('imp'), kind, recipe_id = null, 
     if(kind!=='recette'||typeof recipe_id!=='string'||!recipe_id||!editeur||typeof editeur!=='object'||Array.isArray(editeur)||Object.keys(editeur).some(k=>!['base_version_id','source_signature'].includes(k))||typeof editeur.base_version_id!=='string'||!editeur.base_version_id||editeur.base_version_id.length>200||typeof editeur.source_signature!=='string'||!/^[a-f0-9]{64}$/.test(editeur.source_signature))throw new TypeError('Cible éditeur invalide');
     ligne.editor_base_version_id=editeur.base_version_id;ligne.editor_source_signature=editeur.source_signature;
   }
+  if(indexLecture!==null){
+    if(kind!=='index'||recipe_id!==null||!indexLecture||Object.keys(indexLecture).some(k=>!['source_capture','index_call'].includes(k)))throw new ErreurSources('invalid_shape');
+    const capture=validerCaptureSources(indexLecture.source_capture),appel=validerAppelIndex(indexLecture.index_call);
+    if(capture.session_id!==scan_session_id||capture.pages.length!==1||page_ids.length!==1||capture.pages[0].id!==page_ids[0]||appel.page_id!==page_ids[0]||appel.kind!==capture.pages[0].zone.kind)throw new ErreurSources('invalid_shape');
+    ligne.source_capture=structuredClone(capture);ligne.index_call=structuredClone(appel);
+    ligne.owner_id=(await db.get('sync_state','user_id'))?.value??null;
+    conditionMagasin(ouverture,'imports',rows=>{if(rows.some(r=>r.scan_session_id===scan_session_id&&r.kind==='index'&&r.status==='en_cours'&&r.source_capture&&canoniqueSources(r.source_capture)===canoniqueSources(capture)))throw new ErreurSources('appel_en_cours');});
+  }
   memoriserBaseImport(ligne, recettes, editions);
   const ecrit = await saveBatch({ imports: [ligne] }, { conditions: reunirConditions(conditions, ouverture), recettes, editions });
   return ecrit.imports[0];
 }
-export async function ajouterPages(files, { edition_id = null, session_id = null, import_id = null, import: nouvelImport = null, recettes = [], editions = [], conditions = {} } = {}) {
+// Un complément d'une recette ne change jamais la sélection d'une séance gérée ni une réponse déjà payée.
+async function ajouterComplementRecette(files,{source,lecture,nouvelImport,nouvelleLecture,intention_id,recettes,editions,conditions}){
+ const contexte=recettes.length===1?recettes[0]:null,egal=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null),fail=code=>{throw new ErreurSources(code);};
+ if(!contexte?.recipe_id||lecture&&(lecture.recipe_id!==contexte.recipe_id||lecture.kind!=='recette')||nouvelImport&&(nouvelImport.recipe_id!==contexte.recipe_id||nouvelImport.kind!=='recette'))fail('source_revision_requise');
+ const payee=!!lecture&&(lecture.status==='a_verifier'||lecture.resultat!=null||lecture.reponse_brute!=null);
+ if(payee&&!nouvelleLecture)fail('nouvelle_lecture_requise');
+ if(nouvelleLecture&&(!lecture||lecture.kind!=='recette'||Object.keys(nouvelleLecture).some(k=>!['id','attendue'].includes(k))||!identifiantCycleValide(nouvelleLecture.id)||nouvelleLecture.id===lecture.id||nouvelleLecture.attendue?.id!==lecture.id))fail('contexte_change');
+ const op=intention_id||nouvelleLecture?.id||newId('complement');if(!identifiantCycleValide(op)||op.length>160)fail('invalid_shape');
+ const edition_id=source?.edition_id??lecture?.edition_id??nouvelImport?.edition_id??contexte.expected_edition_id??null;
+ if(edition_id!==(contexte.expected_edition_id??null))fail('cycle_change');
+ editions=[...editions];if(edition_id&&!editions.some(c=>c.edition_id===edition_id))editions.push({edition_id,expected_cycle_id:contexte.expected_edition_cycle_id??null,owner_id:contexte.owner_id,recipe_id:contexte.recipe_id,contexteValide:contexte.contexteValide});
+ const empreintes=[];for(const file of files)empreintes.push({sha256:await sha256Hex(file),mime:file.type,size:file.size,original_filename:file.name});
+ const id='ss_'+op,importId=nouvelleLecture?.id||lecture?.id||nouvelImport?.id||null,marque={format:1,operation_id:op,source_session_id:source?.id??null,recipe_id:contexte.recipe_id,owner_id:contexte.owner_id??null,files:empreintes,import_id:importId,previous_import_id:nouvelleLecture?lecture.id:null};
+ const existante=await db.get('scan_sessions',id),garde=attendue=>courante=>{if(!egal(courante,attendue))fail('source_changed');return null;};
+ conditions=Object.fromEntries(Object.entries(conditions||{}).map(([s,cs])=>[s,[...cs]]));
+ if(existante){if(!egal(existante.complement_sources,marque))fail('operation_conflict');
+  conditionUnique(conditions,'scan_sessions',id,ancienne=>({key:id,fusion:(r,l)=>{garde(existante)(r);return lireCondition(ancienne,r,'scan_sessions',id,l);}}));
+  await saveBatch({}, {conditions,recettes,editions});
+  return{session:existante,pages:await Promise.all(existante.page_ids.map(id=>db.get('source_pages',id))),docs:await Promise.all(existante.document_ids.map(id=>db.get('source_documents',id))),importId,previousImportId:marque.previous_import_id,dejaConserve:true};
+ }
+ if(lecture&&!ATTENDUS_AJOUT.includes(lecture.status))throw new TransitionRefusee('imports',lecture.id,lecture.status);
+ if(nouvelleLecture&&!egal(lecture,nouvelleLecture.attendue))fail('lecture_changee');
+ const session={id,status:'open',edition_id,started_at:nowIso(),page_ids:[],document_ids:[],recipe_ids:[contexte.recipe_id],device_id:deviceId(),complement_sources:marque},pages=[],docs=[],fichiers=[];
+ for(const [i,file]of files.entries()){const meta=empreintes[i],pdf=estPdf(file),epub=estEpub(file),doc={id:'doc_'+op+'_'+i,edition_id,source_type:pdf?'pdf':epub?'epub':'photo',...meta,blob_path:'files/'+meta.sha256,scan_session_id:id,captured_at:nowIso()};docs.push(doc);session.document_ids.push(doc.id);fichiers.push({sha256:meta.sha256,blob:file,meta:{original_filename:file.name}});if(!pdf&&!epub){const page={id:'pg_'+op+'_'+i,document_id:doc.id,edition_id,sha256:meta.sha256,printed_page:null,file_position:null,locator:null,position:pages.length+1,issues:issuesPourImage(file.size),kind:null};pages.push(page);session.page_ids.push(page.id);}}
+ const lignes={scan_sessions:[session],source_documents:docs,source_pages:pages},neuves=pages.map(p=>p.id);(conditions.scan_sessions||=[]).push({key:id,absente:true});
+ if(source)conditionUnique(conditions,'scan_sessions',source.id,ancienne=>({key:source.id,fusion:(r,l)=>{garde(source)(r);return lireCondition(ancienne,r,'scan_sessions',source.id,l);}}));
+ if(lecture)conditionUnique(conditions,'imports',lecture.id,ancienne=>({key:lecture.id,fusion:(r,l)=>{if(!egal(r,nouvelleLecture?.attendue||lecture))fail('lecture_changee');lireCondition(ancienne,r,'imports',lecture.id,l);return nouvelleLecture?{...r,status:'ignore',replaced_by_import_id:importId}:{...r,scan_session_id:id,page_ids:[...new Set([...(r.page_ids||[]),...neuves])]};}}));
+ if(nouvelleLecture||nouvelImport){const definition=nouvelleLecture?{id:importId,kind:'recette',recipe_id:contexte.recipe_id,edition_id,device_id:deviceId()}:nouvelImport;
+  const {ligne}=nouvelleLigneImport({...definition,scan_session_id:id,page_ids:[...new Set([...(nouvelleLecture?lecture.page_ids||[]:nouvelImport.page_ids||[]),...neuves])]});
+  if(nouvelleLecture)ligne.previous_import_id=lecture.id;memoriserBaseImport(ligne,recettes,editions);lignes.imports=[ligne];(conditions.imports||=[]).push({key:ligne.id,absente:true},{index:'recipe_id',valeur:contexte.recipe_id,verifier:rows=>{if(rows.some(r=>r.id!==lecture?.id&&IMPORTS_OUVERTS.includes(r.status)))fail('import_ouvert');}});
+ }
+ const source_batch=edition_id&&docs.length?{operation_id:'sources_'+op,session_id:id,base_session:null}:null;
+ const result=await saveBatch(lignes,{conditions,recettes,editions,fichiers,source_batch});
+ return{session:result.scan_sessions[0],pages:result.source_pages,docs:result.source_documents,importId,previousImportId:marque.previous_import_id};
+}
+
+export async function ajouterPages(files, { edition_id = null, session_id = null, import_id = null, import: nouvelImport = null, recettes = [], editions = [], conditions = {}, intention_id = null, nouvelleLecture = null } = {}) {
   if (import_id && nouvelImport) throw new TypeError('ajouterPages : import_id et import ne se donnent pas ensemble');
+  const lectureComplement=import_id?await db.get('imports',import_id):null;
+  const sourceComplement=(session_id||lectureComplement?.scan_session_id)?await db.get('scan_sessions',session_id||lectureComplement.scan_session_id):null;
+  if(sourceComplement?.source_state||nouvelleLecture||lectureComplement?.kind==='recette'&&(lectureComplement.status==='a_verifier'||lectureComplement.resultat!=null||lectureComplement.reponse_brute!=null)){
+    if(import_id&&!lectureComplement)throw new TransitionRefusee('imports',import_id,undefined);
+    if(session_id&&lectureComplement?.scan_session_id&&session_id!==lectureComplement.scan_session_id)throw new ErreurSources('source_changed');
+    return ajouterComplementRecette(files,{source:sourceComplement,lecture:lectureComplement,nouvelImport,nouvelleLecture,intention_id,recettes,editions,conditions});
+  }
+
   if (nouvelImport && !KINDS_PAGES.includes(nouvelImport.kind)) throw new TypeError('ajouterPages : kind d’import inconnu (' + String(nouvelImport.kind) + ')');
   // Vague finale (Important, « Relire les pages ») : `import.page_ids` = les pages DÉJÀ liées à la recette (celles de sa version courante), placées en
   // tête de la ligne neuve, dans leur ordre ; les photos du geste suivent. Sans elles, une relecture d'une fiche partial ne lisait que la page neuve.
