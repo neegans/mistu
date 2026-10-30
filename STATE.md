@@ -1,4 +1,12 @@
-# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L6 PUBLIÉ, 0.28.0 EN LIGNE
+# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L7 EN CONSTRUCTION, 0.28.0 EN LIGNE
+
+**L7 — cuisine et minuteries : contrat technique fermé, code à venir.**
+[Spec](docs/superpowers/specs/2026-10-29-l7-cuisine-minuteurs-design.md), [protocole](docs/superpowers/specs/2026-10-30-l7-protocole-cuisine.md), [plan](docs/superpowers/plans/2026-10-29-l7-cuisine-minuteurs.md).
+Branche `l7-cuisine-minuteurs`, base publique L6 code87855c4/reçu c5b6c08. Revue A/C puis intégration ; aucune relecture personnelle attribuée à Neegan.
+Deux régions ingrédients/étape, échéances conservées et progression qualifiée par version ; demandes système explicites et écran allumé révocable.
+Cible0.29.0, DB6/archive6, SQL0012 additive/cooking_persistence1 ; aucun code ni test L7 à cette entrée. La version en ligne reste0.28.0.
+La poursuite et publication sont autorisées par les demandes « deploy avant », « et enchaine sur le restant des lots », puis « continu ».
+L7–L10 et E1 restent à terminer.
 
 **L6 — Groupes d’ingrédients et recette en français : publié et vérifié.**
 [Spec](docs/superpowers/specs/2026-10-29-l6-ingredients-groupes-traductions-design.md),
