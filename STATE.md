@@ -1,4 +1,7 @@
-# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L8 PUBLIÉ, 0.30.0 EN LIGNE
+# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L9 EN CONSTRUCTION, 0.30.0 EN LIGNE
+
+**L9 — confort et accessibilité : contrat fermé avant code.** [Spec](docs/superpowers/specs/2026-10-29-l9-confort-accessibilite-design.md), [plan](docs/superpowers/plans/2026-10-30-l9-confort-accessibilite.md).
+Base L8 code9bb96ac/reçu c9b2048, publication vérifiée ci-dessous. Branche l9-confort-accessibilite, cible0.31.0/DB6/archive7 inchangés, sans SQL. Revues A/B/C/root, captures et défauts clavier/reflow observés. Poursuite autorisée ; aucune relecture personnelle attribuée à Neegan. **L9–L10 et E1 restent à terminer.**
 
 **L8 publié et reçu le 30 octobre.** SQL0013 appliqué une seule fois à **06:11:45UTC (02 h11 HAE)** sous transaction gardée ; SHA256 `02f0390bed59a9297e3c2138679512a26c64e8acebd7b961128ca454eaa6be3b`.
 Catalogue distant :32 fonctions/corps et droits clients exacts,6 triggers conformes,2 tables privées inchangées. Les32 écarts service_role sont les droits par défaut du rôle serveur privilégié, sans héritage anon/authenticated vérifié à distance. Capacité inventory_changes1 confirmée sous authenticated en lecture seule ; aucune donnée métier serveur consultée.
