@@ -691,9 +691,9 @@ export async function runPasserelleTests({ eq, ok }) {
     const passerelle = lus.find(([m]) => m === 'src/domain/passerelle.js')?.[1] ?? '';
     ok(!/from '\.\.\/ui\//.test(passerelle), 'passerelle.js : n’importe rien de src/ui/ (couche domaine)');
     ok(sw.chemins.includes('./src/domain/passerelle.js'), 'SHELL : ./src/domain/passerelle.js');
-    ok(/^0\.32\.1-[1-9]\d*$/.test(sw.release), 'manifeste : livraison 0.32.1');
+    ok(/^0\.32\.2-[1-9]\d*$/.test(sw.release), 'manifeste : livraison 0.32.2');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.32.1', 'APP_VERSION 0.32.1 (lot UI-1, carnet)');
+    eq(APP_VERSION, '0.32.2', 'APP_VERSION 0.32.2 (lot UI-1, carnet)');
   }
 
   // --- Lot F (spec plats-en-images § 4.6) : deux raisons de plus, écrites par la passerelle pour image-web et relayées telles quelles

@@ -67,10 +67,10 @@ export async function runRechercheWebTests({ eq, ok }) {
   // --- § 8 : version 0.17.0 (lot UI-1 « Carnet » ; 0.16.0 au lot UI-2, aperçus ; 0.15.0 au lot F, plats en images ; 0.14.0 au lot E, 0.13.0 au lot D, 0.12.0 au lot C, 0.11.0 au lot G, 0.10.0 au lot B, 0.9.0 au lot A, 0.8.1 à la présentation du serveur), SHELL
   {
     const sw = await lireLivraison();
-    ok(/^0\.32\.1-[1-9]\d*$/.test(sw.release), 'manifeste : livraison 0.32.1');
+    ok(/^0\.32\.2-[1-9]\d*$/.test(sw.release), 'manifeste : livraison 0.32.2');
     ok(sw.chemins.includes('./src/core/bornes.js'), 'SHELL : ./src/core/bornes.js');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.32.1', 'APP_VERSION 0.32.1 (lot UI-1, carnet)');
+    eq(APP_VERSION, '0.32.2', 'APP_VERSION 0.32.2 (lot UI-1, carnet)');
   }
 
   // --- § 7.1 : supportsWebSearch lu par l'écran (F6) — seule la passerelle (une SESSION) cherche sur le web

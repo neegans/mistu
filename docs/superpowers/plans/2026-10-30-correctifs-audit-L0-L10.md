@@ -111,13 +111,13 @@
 - Modifier : `src/demarrage.js:29-31` (`presenter`), `:49-52` (décision)
 - Modifier : `tests/l10-demarrage.js`
 
-- [ ] **Étape 1 : tests rouges** (fixtures du fichier : `serviceWorker` factice, `MessageChannel` factice) :
+- [x] **Étape 1 : tests rouges** (fixtures du fichier : `serviceWorker` factice, `MessageChannel` factice) :
   - `audit I1 : updatefound pendant la verification` : le faux `registration` émet `updatefound` puis `statechange` pendant `controle.verifier()` → `demarrerApplication(...)` finit en `etat:'montee'` (une seconde vérification bornée est faite avant tout écran de choix).
   - `audit 3.1 : sans serviceWorker` : `serviceWorker: undefined` → `etat:'montee'`, mode `en_ligne_non_verifiee`, et `app.textContent` ne contient pas `Reprendre le démarrage`.
   - `audit 3.1 : sw.js introuvable` : `register` rejette → même issue que sans serviceWorker, plus une ligne discrète `data-role="demarrage-non-verifie"` (texte : « Mistu s’ouvre en ligne. L’installation hors ligne sera réessayée au prochain lancement. ») conservée dans `#app` après montage.
-- [ ] **Étape 2 : rouge constaté** (`preuves/sonde-demarrage.txt`).
-- [ ] **Étape 3 : implémenter** : (a) après `controle.verifier()`, si `observation.etat === 'inconnue'` et `raison === 'worker_change'`, attendre `attendreInstallation` à nouveau (même `delai`) puis `verifier()` une seconde fois avant de décider ; (b) si `!serviceWorker?.register` ou si `register` rejette : `monter('en_ligne_non_verifiee')` directement, avec la ligne discrète ; (c) l'écran de choix ne reste que pour `controlee` incomplet ; (d) les textes : deux langues codées en dur (`navigator.language` commence par `en` → anglais), parce que `t()` n'est pas chargé à cette frontière — le dire en commentaire.
-- [ ] **Étape 4 : suite verte, livraison, commit** `fix(demarrage): ouvrir en ligne sans worker et revérifier apres updatefound (audit I1)`.
+- [x] **Étape 2 : rouge constaté** (`preuves/sonde-demarrage.txt`).
+- [x] **Étape 3 : implémenter** : (a) après `controle.verifier()`, si `observation.etat === 'inconnue'` et `raison === 'worker_change'`, attendre `attendreInstallation` à nouveau (même `delai`) puis `verifier()` une seconde fois avant de décider ; (b) si `!serviceWorker?.register` ou si `register` rejette : `monter('en_ligne_non_verifiee')` directement, avec la ligne discrète ; (c) l'écran de choix ne reste que pour `controlee` incomplet ; (d) les textes : deux langues codées en dur (`navigator.language` commence par `en` → anglais), parce que `t()` n'est pas chargé à cette frontière — le dire en commentaire.
+- [x] **Étape 4 : suite verte, livraison, commit** `fix(demarrage): ouvrir en ligne sans worker et revérifier apres updatefound (audit I1)`.
 
 ### Tâche 7 : Worker : stockage persistant, échec visible, anciens caches purgés (livraison I2, I3, I5)
 

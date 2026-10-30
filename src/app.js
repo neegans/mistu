@@ -1,3 +1,4 @@
+import { remplacerRacineApplication } from './core/racine-application.js';
 import { renderCorbeille } from './ui/corbeille.js';
 // Entrée métier après décision du démarrage : base, langue, coquille et routeur.
 import { el, replace, toast } from './core/dom.js';
@@ -95,7 +96,7 @@ async function onRoute({ handler, params, query, path, navigation = {} }) {
   if(coquilleARefaire){libererVue();current?.dispose();current=null;coquilleARefaire=false;}
   // La coquille est reconstruite au premier rendu et après un changement de langue : la pastille neuve est remise
   // à l'état RÉEL du moteur tout de suite, sinon elle resterait vide jusqu'à la prochaine passe.
-  if (!current) { current = shell(); replace(document.getElementById('app'), current.root); majPastille(getSyncState().moteur?.etat(), !!getSyncState().user); }
+  if (!current) { current = shell(); remplacerRacineApplication(document.getElementById('app'), current.root); majPastille(getSyncState().moteur?.etat(), !!getSyncState().user); }
   for (const a of [...current.side.querySelectorAll('a'), ...current.tabs.querySelectorAll('a')]) {
     const href = a.dataset.navDestination || a.getAttribute('href').slice(1).split('?')[0];
     const nav = NAV.find((n) => n.href === href);
@@ -302,7 +303,7 @@ async function porteDEntree() {
         signOut: () => resolve('signOut'),
         sansCompte: () => resolve('sansCompte'),
       });
-      replace(document.getElementById('app'), racine);
+      remplacerRacineApplication(document.getElementById('app'), racine);
       // `autofocus` ne prend pas sur un nœud inséré après le chargement : le focus est posé une fois en place.
       racine.querySelector('button[autofocus]')?.focus();
     });
@@ -362,7 +363,7 @@ async function boot() {
     window.addEventListener('pageshow',e=>{if(e.persisted)surveiller();});
   } catch (e) {
     logError('boot', { error: e });
-    replace(document.getElementById('app'), el('div', { class: 'card danger', style: { margin: '1rem' } }, el('h2', null, 'Cuisine OS ne peut pas démarrer'), el('p', { class: 'muted' }, t('Code : {c}', { c: e?.name || 'Erreur' })), el('button', { class: 'btn', onClick: () => location.reload() }, t('Recharger'))));
+    remplacerRacineApplication(document.getElementById('app'), el('div', { class: 'card danger', style: { margin: '1rem' } }, el('h2', null, 'Cuisine OS ne peut pas démarrer'), el('p', { class: 'muted' }, t('Code : {c}', { c: e?.name || 'Erreur' })), el('button', { class: 'btn', onClick: () => location.reload() }, t('Recharger'))));
   }
 }
 
