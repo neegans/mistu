@@ -132,3 +132,14 @@ Cuisine8 mesures/36 gestes, photo décodée et note conservées après rechargem
 E1 clos sur la décision documentaire d’écarter l’automatisation Cookidoo pour cette livraison, transfert manuel existant conservé. **L10 reste à terminer.**
 
 Preuves sous `.superpowers/sdd/2026-10-30-l9/` : rapports A/B/C/root, revues indépendantes, rouges/verts et parcours. Défaillances fermées : focus périmé/explicite après dialogue, bouton réactivé tardivement, repère de réglage perdu au vrai refresh, fenêtre du contrôleur de géométrie incorrecte dans les cadres, titre sous barre haute et toast sous navigation. Aucun retrait de test pour masquer ces défauts.
+
+
+## 7. Réception publique
+
+**L9 publié et reçu le 30 octobre.** Code **ed454203** poussé par avance rapide dans main ; Pages construit à **06:43:43 UTC (02 h 43 HAE)**.
+**38 fichiers** publics identiques ; suite publique **11262/11262**, zéro erreur JavaScript ou requête extérieure.
+Parcours publics : navigation **12 observations**, dialogues **20 observations**, lisibilité **40 configurations** FR/EN et contrôles de focus, petite hauteur, mouvement réduit et zoom visuel ; cuisine **8 mesures/36 gestes**, deux onglets, note et photo décodée après rechargement réellement hors ligne. Captures publiques relues.
+**0.31.0 en ligne**, cache `cuisine-os-v0.31.0-1`, DB6/archive7 inchangés. Aucun SQL appliqué pour L9. Aucun essai physique iPhone/Safari/lecteur vocal/TM7 ni appel assistant réel.
+E1 est clos par décision documentaire ; **L10 reste à terminer**. Les mentions de lots restants ci-dessous décrivent les reçus historiques à leur date.
+
+Preuves : `.superpowers/sdd/2026-10-30-l9/`, fichiers publics, suite et parcours publics.

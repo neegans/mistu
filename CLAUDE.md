@@ -3779,3 +3779,14 @@ A41 contrôles/navigation et géométrie, B62/dialogues, C68/sélecteurs, root8/
 Parcours Chrome : navigation12 observations/deux onglets, dialogues20 observations/10 captures, clavier des contraintes6 ;40 configurations de lecture FR/EN320→1280/texte100–200/pastille, plus lien d’évitement, petite hauteur, message, réduction du mouvement à chaud et zoom visuel200% CDP. Captures relues.
 Cuisine8 mesures/36 gestes, photo décodée et note conservées après rechargement réellement hors ligne ; minuteurs sans remontage, API voix/Wake Lock simulées. Aucun essai physique iPhone/Safari/lecteur vocal ni certification WCAG ; zoom CDP distinct du zoom physique. Aucun compte privé ou appel assistant réel.
 E1 clos sur la décision documentaire d’écarter l’automatisation Cookidoo pour cette livraison, transfert manuel existant conservé. **L10 reste à terminer.**
+
+
+## L9 — réception publique, 30 octobre 2026
+
+**L9 publié et reçu le 30 octobre.** Code **ed454203** poussé par avance rapide dans main ; Pages construit à **06:43:43 UTC (02 h 43 HAE)**.
+**38 fichiers** publics identiques ; suite publique **11262/11262**, zéro erreur JavaScript ou requête extérieure.
+Parcours publics : navigation **12 observations**, dialogues **20 observations**, lisibilité **40 configurations** FR/EN et contrôles de focus, petite hauteur, mouvement réduit et zoom visuel ; cuisine **8 mesures/36 gestes**, deux onglets, note et photo décodée après rechargement réellement hors ligne. Captures publiques relues.
+**0.31.0 en ligne**, cache `cuisine-os-v0.31.0-1`, DB6/archive7 inchangés. Aucun SQL appliqué pour L9. Aucun essai physique iPhone/Safari/lecteur vocal/TM7 ni appel assistant réel.
+E1 est clos par décision documentaire ; **L10 reste à terminer**. Les mentions de lots restants ci-dessous décrivent les reçus historiques à leur date.
+
+Preuves : `.superpowers/sdd/2026-10-30-l9/`, fichiers publics, suite et parcours publics.

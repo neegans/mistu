@@ -1,4 +1,10 @@
-# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L9 REÇU LOCALEMENT, 0.30.0 EN LIGNE
+# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L9 PUBLIÉ, 0.31.0 EN LIGNE
+
+**L9 publié et reçu le 30 octobre.** Code **ed454203** poussé par avance rapide dans main ; Pages construit à **06:43:43 UTC (02 h 43 HAE)**.
+**38 fichiers** publics identiques ; suite publique **11262/11262**, zéro erreur JavaScript ou requête extérieure.
+Parcours publics : navigation **12 observations**, dialogues **20 observations**, lisibilité **40 configurations** FR/EN et contrôles de focus, petite hauteur, mouvement réduit et zoom visuel ; cuisine **8 mesures/36 gestes**, deux onglets, note et photo décodée après rechargement réellement hors ligne. Captures publiques relues.
+**0.31.0 en ligne**, cache `cuisine-os-v0.31.0-1`, DB6/archive7 inchangés. Aucun SQL appliqué pour L9. Aucun essai physique iPhone/Safari/lecteur vocal/TM7 ni appel assistant réel.
+E1 est clos par décision documentaire ; **L10 reste à terminer**. Les mentions de lots restants ci-dessous décrivent les reçus historiques à leur date.
 
 **L9 — confort et accessibilité : réception locale terminée, publication en préparation.**
 [Spec](docs/superpowers/specs/2026-10-29-l9-confort-accessibilite-design.md), [rapport](docs/superpowers/plans/2026-10-30-l9-confort-accessibilite.md).
