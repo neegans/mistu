@@ -1,4 +1,10 @@
-# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L7 PUBLIÉ, 0.29.0 EN LIGNE
+# STATE.md — Cuisine OS (Mistu) — 30 octobre 2026 — L8 EN CONSTRUCTION, 0.29.0 EN LIGNE
+
+**L8 — repas, courses et inventaire : contrat technique fermé avant code.**
+[Spec](docs/superpowers/specs/2026-10-29-l8-repas-inventaire-design.md), [protocole](docs/superpowers/specs/2026-10-30-l8-protocole-inventaire.md), [plan](docs/superpowers/plans/2026-10-29-l8-repas-inventaire.md).
+Branche `l8-repas-inventaire`, base L7 code8fb0784/reçu f7e836a. Revues A/B/C/root, poursuite autorisée sans relecture personnelle inventée.
+Cible0.30.0/DB6/archive7/SQL0013 ; aucun code ni test L8 à cette entrée. Public0.29.0. **L8–L10 et E1 restent à terminer.**
+
 
 **L7 — cuisine et minuteries : publié et vérifié.**
 [Spec](docs/superpowers/specs/2026-10-29-l7-cuisine-minuteurs-design.md), [protocole](docs/superpowers/specs/2026-10-30-l7-protocole-cuisine.md), [rapport](docs/superpowers/plans/2026-10-29-l7-cuisine-minuteurs.md).
