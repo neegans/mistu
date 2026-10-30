@@ -1,6 +1,6 @@
 # L4 — Éditeurs et brouillons durables
 
-Réception locale terminée ; publication autorisée, pas encore attestée dans cette révision.
+Réceptions locale et publique terminées ; code39a890a publié le29octobre2026 à20 h10 HAE.
 Branche `l4-editeurs-brouillons`, base publique `ea25232`, spécification `de858f9`.
 Cible0.26.0, cache `cuisine-os-v0.26.0-1`, DB6/archive3 inchangées, aucun SQL nouveau.
 Poursuite et publication autorisées par Neegan ; [contrat](../specs/2026-10-29-l4-editeurs-brouillons-design.md) relu techniquement avant construction.
@@ -26,10 +26,21 @@ Domaine/stockage : **129/129** assertions ciblées (brouillons24, publication53,
 
 Régressions ciblées : import710, classement470, passerelle288, traductions84, adaptation46, photos195, carnet301, thème81, I3intégration54, L1mutations32, L2mutations24 et synchronisation318. Les quatre nouvelles assertions de mutations vérifient précisément `cycle_change`, et pas seulement l’absence d’écriture.
 
-Node **232/232**, générateur de migrations `--check`0. Syntaxe de60 fichiers JavaScript et diff propres. Après raccord des scénarios et nettoyage des trois éditeurs de livre laissés dans des iframes de test, suite complète **8880/8880**, épingle8879 (+333 depuis L3, aucun retrait), zéro erreur JavaScript/requête extérieure. Le compteur a été ajusté seulement après mesure complète sans autre échec. La réception publique reste à effectuer après publication.
+Node **232/232**, générateur de migrations `--check`0. Syntaxe de60 fichiers JavaScript et diff propres. Après raccord des scénarios et nettoyage des trois éditeurs de livre laissés dans des iframes de test, suite complète **8880/8880**, épingle8879 (+333 depuis L3, aucun retrait), zéro erreur JavaScript/requête extérieure. Le compteur a été ajusté seulement après mesure complète sans autre échec. La réception publique confirme le même résultat8880/8880.
 
 ## Limites conservées
 
 Les brouillons restent sur cet appareil et hors archive/synchronisation. Une fermeture brutale peut perdre les touches non encore confirmées ; effacer les données du navigateur supprime les brouillons. Les avertissements et la récupération textuelle sont accessibles avant effacement.
 
 Pour une entrée d’historique étrangère sans index disponible, le repli conserve formulaire, adresse et état, sans garantir l’identité physique de l’entrée. Aucun essai physique iPhone/Safari, aucun compte privé et aucun appel assistant payé n’ont été utilisés. Groupes d’ingrédients, traduction automatique complète, révisions de sources et confort cuisine appartiennent aux lots suivants ; L5–L10 et E1 ne sont pas terminés.
+
+
+## Publication et réception publique
+
+Code **`39a890a036b0a463216e16ab0cae2bc71970510b`**, intégré en avance rapide dans `main` et poussé. GitHub Pages : construit le30octobre2026 à00:10:04UTC, soit le29octobre à20 h10 HAE, sans erreur de construction.
+
+Les **61 fichiers** de production/tests/SW/styles modifiés depuis L3 sont identiques au commit public. La suite sur le site public termine à **8880/8880**, sans erreur JavaScript ni requête extérieure.
+
+Chrome public en profils jetables : parcours principal **28 mesures**, recette corrigée puis métadonnées seules, livre repris/publié, création après rechargement hors ligne, note/photo retrouvées, dix modules nouveaux en cache unique0.26.0-1. Parcours C distinct **12 mesures**, quota et sorties, historique natif, deux onglets et copie séparée, première conservation terminée pendant un retour, changement de langue/dispose. Ce second harnais bloque le service worker et ne revendique donc pas une seconde preuve hors ligne. Captures inspectées.
+
+Preuves : `publication-fichiers.json`, `suite-publique.log/.resultat.json`, `parcours-public.log/.resultat.json`, parcours public livre/sorties et captures associés sous `.superpowers/sdd/2026-10-29-l4/`. Aucun SQL, compte privé ou appel assistant réel utilisé. Le lot L5 est préparé séparément ; les lots restants ne sont pas déclarés livrés par cette publication.

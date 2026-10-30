@@ -3691,3 +3691,6 @@ Relecture payée conservée avant affichage, sélection de source/compte/cycles 
 Archive3 et DB6 inchangées, aucun SQL ; remplacement change l’époque locale atomiquement, brouillons hors archive/synchronisation.
 **8880/8880** navigateur, épingle8879 (+333), Node232/232, générateur0, syntaxe60/diff propres. Réception Chrome28+12 mesures, deux onglets, quota/reprise/hors ligne, dix modules en cache0.26.0-1.
 Pas d’appareil physique iPhone/Safari ni compte privé/appel assistant réel. Limites de fermeture avant confirmation et d’historique étranger précisées au rapport. Publication autorisée par la poursuite globale ; son reçu public sera ajouté après vérification. L5–L10/E1 restent à réaliser.
+
+
+**L4 publié et reçu.** Code39a890a poussé dans main, Pages construit le29octobre20 h10 HAE (30octobre00:10:04UTC).61 fichiers publics identiques, suite publique8880/8880 sans erreur JavaScript/requête extérieure. Parcours publics28+12 mesures ; dix modules en cache0.26.0-1, création/photo/note après rechargement hors ligne. Reçu dans le rapport L4. L5 reprend ensuite, sans être inclus dans cette livraison.

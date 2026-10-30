@@ -1,6 +1,6 @@
-# STATE.md — Cuisine OS (Mistu) — 29 octobre 2026 — 0.26.0 LOCALE — L4 REÇU
+# STATE.md — Cuisine OS (Mistu) — 29 octobre 2026 — 0.26.0 EN LIGNE — L4 PUBLIÉ
 
-**L4 — Éditeurs et brouillons : réception locale terminée, publication autorisée à suivre.**
+**L4 — Éditeurs et brouillons : publié et vérifié.**
 [Spec](docs/superpowers/specs/2026-10-29-l4-editeurs-brouillons-design.md), [rapport](docs/superpowers/plans/2026-10-29-l4-editeurs-brouillons.md).
 Branche `l4-editeurs-brouillons`, base `9ecf826`, contrat `de858f9`, revues techniques avant construction.
 Formulaires structurés de recette/livre, source à côté ou bascule mobile, cinq sections, brouillons locaux repris explicitement.
@@ -12,7 +12,10 @@ Domaine129 assertions ; vrais parcours Chrome **28+12 mesures**, deux onglets, r
 création hors ligne, note/photo conservées, dix nouveaux modules dans le cache unique.
 **0.26.0**, cache `cuisine-os-v0.26.0-1`, DB6/archive3 inchangées, aucun SQL nouveau.
 Brouillons propres à l’appareil, hors archive/synchronisation ; touches non confirmées et historique étranger sans index restent limités.
-Aucun compte privé, appel assistant réel ou essai physique iPhone/Safari ; production encore0.25.0 à ce stade.
+Aucun compte privé, appel assistant réel ou essai physique iPhone/Safari.
+Code **39a890a**, avance rapide dans main, poussé ; GitHub Pages construit le29octobre à **20 h10 HAE (30octobre00:10:04UTC)**.
+**61 fichiers** publics identiques ; suite publique **8880/8880**, zéro erreur JavaScript/requête extérieure.
+Parcours publics **28+12 mesures**, reprise/conflits, dix modules en cache unique, création/photo/note après rechargement hors ligne.
 L5 est en préparation de contrat, sans code ; **L5–L10 et E1 restent à réaliser**.
 
 **L3 — Gestion visible : publié et vérifié.** Branche `l3-gestion-visible`, base publique `fc407df`.
