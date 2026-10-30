@@ -28,7 +28,12 @@ export async function demarrerApplication({document:doc=globalThis.document,base
  // t() dépend du métier, encore interdit à cette frontière : seules les deux langues de démarrage sont locales.
  const texte=(fr,en)=>String(langue||'').toLowerCase().startsWith('en')?en:fr;
  const resultat={etat:'verification',controle,reprendre,continuerEnLigne:()=>monter('en_ligne_non_verifiee')};
- const presenter=(message,choix=false)=>{if(!app)return;const titre=element(doc,'h1',texte('Démarrage de Mistu','Starting Mistu')),paragraphe=element(doc,'p',message);app.replaceChildren(titre,paragraphe);app.setAttribute('aria-busy',choix?'false':'true');if(choix){const reprendreBouton=element(doc,'button',texte('Reprendre le démarrage','Restart Mistu')),ligneBouton=element(doc,'button',texte('Continuer en ligne','Continue online'));reprendreBouton.type=ligneBouton.type='button';reprendreBouton.onclick=reprendre;ligneBouton.onclick=()=>void resultat.continuerEnLigne();app.append(reprendreBouton);if(admis!=='controlee')app.append(ligneBouton)}};
+ function afficherEchec(){
+  if(!app||enCours||resultat.etat!=='choix')return;const raison=controle.etat()?.echec?.raison,ancien=app.querySelector('[data-role="livraison-echec"]');
+  if(!raison){ancien?.remove();return}const avis=ancien||element(doc,'p');avis.dataset.role='livraison-echec';avis.textContent=texte('Installation hors ligne impossible ('+raison+').','Offline installation failed ('+raison+').');if(!ancien)app.insertBefore(avis,app.querySelector('button'));
+ }
+ const arreterEchec=controle.observer(afficherEchec);
+ const presenter=(message,choix=false)=>{if(!app)return;const titre=element(doc,'h1',texte('Démarrage de Mistu','Starting Mistu')),paragraphe=element(doc,'p',message);app.replaceChildren(titre,paragraphe);app.setAttribute('aria-busy',choix?'false':'true');if(choix){const reprendreBouton=element(doc,'button',texte('Reprendre le démarrage','Restart Mistu')),ligneBouton=element(doc,'button',texte('Continuer en ligne','Continue online'));reprendreBouton.type=ligneBouton.type='button';reprendreBouton.onclick=reprendre;ligneBouton.onclick=()=>void resultat.continuerEnLigne();app.append(reprendreBouton);if(admis!=='controlee')app.append(ligneBouton);afficherEchec()}};
  function reprendre(){if(resultat.etat==='montee'||enCours)return;try{sessionStorage?.setItem(cle,'1')}catch{}location.reload()}
  function autoReprise(){try{if(!sessionStorage||sessionStorage.getItem(cle)==='1')return false;sessionStorage.setItem(cle,'1')}catch{return false}resultat.etat='reprise';presenter(texte('La livraison est prête. Reprise du démarrage…','The release is ready. Restarting Mistu…'));location.reload();return true}
  async function verifierStable(){
@@ -50,9 +55,9 @@ export async function demarrerApplication({document:doc=globalThis.document,base
    admis=mode;await controle.verifier();
    if(mode==='en_ligne_non_verifiee'&&app){const avis=element(doc,'p',texte('Mistu s’ouvre en ligne. L’installation hors ligne sera réessayée au prochain lancement.','Mistu opens online. Offline installation will be retried at the next launch.'));avis.dataset.role='demarrage-non-verifie';avis.className='muted';app.replaceChildren(avis)}
    await chargerMetier({document:doc,baseURL:base,avantImport:async()=>{if(mode==='controlee'){const actuel=await verifierStable();if(actuel.etat!=='verifiee'||!controle.estCourante(actuel))throw Error('worker_change');try{sessionStorage?.removeItem(cle)}catch{}}monte=true;app?.removeAttribute('aria-busy');}});
-   resultat.etat='montee';return resultat;
+   resultat.etat='montee';arreterEchec();return resultat;
   }catch{resultat.etat='choix';presenter(admis==='controlee'?texte('Cette livraison ne peut pas être ouverte pour le moment. Reprenez le démarrage.','This release cannot be opened right now. Restart Mistu.'):texte('Le démarrage n’a pas pu terminer. Vous pouvez reprendre ou continuer en ligne.','Mistu could not finish starting. You can restart or continue online.'),true);return resultat}
-  finally{enCours=false}
+  finally{enCours=false;afficherEchec()}
  }
  presenter(texte('Vérification de la livraison de l’application…','Checking the application release…'));
  const delai=Number.isFinite(delaiInstallation)?Math.max(1,Math.min(30000,delaiInstallation)):15000;

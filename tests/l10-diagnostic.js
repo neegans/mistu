@@ -14,6 +14,40 @@ export async function runL10DiagnosticTests({eq,ok}){
 import {withRepo} from './sync-fixture.js';
 const attendre=async fn=>{for(let n=0;n<250;n++){if(await fn())return;await new Promise(r=>setTimeout(r,5));}throw Error('Diagnostic attendu absent');};
 
+export async function runAuditDiagnosticStockageTests({eq,ok}){
+  const {projeterDiagnosticApp,texteDiagnosticApp}=await import('../src/domain/diagnostic-app.js');
+  const {collecterDiagnosticApp,creerPanneauDiagnostic,renderSettings}=await import('../src/ui/settings.js');
+  const {getUiLocale,setUiLocale}=await import('../src/core/i18n.js');
+  const locale=getUiLocale(),secret='information-privee-non-affichee';
+  try{
+    setUiLocale('fr');
+    for(const [value,attendu]of [[true,true],[false,false],[null,null],[undefined,null],['true',null],[1,null],[{secret},null]]){
+      const d=projeterDiagnosticApp({stockage:{persistant:value,secret}});
+      eq(d.stockage.persistant,attendu,'audit stockage diagnostic : valeur stricte '+JSON.stringify(value));
+      eq(JSON.parse(texteDiagnosticApp(d)).stockage.persistant,attendu,'audit stockage diagnostic : valeur conservée dans copie '+JSON.stringify(value));
+    }
+    for(const [value,attendu,texte]of [[true,true,'oui'],[false,false,'non'],[secret,null,'inconnu']])await withRepo(async(repo,db)=>{
+      await db.put('sync_state',{key:'stockage_persistant',value,at:'2026-10-30T19:30:00.000Z',secret},{origin:'device'});
+      const d=await collecterDiagnosticApp({depot:repo,livraison:null,navigateur:{onLine:true,storage:{estimate:async()=>{throw Error(secret);}}}});
+      eq(d.stockage.persistant,attendu,'audit stockage diagnostic : résultat lu même si estimate échoue '+texte);
+      eq(d.stockage.quota_estime,null,'audit stockage diagnostic : aucun quota inventé '+texte);
+      ok(!texteDiagnosticApp(d).includes(secret),'audit stockage diagnostic : ni marqueur brut ni exception dans copie '+texte);
+      const root=await renderSettings({}, {},{settings:await repo.getSettings(),sync:{user:null,auth:null,guard:null}});
+      try{eq(root.querySelector('[data-role=stockage-persistant]')?.textContent,'Stockage protégé contre l’éviction : '+texte,'audit stockage diagnostic : état visible sans Copier '+texte);}
+      finally{root.dispose?.();root.remove();}
+    });
+    const p=creerPanneauDiagnostic({stockagePersistant:true,collecter:async()=>projeterDiagnosticApp({stockage:{persistant:false}}),navigateur:{clipboard:{writeText:async()=>{throw Error('refus');}}}});document.body.append(p);
+    try{
+      eq(p.querySelector('[data-role=stockage-persistant]')?.textContent,'Stockage protégé contre l’éviction : oui','audit stockage diagnostic : état initial réel');
+      p.querySelector('button').click();await attendre(()=>p.querySelector('textarea').value);
+      eq(p.querySelector('[data-role=stockage-persistant]')?.textContent,'Stockage protégé contre l’éviction : non','audit stockage diagnostic : collecte actualise état visible');
+      eq(JSON.parse(p.querySelector('textarea').value).stockage.persistant,false,'audit stockage diagnostic : résultat visible et copie identiques');
+    }finally{p.dispose();p.remove();}
+    setUiLocale('en');const en=creerPanneauDiagnostic({stockagePersistant:true});
+    try{eq(en.querySelector('[data-role=stockage-persistant]')?.textContent,'Storage protected from eviction: yes','audit stockage diagnostic : libellé anglais');}finally{en.dispose();}
+  }finally{setUiLocale(locale);}
+}
+
 export async function runL10DiagnosticCollecteTests({eq,ok}){
   const {collecterDiagnosticApp,creerPanneauDiagnostic}=await import('../src/ui/settings.js');
   await withRepo(async(repo,db)=>{
@@ -22,7 +56,7 @@ export async function runL10DiagnosticCollecteTests({eq,ok}){
     let verifications=0;const observation={etat:'inconnue',execution:{release:'0.32.0-1',mode:'en_ligne_non_verifiee'},controleur:null,actif:null,attente:null};
     const livraison={verifier:async()=>{verifications++;return observation;},estCourante:o=>o===observation};
     const d=await collecterDiagnosticApp({depot:repo,livraison,navigateur:{onLine:false,storage:{estimate:async()=>{throw Error(secret);}}}});
-    eq(d.envois.en_attente,1,'L10 diagnostic réel : file du propriétaire seulement');eq(d.envois.bloques,1,'L10 diagnostic réel : commande bloquée comptée');eq(d.fichiers,{declares:2,locaux:1,manquants:1,octets_locaux:3},'L10 diagnostic réel : référence sans ligne fichier reste manquante');eq(d.stockage,{utilisation_estimee:null,quota_estime:null},'L10 diagnostic réel : quota illisible reste inconnu');eq(d.erreurs.quota,1,'L10 diagnostic réel : code connu agrégé');ok(!JSON.stringify(d).includes(secret),'L10 diagnostic réel : aucun titre/compte/exception dans la sortie');eq(verifications,1,'L10 diagnostic réel : un contrôle explicite de livraison');eq(await db.count('outbox'),2,'L10 diagnostic réel : collecte sans écriture');
+    eq(d.envois.en_attente,1,'L10 diagnostic réel : file du propriétaire seulement');eq(d.envois.bloques,1,'L10 diagnostic réel : commande bloquée comptée');eq(d.fichiers,{declares:2,locaux:1,manquants:1,octets_locaux:3},'L10 diagnostic réel : référence sans ligne fichier reste manquante');eq(d.stockage,{utilisation_estimee:null,quota_estime:null,persistant:null},'L10 diagnostic réel : quota illisible et protection inconnue restent explicites');eq(d.erreurs.quota,1,'L10 diagnostic réel : code connu agrégé');ok(!JSON.stringify(d).includes(secret),'L10 diagnostic réel : aucun titre/compte/exception dans la sortie');eq(verifications,1,'L10 diagnostic réel : un contrôle explicite de livraison');eq(await db.count('outbox'),2,'L10 diagnostic réel : collecte sans écriture');
     let copies=0;const p=creerPanneauDiagnostic({collecter:async()=>d,navigateur:{clipboard:{writeText:async()=>{copies++;throw Error(secret);}}}});document.body.append(p);
     try{p.querySelector('[data-role=copier-diagnostic]').click();await attendre(()=>p.querySelector('textarea').value);const texte=p.querySelector('textarea');ok(!texte.hidden&&texte.readOnly,'L10 diagnostic écran : repli textuel sélectionnable');ok(!texte.value.includes(secret),'L10 diagnostic écran : repli déjà expurgé');eq(copies,1,'L10 diagnostic écran : une seule demande presse-papiers');ok(p.textContent.includes('Copie impossible'),'L10 diagnostic écran : aucun faux copié');}
     finally{p.dispose();p.remove();}

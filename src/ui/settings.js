@@ -11,6 +11,7 @@ import { reprendreEnvoi, retirerEnvoi, fileDe, estDeCeCompte } from '../sync/out
 import {obtenirControleLivraison} from '../core/livraison.js';
 import {creerRechercheMiseAJour} from './mise-a-jour.js';
 import {projeterDiagnosticApp,texteDiagnosticApp} from '../domain/diagnostic-app.js';
+import {CLE_STOCKAGE_PERSISTANT} from '../domain/stockage-persistant.js';
 import { estCommandeTraduction, estPhaseJournalTraduction } from '../sync/commandes-traduction.js';
 import { estCommandeCuisine } from '../sync/commandes-cuisine.js';
 import { estCommandeInventaire } from '../sync/commandes-inventaire.js';
@@ -71,28 +72,30 @@ async function compteursDiagnostic(base) {
 export async function collecterDiagnosticApp({depot=repo,livraison=obtenirControleLivraison(),navigateur=navigator,estCourante=()=>true,getGeneration=getSyncGeneration,maintenant=()=>new Date().toISOString(),preparation=null}={}){
   const base=depot.db,generation=getGeneration();const valide=()=>depot.db===base&&getGeneration()===generation&&estCourante();
   if(!valide())throw Error('contexte_change');
-  const [db,coquille,stockage]=await Promise.allSettled([compteursDiagnostic(base),livraison?.verifier(),navigateur.storage?.estimate?.()]);
+  const [db,coquille,stockage,persistance]=await Promise.allSettled([compteursDiagnostic(base),livraison?.verifier(),navigateur.storage?.estimate?.(),base.get('sync_state',CLE_STOCKAGE_PERSISTANT)]);
   if(!valide())throw Error('contexte_change');let compte=db.status==='fulfilled'?db.value:null;
   if(compte){try{const [owner,epoch]=await Promise.all([base.get('sync_state','user_id'),base.get('sync_state','editor_library_epoch:v1')]);if(!valide()||(owner?.value??null)!==compte.owner||JSON.stringify(epoch??null)!==JSON.stringify(compte.epoque))throw Error('contexte_change');}catch(e){if(e?.message==='contexte_change')throw e;compte=null;}}
   const observation=coquille.status==='fulfilled'&&livraison?.estCourante(coquille.value)?coquille.value:null;
   return projeterDiagnosticApp({version:APP_VERSION,observe_le:maintenant(),livraison:observation,reseau:navigateur.onLine===true?'en_ligne':navigateur.onLine===false?'hors_ligne':'inconnu',
     proprietaire:compte?compte.owner===null?'absent':'present':'inconnu',envois:compte?.envois,fichiers:compte?.fichiers,erreurs:compte?.erreurs,
-    stockage:stockage.status==='fulfilled'?{utilisation_estimee:stockage.value?.usage,quota_estime:stockage.value?.quota}:null,preparation});
+    stockage:{...(stockage.status==='fulfilled'?{utilisation_estimee:stockage.value?.usage,quota_estime:stockage.value?.quota}:{}),persistant:persistance.status==='fulfilled'?persistance.value?.value:null},preparation});
 }
 
-export function creerPanneauDiagnostic({collecter=collecterDiagnosticApp,navigateur=navigator,estCourante=()=>true}={}){
+export function creerPanneauDiagnostic({collecter=collecterDiagnosticApp,navigateur=navigator,estCourante=()=>true,stockagePersistant=null}={}){
   let detruit=false,enCours=false;
+  const libelleStockage=value=>value===true?t('Stockage protégé contre l’éviction : oui'):value===false?t('Stockage protégé contre l’éviction : non'):t('Stockage protégé contre l’éviction : inconnu');
+  const protection=el('p',{class:'muted',dataset:{role:'stockage-persistant'}},libelleStockage(stockagePersistant));
   const etat=el('p',{role:'status',class:'muted'}),texte=el('textarea',{readOnly:true,hidden:true,rows:12,'aria-label':t('Diagnostic expurgé'),class:'diagnostic-texte'});
   const bouton=el('button',{type:'button',class:'btn',dataset:{role:'copier-diagnostic'},onClick:async()=>{
     if(detruit||enCours||!estCourante())return;enCours=true;bouton.disabled=true;etat.textContent=t('Lecture du diagnostic…');
-    try{const resultat=await collecter({estCourante:()=>!detruit&&estCourante()}),copie=texteDiagnosticApp(resultat);if(detruit||!estCourante())return;texte.value=copie;texte.hidden=false;
+    try{const resultat=await collecter({estCourante:()=>!detruit&&estCourante()}),copie=texteDiagnosticApp(resultat);if(detruit||!estCourante())return;texte.value=copie;texte.hidden=false;protection.textContent=libelleStockage(resultat?.stockage?.persistant);
       try{if(typeof navigateur.clipboard?.writeText!=='function')throw Error('presse_papiers');await navigateur.clipboard.writeText(copie);if(!detruit&&estCourante())etat.textContent=t('Diagnostic copié.');}
       catch{if(!detruit&&estCourante())etat.textContent=t('Copie impossible. Tu peux sélectionner le diagnostic ci-dessous.');}
     }catch{if(!detruit&&estCourante()){texte.value='';texte.hidden=true;etat.textContent=t('Le diagnostic n’a pas pu être relu. Réessaie sur cet écran.');}}
     finally{enCours=false;if(!detruit)bouton.disabled=false;}
   }},t('Copier le diagnostic'));
   const root=section(t('Diagnostic à partager'),el('p',null,t('Ce diagnostic contient des versions, des compteurs et des états, sans texte de recette, photo ni identité du compte. Les tailles du navigateur sont des estimations.')),
-    el('p',{class:'muted'},t('Les fichiers comptés sont ceux référencés dans cette bibliothèque. Leur présence ne certifie pas leur lecture hors ligne. Une valeur inconnue reste indiquée comme telle.')),bouton,etat,texte);
+    el('p',{class:'muted'},t('Les fichiers comptés sont ceux référencés dans cette bibliothèque. Leur présence ne certifie pas leur lecture hors ligne. Une valeur inconnue reste indiquée comme telle.')),protection,bouton,etat,texte);
   root.classList.add('diagnostic-app');
   // Lecture ponctuelle : préserver son attente et son résultat sans déclarer une saisie à enregistrer.
   root.retientVue=()=>!detruit&&root.isConnected&&(enCours||!texte.hidden);
@@ -105,7 +108,8 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
   const s = ctx.settings;
   const root = el('div', {class:'reglages-page'}, pageHeader(t('Réglages'), { subtitle: `Cuisine OS ${APP_VERSION}` }));
   let detruit=false;
-  const diagnostic=creerPanneauDiagnostic({estCourante:()=>!detruit&&root.isConnected});
+  const baseStockage=repo.db,stockageLigne=await baseStockage.get('sync_state',CLE_STOCKAGE_PERSISTANT).catch(()=>null);
+  const diagnostic=creerPanneauDiagnostic({estCourante:()=>!detruit&&root.isConnected,stockagePersistant:repo.db===baseStockage?stockageLigne?.value:null});
   const miseAJour=creerRechercheMiseAJour({livraison:obtenirControleLivraison(),estCourante:()=>!detruit&&root.isConnected});
   root.append(miseAJour);
   root.dispose=()=>{detruit=true;diagnostic.dispose();miseAJour.dispose();};

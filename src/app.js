@@ -1,3 +1,4 @@
+import { demanderStockagePersistant } from './domain/stockage-persistant.js';
 import { remplacerRacineApplication } from './core/racine-application.js';
 import { renderCorbeille } from './ui/corbeille.js';
 // Entrée métier après décision du démarrage : base, langue, coquille et routeur.
@@ -349,6 +350,8 @@ async function boot() {
     // La porte attend un geste ; si elle casse, l'app s'ouvre quand même (invariant I4).
     try { await porteDEntree(); }
     catch (error) { logError('porte', { error }); }
+    // La demande peut rester pendante : les routes s'ouvrent sans attendre le navigateur.
+    void demanderStockagePersistant().catch(error => logError('stockage.persistant', { error }));
     // Après la porte, avant les routes : la synchronisation ne doit jamais empêcher l'app de s'ouvrir (I4).
     try { demarrerMoteur(); }
     catch (error) { logError('sync.moteur', { error }); }

@@ -11,17 +11,31 @@ export function creerControleLivraison({releasePage,baseURL,serviceWorker=global
  const base=normaliserPorteeLivraison(baseURL);if(!releaseValide(releasePage))throw new ErreurLivraison('livraison_incompatible');
  const delai=Number.isFinite(delaiMs)?Math.max(1,Math.min(LIMITES_LIVRAISON.delaiMax,delaiMs)):LIMITES_LIVRAISON.delai;
  const delaiRecherche=Number.isFinite(delaiRechercheMs)?Math.max(1,Math.min(60000,delaiRechercheMs)):30000;
- let registration=null,epoch=0,detruit=false,observation=null,verification=null,recherche=null,arreterRecherche=null,admis=false,relireApres=false;
+ let registration=null,epoch=0,detruit=false,observation=null,verification=null,recherche=null,arreterRecherche=null,admis=false,relireApres=false,echec=null,numeroTentative=0,dernierSucces=0;
  let execution={release:releasePage,mode:'en_ligne_non_verifiee',manifest_sha256:null};
  const callbacks=new Set(),preuves=new WeakMap(),requêtes=new Map(),terminer=new Set(),abonnements=new Map();
+ const sourcesConnues=new WeakSet(),tentatives=new WeakMap();
+ const tentative=worker=>{if(!tentatives.has(worker))tentatives.set(worker,++numeroTentative);return tentatives.get(worker)};
  const cibles=()=>[serviceWorker?.controller||null,registration?.active||null,registration?.waiting||null,registration?.installing||null];
  const sameTargets=(a,b)=>a.every((x,i)=>x===b[i]);
  const inconnu=w=>w?{release:null,manifest_sha256:null,complete:null}:null;
  const notifier=()=>{for(const cb of callbacks){try{cb(observation)}catch{/* Un écran ne bloque pas les autres abonnés. */}}};
- function poser(etat,raison,stats){const targets=cibles();observation=figer({etat,execution:{...execution},controleur:stats?.[0]??inconnu(targets[0]),actif:stats?.[1]??inconnu(targets[1]),attente:stats?.[2]??inconnu(targets[2]),raison,verifieLe:maintenant()});preuves.set(observation,{epoch,registration,targets});notifier();return observation;}
+ function poser(etat,raison,stats){const targets=cibles();observation=figer({etat,execution:{...execution},controleur:stats?.[0]??inconnu(targets[0]),actif:stats?.[1]??inconnu(targets[1]),attente:stats?.[2]??inconnu(targets[2]),raison,echec:echec?{raison:echec.raison}:null,verifieLe:maintenant()});preuves.set(observation,{epoch,registration,targets});notifier();return observation;}
  const estCourante=obs=>{const p=preuves.get(obs);return !detruit&&obs===observation&&p?.epoch===epoch&&p.registration===registration&&sameTargets(p.targets,cibles())};
  const invalider=()=>{if(detruit)return;epoch++;for(const fin of [...terminer])fin({data:null,raison:'worker_change'});poser('inconnue','worker_change');ecouter();if(verification)relireApres=true;else void verifier();};
- function ecouter(){const prochains=new Map();if(serviceWorker)prochains.set(serviceWorker,['controllerchange']);if(registration)prochains.set(registration,['updatefound']);for(const w of cibles())if(w)prochains.set(w,['statechange']);for(const [objet,events] of abonnements)if(!prochains.has(objet)){for(const event of events)objet.removeEventListener?.(event,invalider);abonnements.delete(objet)}for(const [objet,events] of prochains)if(!abonnements.has(objet)){for(const event of events)objet.addEventListener?.(event,invalider);abonnements.set(objet,events)}}
+ function ecouter(){const prochains=new Map();if(serviceWorker)prochains.set(serviceWorker,['controllerchange']);if(registration)prochains.set(registration,['updatefound']);for(const w of cibles())if(w){prochains.set(w,['statechange']);sourcesConnues.add(w);if(w===registration?.installing)tentative(w)}for(const [objet,events] of abonnements)if(!prochains.has(objet)){for(const event of events)objet.removeEventListener?.(event,invalider);abonnements.delete(objet)}for(const [objet,events] of prochains)if(!abonnements.has(objet)){for(const event of events)objet.addEventListener?.(event,invalider);abonnements.set(objet,events)}}
+ function recevoirEchec(event){
+  const d=event.data,w=event.source;
+  if(detruit||!d||typeof d!=='object'||Array.isArray(d)||Object.keys(d).sort().join(',')!=='manifest_sha256,raison,release,scope,type'||d.type!=='livraison_echec'||d.scope!==base||!releaseValide(d.release)||typeof d.manifest_sha256!=='string'||/^[a-f0-9]{64}$/.exec(d.manifest_sha256)?.[0]!==d.manifest_sha256||!['shell_invalid','shell_incomplete','quota','indisponible'].includes(d.raison)||w?.scriptURL!==new URL('sw.js',base).href||!['installing','redundant'].includes(w.state))return;
+  // Une tentative connue exige son identité. Au premier install rapide, getRegistration peut déjà
+  // avoir perdu le worker redundant : portée exacte + script exact + DTO fermé restent nécessaires.
+  if((registration?.installing||dernierSucces)&&registration?.installing!==w&&!sourcesConnues.has(w))return;
+  const ordre=tentative(w);if(ordre<=dernierSucces||echec&&ordre<echec.tentative)return;
+  sourcesConnues.add(w);echec={raison:d.raison,release:d.release,manifest_sha256:d.manifest_sha256,tentative:ordre};
+  // Le diagnostic B ne change ni l’epoch ni la preuve de la coquille A. Une preuve périmée est relue.
+  if(observation&&estCourante(observation))poser(observation.etat,observation.raison,[observation.controleur,observation.actif,observation.attente]);
+  else if(observation)void verifier();
+ }
  function demander(worker){
   if(!worker)return Promise.resolve({data:null,raison:null});
   if(worker.scriptURL!==new URL('sw.js',base).href||worker.state==='redundant')return Promise.resolve({data:null,raison:'portee_incompatible'});
@@ -49,6 +63,9 @@ export function creerControleLivraison({releasePage,baseURL,serviceWorker=global
   if(detruit)return poser('inconnue','dispose');
   if(depart!==epoch||registration!==reg&&!!reg||!sameTargets(targets,cibles()))return poser('inconnue','worker_change');
   const stats=resultats.map((r,i)=>!targets[i]?null:r.data?{release:r.data.release,manifest_sha256:r.data.manifest_sha256,complete:r.data.complete}:inconnu(targets[i]));
+  // Relire A complet ne suffit pas à effacer l’échec B : il faut B réparé ou une tentative suivante prouvée.
+  for(let i=0;i<resultats.length;i++)if(resultats[i].data?.complete)dernierSucces=Math.max(dernierSucces,tentatives.get(targets[i])||0);
+  if(echec&&(dernierSucces>=echec.tentative||resultats.some(r=>r.data?.complete&&r.data.release===echec.release&&r.data.manifest_sha256===echec.manifest_sha256))){dernierSucces=Math.max(dernierSucces,echec.tentative);echec=null;}
   const ctrl=stats[0];let etat,raison=null;
   if(!admis||execution.mode==='en_ligne_non_verifiee'||!targets[0]){etat='non_controlee';raison='non_controlee'}
   else if(!ctrl?.release){etat='inconnue';raison=resultats[0].raison||'indisponible'}
@@ -97,9 +114,9 @@ export function creerControleLivraison({releasePage,baseURL,serviceWorker=global
    })();
   }).finally(()=>{recherche=null;});return recherche;
  }
- const service={verifier,rechercherMiseAJour,etat:()=>observation,estCourante,observer:cb=>{if(typeof cb!=='function'||detruit)return()=>{};callbacks.add(cb);return()=>callbacks.delete(cb)},dispose(){if(detruit)return;detruit=true;epoch++;arreterRecherche?.();for(const fin of [...terminer])fin({data:null,raison:'dispose'});for(const [objet,events]of abonnements)for(const event of events)objet.removeEventListener?.(event,invalider);abonnements.clear();callbacks.clear();if(singleton===service)singleton=null;}};
+ const service={verifier,rechercherMiseAJour,etat:()=>observation,estCourante,observer:cb=>{if(typeof cb!=='function'||detruit)return()=>{};callbacks.add(cb);return()=>callbacks.delete(cb)},dispose(){if(detruit)return;detruit=true;epoch++;arreterRecherche?.();serviceWorker?.removeEventListener?.('message',recevoirEchec);for(const fin of [...terminer])fin({data:null,raison:'dispose'});for(const [objet,events]of abonnements)for(const event of events)objet.removeEventListener?.(event,invalider);abonnements.clear();callbacks.clear();if(singleton===service)singleton=null;}};
  internes.set(service,{detruit:()=>detruit,admettre(mode,manifest){if(admis){if(mode!==execution.mode||manifest!==execution.manifest_sha256)throw new ErreurLivraison('execution_invalide');return}if(mode==='controlee'){const p=preuves.get(observation);if(!estCourante(observation)||!observation.controleur?.complete||observation.controleur.release!==releasePage||observation.controleur.manifest_sha256!==manifest||p.targets[0]!==p.targets[1])throw new ErreurLivraison('execution_invalide')}else if(manifest!==null)throw new ErreurLivraison('execution_invalide');execution={release:releasePage,mode,manifest_sha256:manifest};admis=true;epoch++;observation=null;}});
- ecouter();return service;
+ serviceWorker?.addEventListener?.('message',recevoirEchec);ecouter();return service;
 }
 
 // Une seule surveillance appartient à l'application, indépendamment du montage des vues.

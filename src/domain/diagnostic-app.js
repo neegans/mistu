@@ -27,7 +27,7 @@ export function projeterDiagnosticApp(source={}) {
     reseau:enumDe(source?.reseau,['en_ligne','hors_ligne']),proprietaire:enumDe(source?.proprietaire,['present','absent']),
     envois:comptes(source?.envois,['en_attente','bloques','conflits']),
     fichiers:comptes(source?.fichiers,['declares','locaux','manquants','octets_locaux']),
-    stockage:comptes(source?.stockage,['utilisation_estimee','quota_estime']),erreurs:comptes(source?.erreurs,['reseau','quota','refus','autre']),
+    stockage:{...comptes(source?.stockage,['utilisation_estimee','quota_estime']),persistant:typeof source?.stockage?.persistant==='boolean'?source.stockage.persistant:null},erreurs:comptes(source?.erreurs,['reseau','quota','refus','autre']),
     preparation:preparation(source?.preparation)};
 }
 export function texteDiagnosticApp(diagnostic) {

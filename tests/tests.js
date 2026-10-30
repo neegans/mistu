@@ -1,3 +1,6 @@
+import {runAuditLivraisonEchecTests} from './audit-livraison-echec.js';
+import {runAuditStockagePersistantTests} from './audit-stockage-persistant.js';
+import {runAuditDiagnosticStockageTests} from './l10-diagnostic.js';
 import {runAuditCycleConflitsTests} from './audit-cycle-conflits.js';
 import {runAuditPurgeImportsTests} from './audit-purge-imports.js';
 import {runAuditConflitsTests} from './audit-conflits.js';
@@ -697,7 +700,10 @@ try { await runL7VoixTests({eq,ok}); } catch (e) { ok(false, 'runL7VoixTests : '
 try { await runAuditConflitsTests({eq,ok}); } catch (e) { ok(false, 'runAuditConflitsTests : ' + (e.stack || e)); }
 try { await runAuditPurgeImportsTests({eq,ok}); } catch (e) { ok(false, 'runAuditPurgeImportsTests : ' + (e.stack || e)); }
 try { await runAuditCycleConflitsTests({eq,ok}); } catch (e) { ok(false, 'runAuditCycleConflitsTests : ' + (e.stack || e)); }
-eq(results.length, 11936,'compte d’assertions : une assertion qui disparait est un rouge');
+try { await runAuditLivraisonEchecTests({eq,ok}); } catch (e) { ok(false, 'runAuditLivraisonEchecTests : ' + (e.stack || e)); }
+try { await runAuditStockagePersistantTests({eq,ok}); } catch (e) { ok(false, 'runAuditStockagePersistantTests : ' + (e.stack || e)); }
+try { await runAuditDiagnosticStockageTests({eq,ok}); } catch (e) { ok(false, 'runAuditDiagnosticStockageTests : ' + (e.stack || e)); }
+eq(results.length, 12062,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

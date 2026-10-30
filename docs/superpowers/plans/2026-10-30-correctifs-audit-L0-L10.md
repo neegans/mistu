@@ -126,14 +126,14 @@
 - Modifier : `src/core/livraison.js` (exposer `observation.echec = { raison } | null`), `src/demarrage.js` (afficher la raison sur l'écran de choix), `src/app.js` (après admission : `navigator.storage?.persist?.()` une fois ; résultat dans `sync_state` clé `stockage_persistant` `{ value: boolean, at }`), `src/ui/settings.js` (Diagnostic : ligne « Stockage protégé contre l’éviction : oui/non/inconnu »)
 - Tests : `tools/livraison-worker.test.mjs`, `tests/l10-demarrage.js`, `tests/l10-diagnostic.js`
 
-- [ ] **Étape 1 : tests rouges** :
+- [x] **Étape 1 : tests rouges** :
   - (worker, Node) `audit I2 : activate purge les caches cuisine-os-v* etrangers` : caches `cuisine-os-v0.31.0-1`, `cuisine-os-v0.32.0-5` (courant), `cuisine-os-meta` → après `activate`, seuls le courant et `meta` restent.
   - (worker, Node) `audit I5 : un echec d'installation est signale` : `recevoir` lève `shell_invalid` → `clients.matchAll()` reçoivent `{ type:'livraison_echec', raison:'shell_invalid' }` et le cache partiel est supprimé (comportement actuel conservé).
   - (app) `audit I5 : l'echec est lisible` : message `livraison_echec` reçu → `controle.verifier()` rend `observation.echec.raison === 'shell_invalid'` et l'écran de choix contient « Installation hors ligne impossible (shell_invalid). ».
   - (app) `audit I3 : persist demande une fois` : `navigator.storage.persist` factice compté → 1 appel sur deux démarrages ; `sync_state.stockage_persistant.value === true`.
   - (diagnostic) la ligne « Stockage protégé » reflète `sync_state`.
-- [ ] **Étape 2 : rouge. Étape 3 : implémenter (activate : `caches.keys()` → supprimer tout nom commençant par `cuisine-os-v` différent de `c.cache`, jamais `c.meta`).**
-- [ ] **Étape 4 : `node --test` vert, suite verte, `generer-livraison` (le worker change : suffixe), commit** `feat(livraison): stockage persistant, echec d'installation visible, purge des anciens caches (audit I2 I3 I5)`.
+- [x] **Étape 2 : rouge. Étape 3 : implémenter (activate : `caches.keys()` → supprimer tout nom commençant par `cuisine-os-v` différent de `c.cache`, jamais `c.meta`).**
+- [x] **Étape 4 : `node --test` vert, suite verte, `generer-livraison` (le worker change : suffixe), commit** `feat(livraison): stockage persistant, echec d'installation visible, purge des anciens caches (audit I2 I3 I5)`.
 
 ### Tâche 8 : Migration `0014_maintenance_et_bornes.sql` — ÉCRITE, JAMAIS APPLIQUÉE
 
