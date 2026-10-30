@@ -814,11 +814,11 @@ test('README racine (F-2) : plus de cle ni de fournisseur a configurer — l ass
   const r = lire('README.md');
   for (const motif of [/Anthropic configur/, /clé réelle/, /Tester/, /compatible OpenAI/, /compte Anthropic/, /Anthropic seulement/, /assistant Anthropic/, /dans Réglages\)/, /clé locale/]) assert.doesNotMatch(r, motif, 'README racine : ' + motif);
   assert.ok(r.includes("Web (avec l'assistant, une fois connecté)"), 'la ligne de la recherche Web');
-  // Une phrase, aux deux endroits qui parlaient de configurer : la ligne du tableau et la verification sur appareil.
+  // Le tableau porte le contrat utilisateur ; l'introduction nomme la passerelle serveur.
   const tableau = r.split('\n').find((l) => l.startsWith('| Assistant IA'));
   assert.ok(tableau && tableau.includes('servi par ton compte') && tableau.includes('la clé vit côté serveur') && tableau.includes('rien à configurer'), 'tableau : ' + tableau);
-  const verif = r.split('\n').find((l) => l.startsWith('5. '));
-  assert.ok(verif && verif.includes('servi par le compte') && verif.includes('la clé vit côté serveur') && verif.includes('rien à configurer'), 'verification 5 : ' + verif);
+  const verif = r.split('\n').find((l) => l.startsWith('Mistu conserve'));
+  assert.ok(verif && verif.includes('les appels de l’assistant passent par la fonction serveur du projet'), 'passerelle documentée : ' + verif);
   assert.ok(r.includes("Un appel à l'assistant par clic"), 'Creer avec l IA : un appel a l assistant par clic');
 });
 

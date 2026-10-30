@@ -93,8 +93,13 @@ export function protegerSaisie(noeud) {
   return () => saisiesMontees.delete(saisie);
 }
 function saisieEnCours() {
+  return observerSaisiesMontees().nombre > 0;
+}
+// La seule exclusion admise est le nœud exact du contrôleur réellement consulté.
+// Ne pas exposer les formulaires ni leurs valeurs au diagnostic de livraison.
+export function observerSaisiesMontees({exclure = null} = {}) {
   for (const saisie of saisiesMontees) if (!saisie.noeud?.isConnected) saisiesMontees.delete(saisie);
-  return saisiesMontees.size > 0;
+  return Object.freeze({nombre:[...saisiesMontees].filter(saisie=>saisie.noeud !== exclure).length});
 }
 
 // La passe vient-elle de se terminer en ayant ÉCRIT quelque chose ? Question à part, et volontairement séparée de

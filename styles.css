@@ -791,3 +791,26 @@ button.chip { font: inherit; cursor: pointer; min-width: 44px; min-height: 44px;
   dialog[open] { animation: l9-apparition 180ms ease-out; }
   @keyframes l9-apparition { from { opacity: .65; } to { opacity: 1; } }
 }
+
+/* L10 : disponibilité et mise à jour restent dans le flux, avec leurs commandes au clavier. */
+.mise-a-jour { width: calc(100% - 2rem); max-width: 1068px; margin: 1rem auto 0; }
+.mise-a-jour, .hors-ligne-repas, .diagnostic-app { min-width: 0; overflow-wrap: anywhere; }
+.hors-ligne-details, .hors-ligne-details .card, .hors-ligne-details .row { min-width: 0; max-width: 100%; }
+.hors-ligne-repas { padding: min(.9rem, 16px); }
+.hors-ligne-details .card { padding: min(.9rem, 12px); }
+.hors-ligne-repas .btn { padding-inline: min(.75rem, 8px); }
+.hors-ligne-recettes select { flex: 1 1 12rem; }
+.hors-ligne-medias label.row { align-items: flex-start; flex-wrap: nowrap; min-height: 44px; cursor: pointer; }
+.hors-ligne-medias label.row > span { min-width: 0; }
+.hors-ligne-medias input[type=checkbox] { flex: 0 0 auto; width: 1.25rem; height: 1.25rem; margin: .2em 0; accent-color: var(--action); }
+.hors-ligne-repas [data-role=bilan-hors-ligne] { font-weight: 600; }
+.hors-ligne-repas[data-etat=pret] [data-role=bilan-hors-ligne] { color: var(--ok); }
+.hors-ligne-repas[data-etat=partiel] [data-role=bilan-hors-ligne],
+.hors-ligne-repas[data-etat=perime] [data-role=bilan-hors-ligne] { color: var(--warn); }
+.diagnostic-texte { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Les anciens libellés techniques des Réglages restent lisibles à texte agrandi. */
+.reglages-page .btn { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
+.reglages-page code, .reglages-page .chip { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
+.reglages-page { overflow-wrap: anywhere; }
+/* À texte agrandi, le titre d'un plat passe sous sa photo plutôt que devenir une colonne de lettres. */
+.repas-fiche .photo-visible.vignette-plat + div { min-width: min(100%, 10rem) !important; }

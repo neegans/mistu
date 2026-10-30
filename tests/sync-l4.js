@@ -1,3 +1,4 @@
+import {lireLivraison} from './livraison-fixture.js';
 // Suite du lot G « Les photos voyagent entre appareils » (spec 2026-10-19, rév. 4) : données, projection, réception et capture (tâche 1),
 // archive (2), Storage factice et passe fichiers (3), moteur (4), Réglages (5), écrans (6). Bases jetables, aucun réseau, aucune clé.
 // Chaque assertion nomme le mutant qu'elle tue (rejoués sur une copie à la clôture).
@@ -509,11 +510,11 @@ export async function runSyncL4Tests({ eq, ok }) {
   });
 
   await run('statique tâche 1', async () => {
-    const sw = await lire('../sw.js');
-    ok(sw.includes("'./src/sync/fichiers.js'"), 'SHELL : ./src/sync/fichiers.js (atteignable par pull.js dès la tâche 1, F-5)');
-    ok(/VERSION = 'cuisine-os-v0\.31\.0-\d+'/.test(sw), 'sw.js : VERSION 0.31.0');
+    const sw = await lireLivraison();
+    ok(sw.chemins.includes('./src/sync/fichiers.js'), 'SHELL : ./src/sync/fichiers.js (atteignable par pull.js dès la tâche 1, F-5)');
+    ok(/^0\.32\.0-[1-9]\d*$/.test(sw.release), 'manifeste : livraison 0.32.0');
     const { APP_VERSION, DB_VERSION } = await import('../src/model/schema.js');
-    eq([APP_VERSION, DB_VERSION], ['0.31.0', 6], 'T1 (lot UI-1, carnet) : APP_VERSION 0.31.0, DB_VERSION 6 (index corbeille des livres) (D-G11 : 0.11.0 au lot G ; 0.12.0 au lot C ; 0.13.0 au lot D ; 0.14.0 au lot E ; 0.15.0 au lot F ; 0.16.0 à UI-2)');
+    eq([APP_VERSION, DB_VERSION], ['0.32.0', 6], 'T1 (lot UI-1, carnet) : APP_VERSION 0.32.0, DB_VERSION 6 (index corbeille des livres) (D-G11 : 0.11.0 au lot G ; 0.12.0 au lot C ; 0.13.0 au lot D ; 0.14.0 au lot E ; 0.15.0 au lot F ; 0.16.0 à UI-2)');
     const { MODULES_NEUFS } = await import('./ajouter.js');
     ok(MODULES_NEUFS.includes('../src/sync/fichiers.js'), 'filet i18n : MODULES_NEUFS contient src/sync/fichiers.js');
   });
@@ -1761,8 +1762,8 @@ export async function runSyncL4Tests({ eq, ok }) {
     const src = await lire('../src/sync/transport.js');
     ok(src.length > 1000 && src.includes('export function createStockage'), 'statique : transport.js est lu et porte createStockage (garde contre un source vide)');
     eq(['.getPublicUrl(', '.createSignedUrl(', '.remove('].filter((m) => src.includes(m)), [], 'I-G6 : ni URL publique, ni URL signée, ni suppression dans le seul module qui tient client.storage (test de texte, faible, admis)');
-    const sw = await lire('../sw.js');
-    const modules = [...sw.matchAll(/'\.\/(src\/[^']+\.js)'/g)].map((m) => m[1]).filter((m) => !m.includes('/vendor/'));
+    const sw = await lireLivraison();
+    const modules = sw.modules.filter((m) => !m.includes('/vendor/'));
     const porteurs = []; const lisentEnLigne = [];
     for (const m of modules) {
       const s = await lire('../' + m);
@@ -3502,9 +3503,9 @@ export async function runSyncL4Tests({ eq, ok }) {
   });
 
   await run('statique tâche 6', async () => {
-    const sw = await lire('../sw.js');
-    const v = /VERSION = 'cuisine-os-v0\.31\.0-(\d+)'/.exec(sw); // ronde 1 : le libellé dit ce que le test vérifie (le -\d+ seul acceptait -1)
-    ok(!!v && Number(v[1]) >= 1, 'sw.js : VERSION 0.31.0-N avec N ≥ 1 (lot UI-1 ; le seuil N ≥ 6 de la clôture des écrans du lot G valait sous 0.11.0)');
+    const sw = await lireLivraison();
+    const v = /^0\.32\.0-([1-9]\d*)$/.exec(sw.release); // ronde 1 : le libellé dit ce que le test vérifie (le -\d+ seul acceptait -1)
+    ok(!!v && Number(v[1]) >= 1, 'manifeste : livraison 0.32.0-N avec N ≥ 1 (lot UI-1 ; le seuil N ≥ 6 de la clôture des écrans du lot G valait sous 0.11.0)');
     const { EN } = await import('../src/i18n/en.js');
     const neuves = ['Page', 'Télécharger', 'Télécharger les {n} pages', 'Téléchargement…', 'Le téléchargement n’a pas abouti.', 'Pas encore sur cet appareil', 'Connecte-toi pour la télécharger', 'Pas encore envoyée par l’appareil qui l’a prise', 'Pas encore reçue', 'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', 'Photos : {n}/{m} sauvegardées sur le serveur'];
     eq(neuves.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'en.js : chaque chaîne neuve des écrans a sa traduction (dont « Page », l’alt de vignettePage)');

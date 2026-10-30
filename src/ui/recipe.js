@@ -144,12 +144,27 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const original = currentVersion(recipe, versions.filter((v) => v.kind !== 'adaptation' && v.kind !== 'synthesis')) || null;
   const adaptations = versions.filter((v) => v.kind === 'adaptation' || v.kind === 'synthesis');
   // `?v=` n'est suivi que pour une version de CETTE fiche (ronde 1) : une version d'une autre recette (adresse forgée, lien ancien) n'est jamais
-  // affichée ici — sa lecture, son bandeau et son import ne sont pas ceux de cette fiche ; retour à la version courante.
+  // affichée ici — sa lecture, son bandeau et son import ne sont pas ceux de cette fiche ; recours courant explicite.
   const demandee = query.v ? ctx.versionsById.get(query.v) : null;
+  // Un lien exact ne doit jamais annoncer la préparation d'une autre version.
+  if (Object.hasOwn(query,'v') && (!demandee || demandee.recipe_id !== recipe.id)) return el('div',{class:'stack',dataset:{role:'version-demandee-indisponible'}},
+    pageHeader(t('Version demandée indisponible')),
+    el('p',null,t('La version indiquée par ce lien n’est pas disponible dans cette recette.')),
+    el('a',{class:'btn',href:lienAvecOrigine(`/recipes/${rid}`,origine)},t('Voir la version courante')));
+
   let version = (demandee?.recipe_id === recipe.id ? demandee : null) || original || versions[0] || null;
   const actionsCommunes=actionsRecette({recipe,version,ctx,origine},deps);
-  const state = { servings: query.servings ? Number(query.servings) : version?.servings || null, units: ctx.settings.units, lang: query.lang || ctx.settings.reading_locale || 'original', diet: '', onglet: 'ingredients', translationId:null };
+  const state = { servings: query.servings ? Number(query.servings) : version?.servings || null, units: ctx.settings.units, lang: query.lang || ctx.settings.reading_locale || 'original', diet: '', onglet: 'ingredients', translationId:query.translation||null };
   const lecturePreparee=version?await preparerLectureRecette({recipe,version,traductions:ctx.recipe_translations||[]}):null;
+  if(Object.hasOwn(query,'translation')){
+    const exacte=lecturePreparee?.lectures.find(x=>x.row.id===query.translation&&x.row.locale===state.lang);
+    if(!exacte||!['courante','partielle'].includes(exacte.lecture.etat))return el('div',{class:'stack',dataset:{role:'traduction-demandee-indisponible'}},
+      pageHeader(recipe.display_title||recipe.original_title),el('p',{role:'status'},t('Traduction demandée indisponible')),
+      el('a',{class:'btn',href:lienAvecOrigine(`/recipes/${rid}${buildQuery({v:version.id,lang:'original'})}`,origine)},t('Voir l’original')),
+      ...(lecturePreparee?.lectures||[]).filter(x=>x.row.locale===state.lang&&['courante','partielle'].includes(x.lecture.etat)).map((x,i)=>
+        el('a',{class:'btn',href:lienAvecOrigine(`/recipes/${rid}${buildQuery({v:version.id,lang:state.lang,translation:x.row.id})}`,origine)},t('Traduction {n}',{n:i+1}))));
+  }
+
   if(version&&!lectureSeule){
     const secondaire=(id,libelle,extra)=>({id,libelle:t(libelle),nomAccessible:t(libelle),eligible:true,...extra});
     const lienSecondaire=(id,libelle,href)=>{const a=secondaire(id,libelle,{verifier:actionsCommunes.find(a=>a.id==='modifier')?.verifier});Object.defineProperty(a,'href',{get:href});return a;};

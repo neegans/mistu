@@ -1,3 +1,4 @@
+import {lireLivraison} from './livraison-fixture.js';
 // Tests du lot UI-1 « Carnet » (spec docs/superpowers/specs/2026-10-23-experience-carnet-design.md, § 7 « Tests neufs »). Tâche 1 : jetons olive
 // et la paire neuve, typographie (une formule clamp() par titre), sectionPlain, pageHeader({ classeTitre, back }), icones.js (vingt-trois noms,
 // aria-hidden, currentColor, levée sur un nom inconnu), emptyState à nom d'icône, et les filets de source du lot (onze états vides, NAV, retours,
@@ -146,8 +147,8 @@ export async function runCarnetTests({ eq, ok }) {
     // écran) ; le premier argument de chaque appel est un littéral de N'IMPORTE QUELLE forme ('…', "…", `…` sans ${}) dont le texte est un nom du jeu — un
     // émoji, un nom hors du jeu ou une expression (constante, String.fromCodePoint…) tombent dans horsJeu. Rien n'est retiré du texte : un appel laissé
     // en commentaire compte aussi (plus strict ; un « 'image/*' » ouvrirait un faux commentaire et cacherait du code à un retrait par expression).
-    const shell = await lire('../sw.js');
-    const modulesUi = [...shell.matchAll(/'\.\/(src\/ui\/[a-z0-9-]+\.js)'/g)].map((m) => m[1]);
+    const shell = await lireLivraison();
+    const modulesUi = shell.modules.filter(p => p.startsWith('src/ui/'));
     const releve = {}; const horsJeu = [];
     for (const f of modulesUi) {
       const args = [...(await lire('../' + f)).matchAll(/(?<!function\s+)\bemptyState\(\s*([^,)]*)/g)].map((m) => { const a = m[1].trim(); return /^(['"`])([^'"`$]*)\1$/.exec(a)?.[2] ?? a; });
@@ -180,7 +181,7 @@ export async function runCarnetTests({ eq, ok }) {
       'D-UI-4 / R-UI-P1 (rendu) : la recherche garde son segment « Mes livres » (une portée de recherche, pas l’écran Bibliothèque), actif en mode books ; son état vide porte l’icône « loupe » au trait');
     const { EN } = await import('../src/i18n/en.js');
     eq([EN['Bibliothèque'], EN['Aller à la bibliothèque.'], 'Aller à Mes livres.' in EN, EN['Mes livres']], ['Library', 'Go to the library.', false, 'My books'], '§ 5 : en.js porte « Library » et « Go to the library. », a perdu « Go to My books. » (chaîne retirée du source) et garde « My books » (segment de la recherche)');
-    eq([shell.includes("'./src/ui/icones.js'"), MODULES_NEUFS.includes('../src/ui/icones.js')], [true, true], 'I-UI-7 / § 7 T1 : ./src/ui/icones.js dans SHELL (sw.js) et dans le filet i18n MODULES_NEUFS (tests/ajouter.js:8)');
+    eq([shell.chemins.includes('./src/ui/icones.js'), MODULES_NEUFS.includes('../src/ui/icones.js')], [true, true], 'I-UI-7 / § 7 T1 : ./src/ui/icones.js dans SHELL (sw.js) et dans le filet i18n MODULES_NEUFS (tests/ajouter.js:8)');
   });
 
   // --- Tâche 1, ronde 1 (M15) — rendus : un état vide de module rendu par son écran (il lève sur un nom inconnu : l'écran planterait), et le texte de la
@@ -1722,9 +1723,9 @@ export async function runCarnetTests({ eq, ok }) {
     eq(sansEntree, [], 'T6 i18n (calculé) : toute clé t() de library.js, recipe.js, book.js, home.js et components.js a son entrée en.js, hors les 78 clés antérieures au lot sans entrée (inventaire figé à f3672be) — un texte neuf sans anglais rougit, listé ou non');
     eq(['../src/ui/accueil-livre.js', '../src/ui/import-web.js', '../src/ui/import-cible.js', '../src/ui/add.js', '../src/ui/icones.js'].filter((m) => !MODULES_NEUFS.includes(m)), [], 'T6 i18n : accueil-livre.js, import-web.js, import-cible.js, add.js et icones.js sont dans MODULES_NEUFS (scannés en entier ; icones.js : S14 — ni innerHTML, ni html: ; pour icones.js, doublon du filet de T1 : filet de clôture)');
     // Les chaînes retirées ont quitté en.js, les filets ET chaque module de SHELL (sw.js lu comme un tableau, X4 du lot C).
-    const sw = await lireT6('../sw.js');
+    const sw = await lireLivraison();
     // Le TABLEAU SHELL, sans ses commentaires (la forme X4 du lot C, tests/table-matieres.js:1674) ; seuls les modules de src/ hors vendor sont relus.
-    const shell = [...(sw.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] ?? '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    const shell = sw.chemins;
     ok(shell.length > 30 && shell.includes('./src/ui/icones.js'), `T6 SHELL : lu comme un tableau (${shell.length} entrées) et il porte ./src/ui/icones.js (doublon du filet SHELL de T1 : filet de clôture)`);
     const srcShell = Object.fromEntries(await Promise.all(shell.filter((m) => m.startsWith('./src/') && m.endsWith('.js') && !m.includes('/vendor/')).map(async (m) => [m, await lireT6('.' + m)])));
     const restes = CHAINES_RETIREES.flatMap((c) => [

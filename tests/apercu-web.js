@@ -1,3 +1,4 @@
+import {lireLivraison} from './livraison-fixture.js';
 // Tests du lot UI-2 « Aperçus des résultats web » (spec docs/superpowers/specs/2026-10-23-experience-carnet-design.md, § 4.6, § 6, § 7 UI-2 ;
 // rulings du chef R-UI2-1, R-UI2-6, R-UI2-7, R-UI2-9 du brief de la tâche 2).
 // Domaine (lireApercusWeb, preparerPhotoDistante sans ré-encodage) sur des réponses fixes et un fetch factice ; écran (search.js) à gestes injectés,
@@ -741,11 +742,11 @@ export async function runApercuWebTests({ eq, ok }) {
     });
 
     await run('statiques : SHELL, filet i18n, aucune marque dans le domaine, test de source I-F3, styles.css (I-UI-2, S-16, R-UI2-9)', async () => {
-      const sw = await lire('../sw.js');
+      const sw = await lireLivraison(vraiFetch);
       const { MODULES_NEUFS } = await import('./ajouter.js');
       const srcA = await lire('../src/domain/apercu-web.js');
       const srcS = await lire('../src/ui/search.js');
-      ok(sw.length > 300 && sw.includes("'./src/domain/apercu-web.js'"), 'SHELL : ./src/domain/apercu-web.js (le graphe d’imports de tests/sync.js l’exige aussi)');
+      ok(sw.octets > 300 && sw.chemins.includes('./src/domain/apercu-web.js'), 'SHELL : ./src/domain/apercu-web.js (le graphe d’imports de tests/sync.js l’exige aussi)');
       ok(MODULES_NEUFS.includes('../src/domain/apercu-web.js'), 'MODULES_NEUFS (tests/ajouter.js) : apercu-web.js est scanné par le filet i18n');
       eq([srcA.length > 300, /Anthropic|Supabase/i.test(srcA), /\bt\(/.test(srcA)], [true, false, false], 'apercu-web.js : lu ; ne nomme ni le fournisseur ni la base ; aucun texte d’écran (t) dans le domaine');
       eq([srcS.length > 300, /(?:\bsrc\s*:|\.src\s*=)\s*['"`]https?:/.test(srcS), srcS.includes("from '../domain/apercu-web.js'"), srcS.includes("'plat-vignette grande'")], [true, false, true, true], 'search.js : aucun src d’image https écrit en dur (I-F3) ; importe le domaine des aperçus ; la figure garde la classe plat-vignette (révocation D-T9)');

@@ -1,3 +1,4 @@
+import {lireLivraison} from './livraison-fixture.js';
 // Tests du lot « Chercher sur le web » (spec docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md).
 // Fonctions pures sur des réponses fixes ; rendus DOM à gestes injectés ; aucun réseau ; aucun history.* réel.
 export async function runRechercheWebTests({ eq, ok }) {
@@ -65,11 +66,11 @@ export async function runRechercheWebTests({ eq, ok }) {
 
   // --- § 8 : version 0.17.0 (lot UI-1 « Carnet » ; 0.16.0 au lot UI-2, aperçus ; 0.15.0 au lot F, plats en images ; 0.14.0 au lot E, 0.13.0 au lot D, 0.12.0 au lot C, 0.11.0 au lot G, 0.10.0 au lot B, 0.9.0 au lot A, 0.8.1 à la présentation du serveur), SHELL
   {
-    const sw = await lire('../sw.js');
-    ok(/VERSION = 'cuisine-os-v0\.31\.0-\d+'/.test(sw), 'sw.js : VERSION 0.31.0');
-    ok(sw.includes("'./src/core/bornes.js'"), 'SHELL : ./src/core/bornes.js');
+    const sw = await lireLivraison();
+    ok(/^0\.32\.0-[1-9]\d*$/.test(sw.release), 'manifeste : livraison 0.32.0');
+    ok(sw.chemins.includes('./src/core/bornes.js'), 'SHELL : ./src/core/bornes.js');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.31.0', 'APP_VERSION 0.31.0 (lot UI-1, carnet)');
+    eq(APP_VERSION, '0.32.0', 'APP_VERSION 0.32.0 (lot UI-1, carnet)');
   }
 
   // --- § 7.1 : supportsWebSearch lu par l'écran (F6) — seule la passerelle (une SESSION) cherche sur le web
@@ -291,8 +292,8 @@ export async function runRechercheWebTests({ eq, ok }) {
       eq(W.choisirLiens({ resultats: [R, R2], texte: 'pas du json' }), { liens: [{ ...R, ...NULS }, { ...R2, ...NULS }], autres: [], repli: true }, 'choix : repli → les résultats tels quels, quatre champs à null');
       eq(W.choisirLiens({ resultats: [R, R2], texte: JSON.stringify({ choix: [{ url: R.href, presentation: 'P', temps_min: 9, difficulte: 'moyen', ingredients: 4 }] }) }), { liens: [{ ...R, presentation: 'P', temps_min: 9, difficulte: 'moyen', ingredients: 4 }], autres: [{ ...R2, ...NULS }], repli: false }, 'choix : les pages « autres » portent les quatre champs à null');
     }
-    const sw = await lire('../sw.js');
-    ok(sw.includes("'./src/domain/recherche-web.js'"), 'SHELL : ./src/domain/recherche-web.js');
+    const sw = await lireLivraison();
+    ok(sw.chemins.includes('./src/domain/recherche-web.js'), 'SHELL : ./src/domain/recherche-web.js');
     ok(!/from '\.\.\/ui\//.test(await lire('../src/domain/recherche-web.js')), 'recherche-web.js : n’importe rien de src/ui/ (couche domaine)');
   }
 

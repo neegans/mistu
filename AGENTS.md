@@ -11,7 +11,7 @@ Langue : français partout (échanges, textes d'écran, documents). Neegan est l
 
 ## Le projet en une minute
 
-- PWA **sans étape de build** : modules ES natifs sous `src/`, aucune dépendance npm, aucun bundler.
+- PWA en modules ES natifs sous `src/`, aucune dépendance npm ni bundler. Depuis L10, un générateur produit l’inventaire et le worker de livraison, sans transformer les modules.
 - Données locales dans IndexedDB (`src/core/db.js`, schéma `src/model/schema.js`), synchronisées avec Supabase (projet `mitsu`).
   Toute écriture passe par `src/model/repo.js` (`repo.save`, `repo.saveBatch`, `repo.transitionner` pour une écriture conditionnée).
 - L'assistant (Claude) n'est JAMAIS appelé directement : tout passe par la fonction `assistant` de `mitsu`
@@ -35,23 +35,19 @@ Langue : français partout (échanges, textes d'écran, documents). Neegan est l
 
 ## À chaque changement de code
 
-- `sw.js` : `VERSION` (`cuisine-os-v<APP_VERSION>-<n>`) +1 à chaque commit qui touche `src/`, `styles.css` ou `index.html` ; tout module neuf
-  ajouté à la liste `SHELL`.
-- Un nouveau lot monte `APP_VERSION` (`src/model/schema.js`, aujourd'hui `0.18.0`) et les épingles de version des tests (fichiers qui
-  contiennent `0.18.0` sous `tests/` : `ajouter.js`, `assistant-compte.js`, `classement.js`, `creer-ia.js`, `passerelle.js`,
-  `recherche-web.js`, `sync-l4.js`).
-- `tests/tests.js` épingle le nombre total d'assertions (`eq(results.length, N, …)`, aujourd'hui 6245) : N = le nombre d'assertions AVANT
+- Livraison L10 : monter le suffixe de livraison dans `index.html` lorsqu’un fichier de la coquille change, puis lancer `node tools/generer-livraison.mjs` après gel du code. Ne pas modifier à la main `sw.js` ou `livraison-manifeste.json`. Le générateur refuse de changer les octets sous une livraison déjà produite ; `--check` vérifie sans écrire. Les entrées et imports calculés autorisés sont dans `tools/livraison-entrees.mjs`.
+- Un nouveau lot monte `APP_VERSION` (`src/model/schema.js`) et les épingles de version sous `tests/`. Versions courantes et reçus : tête de `STATE.md`.
+- `tests/tests.js` épingle le nombre total d'assertions (`eq(results.length, N, …)`) : N = le nombre d'assertions AVANT
   cette ligne ; le bilan affiché vaut N + 1. Le remettre à la valeur mesurée, et dire pourquoi s'il baisse.
-- `DB_VERSION` (aujourd'hui 4) ne monte que pour un index IndexedDB neuf. Des champs JSON neufs sur une fiche n'en demandent pas.
+- `DB_VERSION` ne monte que pour un changement de structure IndexedDB. Des champs JSON neufs sur une fiche n'en demandent pas.
 
 ## Tests
 
-Tu n'as pas de terminal dans VibeForge : écris les tests, et demande à Neegan de les lancer (session « Terminal classique », après avoir
-arrêté ta session sur ce dossier). Ne dis jamais « ça passe » sans le bilan lu.
+Utiliser le terminal et le navigateur quand ils sont disponibles. Sinon, écrire les tests et indiquer précisément les vérifications non exécutées. Ne dis jamais « ça passe » sans le bilan lu.
 
 - Suite navigateur (la référence) : `python3 -m http.server 8080` à la racine, puis ouvrir `http://localhost:8080/tests/` et lire le
   bilan (« ✅ N/N tests réussis » ; seule erreur console attendue : le 404 de `/favicon.ico`). Recharger sans cache après chaque modification.
-- Outils Node : `node --test --test-concurrency=1 tools/*.test.mjs` (aujourd'hui 230/230) et `node tools/generer-migrations.mjs --check` (0).
+- Outils Node : `node --test --test-concurrency=1 tools/*.test.mjs`, `node tools/generer-migrations.mjs --check` et `node tools/generer-livraison.mjs --check` (0).
 - Les tests de l'écran passent par des bases jetables et un `fetch` injecté : aucun appel réel à l'assistant dans la suite.
 - Écrire le test d'abord (rouge), puis le code. Un test ne cherche jamais une chaîne dans le source : il observe un comportement.
 

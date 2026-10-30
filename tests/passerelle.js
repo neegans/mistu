@@ -1,3 +1,4 @@
+import {lireLivraison} from './livraison-fixture.js';
 // Tests du lot « Passerelle de l'assistant », tâche 3 (spec docs/superpowers/specs/2026-10-18-passerelle-assistant-design.md).
 // L'app n'appelle plus jamais api.anthropic.com : elle poste à la fonction `assistant` de Supabase avec la SESSION de la personne
 // (Authorization: Bearer <access_token>) et la clé PUBLIQUE du projet (apikey). Aucune clé ici : seul un jeton factice. Zéro réseau :
@@ -678,8 +679,8 @@ export async function runPasserelleTests({ eq, ok }) {
 
   // --- Absence de toute clé et de tout appel direct : lue dans les SOURCES (les modules de la coquille)
   {
-    const sw = await lire('../sw.js');
-    const modules = [...sw.matchAll(/'\.\/(src\/[^']+\.js)'/g)].map((m) => m[1]);
+    const sw = await lireLivraison();
+    const modules = sw.modules;
     ok(modules.length > 50 && modules.includes('src/domain/passerelle.js'), `absence : la liste SHELL est lue (${modules.length} modules, passerelle.js compris) — sans quoi les inclusions ci-dessous ne prouveraient rien`);
     const sources = await Promise.all(modules.map(async (m) => [m, await lire('../' + m)]));
     const lus = sources.filter(([, s]) => !s.startsWith('ERREUR'));
@@ -689,10 +690,10 @@ export async function runPasserelleTests({ eq, ok }) {
     }
     const passerelle = lus.find(([m]) => m === 'src/domain/passerelle.js')?.[1] ?? '';
     ok(!/from '\.\.\/ui\//.test(passerelle), 'passerelle.js : n’importe rien de src/ui/ (couche domaine)');
-    ok(sw.includes("'./src/domain/passerelle.js'"), 'SHELL : ./src/domain/passerelle.js');
-    ok(/VERSION = 'cuisine-os-v0\.31\.0-\d+'/.test(sw), 'sw.js : VERSION 0.31.0');
+    ok(sw.chemins.includes('./src/domain/passerelle.js'), 'SHELL : ./src/domain/passerelle.js');
+    ok(/^0\.32\.0-[1-9]\d*$/.test(sw.release), 'manifeste : livraison 0.32.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.31.0', 'APP_VERSION 0.31.0 (lot UI-1, carnet)');
+    eq(APP_VERSION, '0.32.0', 'APP_VERSION 0.32.0 (lot UI-1, carnet)');
   }
 
   // --- Lot F (spec plats-en-images § 4.6) : deux raisons de plus, écrites par la passerelle pour image-web et relayées telles quelles

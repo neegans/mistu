@@ -11,6 +11,7 @@ import { purgerAnciens } from './conflits.js';
 import { createFichiers, compterFichiers, lireErreursFichiers, MAGASINS_FICHIERS } from './fichiers.js';
 import { setClockOffset } from './clock.js';
 import { logError } from '../core/log.js';
+import {egalesLecturesHorsLigne} from '../domain/hors-ligne.js';
 
 // Lot G (§ 3.6) : les compteurs de fichiers au repos — toujours présents, à zéro tant qu'aucune passe n'a compté.
 const FICHIERS_AU_REPOS = Object.freeze({ aEnvoyer: 0, aTelecharger: 0, octetsATelecharger: 0, enErreur: 0, typeInconnu: 0, copiesPerimees: 0, copiesSansServeur: 0, aRenvoyer: 0 });
@@ -472,8 +473,23 @@ export function createMoteur({
   }
   const actualiserEspace = () => geste(async () => appliquerEspace(await fichiers.mesurerEspace())); // hors passe : lister ne touche pas la base avant la fin
   const renvoyerEnOriginale = () => geste(() => ecrireEtRelancer(cleDatee('renvoi_originale'), 'renvoi'));
-  function reessayerFichier(sha256) {
+  function reessayerFichier(sha256, options) {
     const cle = 'file_error:' + sha256;
+    // L10 : un geste de réception ne peut effacer une erreur d'envoi apparue depuis l'écran.
+    if(options!==undefined){
+      const attendu=structuredClone(options.erreurAttendue),uid=getUserId();
+      const refuse=()=>({refuse:true,raison:'erreur_fichier_changee'});
+      if(options.sensAttendu!=='reception'||attendu?.key!==cle||attendu?.value?.sens!=='reception')return Promise.resolve(refuse());
+      return geste(async()=>{
+        try{
+          await db.mutate({origin:'device',deletes:{sync_state:[cle]},conditions:{sync_state:[
+            {key:cle,fusion:row=>{if(arrete||getUserId()!==uid||!egalesLecturesHorsLigne(row,attendu))throw Object.assign(Error('erreur_fichier_changee'),{code:'erreur_fichier_changee'});return null;}},
+            {key:'user_id',fusion:row=>{if(!uid||row?.value!==uid||arrete||getUserId()!==uid)throw Object.assign(Error('erreur_fichier_changee'),{code:'erreur_fichier_changee'});return null;}}
+          ]}});
+        }catch(error){if(error?.code==='erreur_fichier_changee'||error?.message==='erreur_fichier_changee')return arrete?ARRETE:refuse();throw error;}
+        return arrete?ARRETE:getUserId()!==uid?refuse():telecharger([sha256]);
+      },{exigeStockage:false});
+    }
     return geste(async () => {
       const ligne = await db.get('sync_state', cle);
       if (arrete) return ARRETE; // la clé n'est pas retirée après l'arrêt

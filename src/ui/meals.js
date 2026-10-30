@@ -24,6 +24,7 @@ import { groupesRepas,jourRepas,jourCivilValide,portionsSaisies,fusionChampsRepa
 import {creerGardeRepas,protectionFormulaireRepas} from './repas-garde.js';
 import {protegerSortieEditeur} from './sortie-editeur.js';
 import {lienAvecOrigine} from './navigation-contexte.js';
+import {creerPreparationHorsLigne} from './hors-ligne-repas.js';
 
 export async function renderMeals(params, query, ctx) {
   const root=el('div',{class:'repas-groupes'},pageHeader(t('Repas'),{actions:[el('button',{class:'btn primary',onClick:()=>newMeal(ctx)},t('Nouveau repas'))]}));
@@ -87,7 +88,7 @@ export async function renderMeal(params, query, ctx, deps = {}) {
   const ctxF = await contexteFichiers(ctx);
   const meal = ctx.meals.find((m) => m.id === params.id);
   if (!meal) return el('div', { class: 'card' }, t('Repas introuvable.'));
-  let creationListe=null,envoiListe=false,copieRepas=null,recopieEnCours=false;
+  let creationListe=null,envoiListe=false,copieRepas=null,recopieEnCours=false,preparationHorsLigne=null;
   const mealAffiche = structuredClone(meal);
   let confirme=structuredClone(mealAffiche),dispose=false;const planification={serve_at:meal.serve_at??null,planned_on:meal.planned_on??null};
   const R={...repo,...(deps.repo||{})},garde=creerGardeRepas(R,ctx,()=>!dispose);
@@ -96,7 +97,7 @@ export async function renderMeal(params, query, ctx, deps = {}) {
   const items = meal.items.map((it) => ({ ...it, recipe: ctx.recipesById.get(it.recipe_id), version: it.recipe_version_id ? ctx.versionsById.get(it.recipe_version_id) : null }));
   const mentions = items.filter(it=>it.recipe&&!recetteActiveDansContexte(it.recipe, ctx)).map(it=>mentionCycleRecette(it.recipe, ctx?.editionsById?.get(it.recipe.edition_id)));
   const main = items.find((it) => it.recipe&&it.role === 'plat_principal') || items.find(it=>it.recipe);
-  const root = el('div', {class:'repas-fiche'}),saisie=protectionFormulaireRepas(root,()=>[...root.querySelectorAll('input')].map(i=>i.value).join('\n')),liberer=protegerSortieEditeur({racine:root,controleur:saisie.controleur});root.dispose=()=>{dispose=true;liberer();};root.flushEditeur=()=>saisie.controleur.flush();root.etatEditeur=saisie.controleur.etat;
+  const root = el('div', {class:'repas-fiche'}),saisie=protectionFormulaireRepas(root,()=>[...root.querySelectorAll('input')].map(i=>i.value).join('\n')),liberer=protegerSortieEditeur({racine:root,controleur:saisie.controleur});root.dispose=()=>{dispose=true;preparationHorsLigne?.dispose();liberer();};root.flushEditeur=()=>saisie.controleur.flush();root.etatEditeur=saisie.controleur.etat;
   const save = async (champs, recettes = []) => {
     const attendu=structuredClone(confirme);const generations=new Map(champs.map(k=>[k,saisie.modifier(k)]));
     const changements = Object.fromEntries(champs.map(champ => [champ, structuredClone(meal[champ])]));
@@ -147,7 +148,7 @@ export async function renderMeal(params, query, ctx, deps = {}) {
     // d'une vignette, le bloc prend la place qui reste (flex 1, min-width 0) — sans quoi l'enveloppe .row (flex-wrap) le renvoyait SOUS la vignette dès
     // que le titre ne tenait plus sur sa ligne (D-F9 : la vignette à gauche du titre) ; sans vignette, aucun style.
     const vignette = vignettePlat(it.recipe, { photo: photoPrincipale(it.recipe, photosPersonnelles), ctxF });
-    const bloc = el('div', vignette ? { style: { flex: '1', minWidth: '0' } } : null, el('a', { href: `#/recipes/${it.recipe.id}?v=${it.recipe_version_id || ''}` }, el('strong', null, it.recipe.display_title || it.recipe.original_title)), ' ', versionBadge(it.version, it.recipe),
+    const bloc = el('div', vignette ? { style: { flex: '1', minWidth: '0' } } : null, el('a', { href: lienAvecOrigine(`/recipes/${encodeURIComponent(it.recipe.id)}${buildQuery({v:it.recipe_version_id})}`) }, el('strong', null, it.recipe.display_title || it.recipe.original_title)), ' ', versionBadge(it.version, it.recipe),
       // S8 : l'hôte d'un signet est RECALCULÉ depuis l'adresse, ici comme ailleurs — `source_label` stocké peut
       // venir d'une archive ou du serveur et nommer n'importe quel site (S7). C-2 : une fiche IA est « Créée avec l’IA », texte de
       // libelleSource rendu ici par t() (seul ce texte-là est une clé ; un libellé libre de la personne n'est jamais traduit).
@@ -184,6 +185,7 @@ export async function renderMeal(params, query, ctx, deps = {}) {
     el('div', { class: 'row', style: { marginTop: '.8rem' } },
       el('button', { class: 'btn primary', onClick: makeList, disabled: !items.some((it) => it.version) }, t('Voir mes courses')),
       el('button', { class: 'btn', onClick: startCooking, disabled: !items.some((it) => it.version) }, t('Cuisiner ensemble')),
+      el('button',{class:'btn',dataset:{role:'preparer-hors-ligne'},onClick:()=>{preparationHorsLigne?.dispose();preparationHorsLigne?.remove();preparationHorsLigne=creerPreparationHorsLigne({meal:mealAffiche,ctx,repo:R,moteur:ctx.sync?.moteur,estCourante:()=>!dispose,...(deps.livraison?{livraison:deps.livraison}:{})});root.append(preparationHorsLigne);preparationHorsLigne.scrollIntoView({block:'nearest'});}},t('Préparer hors ligne')),
       el('button', { class: 'btn', onClick: feedback }, t('Noter ce repas')))));
 
   const fb = ctx.meal_feedback.filter((f) => f.meal_id === meal.id).sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));

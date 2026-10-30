@@ -3,7 +3,57 @@
 const routes = [];
 let notFound = null;
 const gardesSortie = new Set();
-export function enregistrerGardeSortie(garde) { gardesSortie.add(garde); return () => gardesSortie.delete(garde); }
+const contratsSortie = new Map(), demandesExplicites = new WeakMap();
+export function enregistrerGardeSortie(garde, contrat = {}) {
+  gardesSortie.add(garde); contratsSortie.set(garde, contrat);
+  return () => { gardesSortie.delete(garde); contratsSortie.delete(garde); };
+}
+const refusExplicite = raison => ({issue:'refuse',raison});
+const MOTIFS_CONSERVATION = new Set(['formulaire_ouvert','contrat_incomplet','contexte_change','saisie_locale','lecture_en_cours','a_conserver','conservation_echouee','rester']);
+export function demanderGardeExplicite({intention, racine, estCourante = () => true} = {}) {
+  if (!racine || !['conserver','revoir_sortie'].includes(intention)) return Promise.resolve(refusExplicite('contrat_incomplet'));
+  const precedente = demandesExplicites.get(racine);
+  if (precedente) return precedente.intention === intention ? precedente.promise : Promise.resolve(refusExplicite('conservation_echouee'));
+  const valide = () => { try { return racine.isConnected && estCourante() === true; } catch { return false; } };
+  if (!valide()) return Promise.resolve(refusExplicite('contexte_change'));
+  let saisieChangee = false;
+  const frappe = () => { saisieChangee = true; };
+  for (const nom of ['input','change']) racine.addEventListener(nom, frappe, true);
+  const promesse = (async () => {
+    // Import littéral tardif : le registre de saisie existe déjà dans l'app ; aucune navigation ni écriture.
+    const {observerSaisiesMontees} = await import('../ui/state.js');
+    if (!valide()) return refusExplicite('contexte_change');
+    const candidates = [...contratsSortie].filter(([,c]) => c.racine?.isConnected && (c.racine === racine || racine.contains(c.racine)));
+    if (candidates.length > 1) return refusExplicite('contrat_incomplet');
+    const [garde, contrat] = candidates[0] || [];
+    const cible = contrat?.racine || racine;
+    const complet = typeof cible.flushEditeur === 'function' && typeof cible.etatEditeur === 'function';
+    const connu = typeof contrat?.demanderExplicite === 'function' || complet;
+    if ([...contratsSortie.values()].some(c=>!c.racine)) return refusExplicite('contrat_incomplet');
+    const autreSaisie = () => observerSaisiesMontees({exclure:connu ? cible : null}).nombre > 0;
+    if (autreSaisie()) return refusExplicite('formulaire_ouvert');
+    if (!connu) return (candidates.length || cible.flushEditeur || cible.etatEditeur) ? refusExplicite('contrat_incomplet') : {issue:'sans_saisie_suivie'};
+    const toujoursValide = () => valide() && (!garde || contratsSortie.get(garde) === contrat);
+    let resultat;
+    if (contrat?.demanderExplicite) resultat = await contrat.demanderExplicite({intention,estCourante:toujoursValide});
+    else {
+      const etatAvant = cible.etatEditeur();
+      if (!etatAvant || typeof etatAvant.sale !== 'boolean' || typeof etatAvant.enCours !== 'boolean') return refusExplicite('contrat_incomplet');
+      const r = await cible.flushEditeur(), e = cible.etatEditeur();
+      resultat = r?.issue === 'ok' && e && !e.sale && !e.enCours ? {issue:'conserve'} : refusExplicite(r?.raison || 'conservation_echouee');
+    }
+    if (!toujoursValide()) return refusExplicite('contexte_change');
+    if (autreSaisie()) return refusExplicite('formulaire_ouvert');
+    if (saisieChangee) return refusExplicite('saisie_locale');
+    if (resultat?.issue === 'conserve') return {issue:'conserve'};
+    if (resultat?.issue === 'quitter_sans_conserver' && intention === 'revoir_sortie') return {issue:'quitter_sans_conserver'};
+    return refusExplicite(MOTIFS_CONSERVATION.has(resultat?.raison) ? resultat.raison : 'conservation_echouee');
+  })().catch(() => refusExplicite(valide() ? 'conservation_echouee' : 'contexte_change')).finally(() => {
+    for (const nom of ['input','change']) racine.removeEventListener(nom, frappe, true);
+    demandesExplicites.delete(racine);
+  });
+  demandesExplicites.set(racine,{intention,promise:promesse});return promesse;
+}
 function avantNavigation(demande) {
   const gardes = [...gardesSortie];
   const poursuivre = index => {

@@ -1,3 +1,4 @@
+import {lireLivraison} from './livraison-fixture.js';
 // Tests du lot A « Importer une recette repérée », tâche 1 (spec docs/superpowers/specs/2026-10-18-import-cible-design.md, rév. 3.1) :
 // schéma (DB_VERSION 4, magasin imports, K-9), primitives (db.mutate à conditions, repo.transitionner, saveBatch conditionné), archives
 // tolérantes aux magasins ajoutés après le format 1 (Review Focus 1), vocabulaire fermé des fabricants (D-12), test statique « transitionner( ».
@@ -189,8 +190,8 @@ export async function runImportCibleTests({ eq, ok }) {
 
   // --- Test statique : transitionner( n'existe que dans repo.js et, ailleurs, sous la forme repo.transitionner( (spec § 7, I-10)
   await run('statique transitionner(', async () => {
-    const sw = await lire('../sw.js');
-    const modules = [...sw.matchAll(/'\.\/(src\/[^']+\.js)'/g)].map((m) => m[1]);
+    const sw = await lireLivraison();
+    const modules = sw.modules;
     ok(modules.length > 30, 'statique : SHELL lu (' + modules.length + ' modules) avant de conclure');
     const fautifs = [];
     let dansRepo = 0;
@@ -1712,7 +1713,11 @@ export async function runImportCibleTests({ eq, ok }) {
         const pageP = await renderRecipe({ id: 'rc_pdf' }, {}, await ctxDe());
         eq([!!pageP.querySelector('[data-role="photo-visible"]'), textesDirects(pageP), !!pageP.querySelector('[data-role="bandeau-lecture"]')], [true, [], true], 'fiche : une photo non affichable conserve un état explicite, sans nœud texte parasite');
         const pageX = await renderRecipe({ id: 'rc_simple' }, { v: extraction.id }, await ctxDe());
-        eq([pageX.querySelector('[data-role="bandeau-lecture"]'), [...pageX.querySelectorAll('[data-role="texte-etape"]')].map((n) => n.textContent)], [null, ['Peler.', 'Cuire.']], 'fiche : ?v= d’une version d’une AUTRE recette est ignoré (retour à la version courante) — jamais la lecture d’un autre import sur cette fiche');
+        eq([pageX.querySelector('[data-role="bandeau-lecture"]'), [...pageX.querySelectorAll('[data-role="texte-etape"]')].map((n) => n.textContent)], [null, []], 'fiche : ?v= d’une AUTRE recette est refusé sans afficher cette lecture ni substituer la courante');
+        const recours=[...pageX.querySelectorAll('a')].find(a=>a.textContent==='Voir la version courante');
+        ok(!!recours&&recours.getAttribute('href').startsWith('#/recipes/rc_simple')&&!recours.getAttribute('href').includes('v='),'fiche : recours à la courante uniquement par lien explicite');
+        const pageCourante=await renderRecipe({id:'rc_simple'},{},await ctxDe());
+        eq([...pageCourante.querySelectorAll('[data-role="texte-etape"]')].map(n=>n.textContent),['Peler.','Cuire.'],'fiche : après le recours explicite les étapes courantes restent disponibles');
       }
 
       // --- Mode cuisine (D-3) : bandeau « Lue par l'assistant, non relue » tant que la version est une extraction à vérifier ; étape entière
@@ -2823,10 +2828,10 @@ export async function runImportCibleTests({ eq, ok }) {
     const src = await lire('../src/ui/import-cible.js');
     ok(src.length > 1000 && /export async function renderImportCible/.test(src), 'statique : src/ui/import-cible.js est lu et exporte renderImportCible (garde contre un source vide)');
     eq(/anthropic|supabase/i.test(src), false, 'statique (I-9 ; sans égard à la casse depuis la ronde 1 de la tâche 6 du lot C, X8) : aucun texte ne nomme le fournisseur ni la base dans src/ui/import-cible.js');
-    const sw = await lire('../sw.js');
-    const shell = [...(sw.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] ?? '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '').matchAll(/'([^']+)'/g)].map((m) => m[1]); // le TABLEAU sans ses commentaires (X4, vague finale du lot C)
-    ok(shell.includes('./src/ui/import-cible.js'), 'SHELL : ./src/ui/import-cible.js est dans le TABLEAU SHELL de sw.js (jamais le fichier entier : un commentaire ne suffit plus, X4)');
-    const modules = [...sw.matchAll(/'\.\/(src\/[^']+\.js)'/g)].map((m) => m[1]);
+    const sw = await lireLivraison();
+    const shell = sw.chemins;
+    ok(shell.includes('./src/ui/import-cible.js'), 'SHELL : ./src/ui/import-cible.js est dans le manifeste validé (un commentaire ne suffit pas)');
+    const modules = sw.modules;
     const porteurs = [];
     for (const m of modules) if ((await lire('../' + m)).includes('pending_recipe')) porteurs.push(m);
     eq([modules.length > 30, porteurs], [true, []], 'régression (D-8) : pending_recipe a disparu de tout src/ (poseurs et lecteur)');

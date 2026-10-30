@@ -1,3 +1,4 @@
+import {lireLivraison} from './livraison-fixture.js';
 // Tests du lot E « Un livre reconnu depuis sa couverture » (spec docs/superpowers/specs/2026-10-19-couverture-lue-design.md, § 7). Tâche 1 : domaine pur
 // (src/domain/couverture.js), lecture par l'assistant (src/domain/llm.js), déménagement de messageErreurImage dans image.js (bornes.js : vérifié en place
 // depuis le lot C, rien n'y change, EI-3 ; le mot « bornes » du sujet du commit a5a89dc est hérité du plan). Tâche 2 : le vol de couverture et la section
@@ -31,7 +32,7 @@ export async function runCouvertureTests({ eq, ok }) {
       eq([IM.messageErreurImage === LA.messageErreurImage, IM.messageErreurImage({ code: 'trop_lourde' }), IM.messageErreurImage({ code: 'trop_grande' }), IM.messageErreurImage({ code: 'type' }), IM.messageErreurImage(null)],
         [true, 'Cette image est trop lourde (25 Mo au plus).', 'Cette image est trop grande.', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Cette image ne peut pas être lue ici. Essaie une autre photo.'],
         'messageErreurImage : déplacée dans core/image.js, ré-exportée par livre-ajout.js (book.js et import-cible.js lisent la même), les trois phrases');
-      ok((await lire('../sw.js')).includes("'./src/domain/couverture.js'"), 'SHELL : ./src/domain/couverture.js');
+      ok((await lireLivraison()).chemins.includes('./src/domain/couverture.js'), 'SHELL : ./src/domain/couverture.js');
     });
 
     // --- validerLectureCouverture (§ 3.2) : la sortie du modèle est une donnée hostile.

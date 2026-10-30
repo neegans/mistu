@@ -1,87 +1,78 @@
-# Cuisine OS (mistu)
+# Cuisine OS (Mistu)
 
-Système d'exploitation personnel pour la cuisine : livres, recettes, plats, versions, appareils, historique et inventaire, construit d'après `cuisine-os-spec-v3.md`. PWA locale (Mac, iPhone, iPad), sans étape de build ni dépendance.
+Mistu conserve livres, recettes, variantes, photos, notes, repas et inventaire dans IndexedDB. L’application utilise des modules ES natifs et un hébergement statique, sans framework ni bundler. La synchronisation passe par Supabase ; les appels de l’assistant passent par la fonction serveur du projet `mitsu`.
 
-## Démarrer
+**Version réellement publiée, contrôles exécutés et travail restant : [STATE.md](STATE.md).** Les spécifications et rapports datés distinguent les résultats automatisés des essais sur appareils physiques.
 
-Servir le dossier avec n'importe quel serveur statique, puis ouvrir `http://localhost:8080/`.
+## Démarrer et vérifier
 
 ```sh
 python3 -m http.server 8080
-# ou
-npx serve .
 ```
 
-- Le service worker et le hachage WebCrypto exigent `https://` ou `localhost`. Sur le réseau local en `http://`, l'app fonctionne (repli SHA-256 en JavaScript) mais sans cache hors connexion : pour installer la PWA sur iPhone/iPad, servir en HTTPS (tunnel ou certificat local).
-- Version hébergée : `https://neegans.github.io/mistu/` (GitHub Pages, branche `main`, dépôt public `neegans/mistu`). Chaque `git push` sur `main` la met à jour en une minute environ. Les données restent dans IndexedDB de chaque appareil ; rien n'est envoyé à GitHub.
-- Sur iOS, ajouter à l'écran d'accueil depuis Safari. L'icône d'écran d'accueil est `icons/apple-touch-icon.png` (180 × 180, opaque, pleine) ; elle se régénère avec `python3 -I tools/make-apple-touch-icon.py icons/apple-touch-icon.png` (formes identiques à `icons/apple-touch-icon.svg`, aucune dépendance).
-- Tests du domaine et de sauvegarde : ouvrir `http://localhost:8080/tests/`. La suite de sauvegarde utilise uniquement des bases IndexedDB temporaires `cuisine-os-backup-test-*`, nettoyées en fin de scénario. La suite complète (domaine, sauvegarde, synchronisation, page « Ajouter ») est **exécutée à chaque lot** : le dernier compte vert est noté dans `CLAUDE.md`. Elle n'écrit jamais dans la bibliothèque du navigateur.
+Ouvrir `http://localhost:8080/`. Le site hébergé est [Mistu sur GitHub Pages](https://neegans.github.io/mistu/), construit depuis `main`. Une publication n’est reçue qu’après construction de Pages et vérification des fichiers publics.
 
-## Ce qui est construit (V0, avec des morceaux de V0.5)
+Le service worker exige HTTPS ou localhost. Sur une adresse HTTP non sécurisée, le démarrage propose de continuer en ligne, sans annoncer une disponibilité hors ligne vérifiée. Sur iOS, l’installation se fait depuis Safari → Ajouter à l’écran d’accueil. Le comportement matériel reste à recevoir sur les appareils concernés.
 
-« Ajouter » ouvre une grille de six cartes (un livre, des pages, une recette tapée, un lien web, une recette créée
-avec l'assistant IA, un lot au congélateur). Un livre se crée en deux pas : ISBN scanné ou tapé (Open Library, puis
-Google Books en repli), sinon saisie directe, puis une fiche à vérifier avant d'ajouter. Un lien web se garde comme
-référence dans la bibliothèque — l'app ne le lit pas, elle se contente de le retrouver plus tard.
+Pour les tests : ouvrir `http://localhost:8080/tests/`. Les scénarios utilisent des bases jetables et des transports injectés, sans appel payé à l’assistant ni bibliothèque personnelle. Les preuves de cycle réel du worker utilisent une origine et un profil séparés.
 
-**Créer avec l'IA** (carte « Créer avec l'IA » d'Ajouter, ou bouton « Créer une recette avec ces critères » de
-l'onglet Web de la recherche) : tu décris ce que tu veux, l'assistant propose **une** recette, tu la gardes ou pas.
-Un appel à l'assistant par clic (compté dans ton quota du jour), jamais sans clic ; rien n'est enregistré sans « Garder cette recette ».
-Une recette gardée dit partout « Créée avec l'IA · non testée » (fiche, cartes, mode cuisine, exports, section
-« Recettes créées avec l'IA » de Mes livres) jusqu'à « Marquer testée » ; ses lignes sont toutes « à vérifier », et
-ses restrictions ne sont jamais certifiées. « Adapter avec l'IA » en fait une variante, sans toucher l'original.
-Aucun appel réel n'a encore été fait avec ce code (voir « Vérifications à faire sur les appareils réels »).
+```sh
+node --test --test-concurrency=1 tools/*.test.mjs
+node tools/generer-migrations.mjs --check
+node tools/generer-livraison.mjs --check
+```
+
+Le dernier outil contrôle le manifeste et le worker générés. Après modification des ressources livrées, augmenter le suffixe de livraison dans la méta `mistu-release` de `index.html`, puis lancer `node tools/generer-livraison.mjs`. La version applicative vient de `src/model/schema.js`. Une identité de livraison ne se réutilise pas avec des octets différents. Il ne s’agit pas d’une compilation de l’application : les modules restent servis tels quels.
+
+## Parcours
 
 | Parcours | Où |
 | --- | --- |
-| Ajouter un livre (ISBN → Open Library / Google Books → confirmer, ou saisie manuelle), convention de mesure par édition | Ajouter |
-| Séance de scan continue : photos, PDF, EPUB conservés localement, miniatures numérotées, remplacement d'une page, séance reprenable | Ajouter → Importer |
-| Entrées d'index → références « Repérée dans ton livre — page N », doublons ignorés | Importer, fiche livre |
-| Saisie ou extraction d'une recette avec correction ciblée (quantités, unités ambiguës `oz`, identité d'ingrédient proposée à confirmer) | Nouvelle recette / Corriger |
-| Recherche FR/EN en langage naturel → pastilles modifiables; modes Mes recettes / Mes livres / Web (avec l'assistant, une fois connecté) / Tout; groupes admissibles, à vérifier, références | Recherche |
-| Fiche recette : Original / Ma version, portions (durées non multipliées), unités (original / métrique / US avec hypothèses), langue de lecture, remplacer un ingrédient, évaluation d'une restriction, exports | Fiche recette |
-| Plats : rapprochements proposés par titre, confirmation/refus réversibles, comparaison de 2–3 recettes | Mes livres → Plats |
-| Composer un repas : « Avec quoi on mange ça ? », propositions expliquées, ajouter/remplacer/retirer/verrouiller, résumé du temps et conflits de four, contraintes du repas, duo mémorisé | Ma semaine |
-| Liste d'épicerie consolidée (même ingrédient et unité convertible seulement) | Fiche recette / repas |
-| Mode cuisine : ingrédients + étape, quantités rappelées, plan commun pour deux recettes, minuterie système (Siri ou raccourci) avec états honnêtes, note « À refaire ? » | Commencer à cuisiner |
-| Redécouvrir : fondé sur les consultations dans l'app, « À explorer » sans historique, Plus tard / Masquer | Aujourd'hui |
-| Appareils par capacités, inventaire de lots (date limite saisie, pas calculée) | Ma cuisine |
-| Sauvegarde ZIP complète, restauration validée en espace isolé puis vérifiée, réimport sans doublon; exports JSON-LD, YAML Paprika, copie HTML | Réglages |
-| Assistant IA, servi par ton compte (la clé vit côté serveur, rien à configurer) : lire pages et index; sorties toujours « à vérifier » | Importer, Nouvelle recette ; état dans Réglages |
-| Créer une recette avec l'assistant : une proposition à vérifier, gardée d'un clic, adaptable | Ajouter → Créer avec l'IA ; Recherche → Web |
-| Synchronisation des fiches entre appareils (compte Google) : file d'envoi, réception, conflits à trancher, quarantaine, « Envoyer maintenant », pastille « N non envoyés »; les photos restent locales (L4) | Réglages, en-tête |
+| Identifier un livre par ISBN ou couverture, confirmer sa fiche ; saisir manuellement reste possible | Ajouter un livre |
+| Photographier des pages, conserver PDF et sources, lire un index, reprendre une lecture et comparer les révisions | Livre → Pages source |
+| Ajouter une recette, garder un lien, lire une page web ou demander une création à vérifier | Ajouter |
+| Web (avec l'assistant, une fois connecté) | Ajouter → Web |
+| Assistant IA | Assistant servi par ton compte ; la clé vit côté serveur, rien à configurer. |
+| Chercher, filtrer, sélectionner et retrouver la position dans les listes | Bibliothèque, Recherche |
+| Consulter original et variantes, groupes d’ingrédients, traduction choisie et passages encore dans la langue source | Fiche recette |
+| Corriger avec brouillon local, reprendre une réponse conservée et récupérer un texte non enregistré | Éditeurs |
+| Garder ses notes et photos de cuisson séparées des photos du livre | Fiche recette, bilan de cuisson |
+| Retirer puis restaurer recettes et livres, en conservant les sources et les contrôles de concurrence | Corbeille |
+| Composer un repas, choisir une date sans heure, revoir les courses et leurs conventions | Ma semaine |
+| Cuisiner plusieurs versions, reprendre une séance et ses minuteurs indicatifs | Mode cuisine |
+| Confirmer du stock, consommer une quantité choisie et garder les restes d’une cuisson précise | Ma cuisine |
+| Vérifier le contenu et les médias choisis disponibles sur cet appareil | Repas → Préparer hors ligne |
+| Archiver, inspecter avant restauration, exporter une copie lisible et copier un diagnostic sans contenu privé | Réglages |
 
-## Synchronisation entre appareils
+Les réponses de l’assistant sont des propositions à vérifier. L’original n’est pas réécrit par une correction ou une adaptation. Les durées estimées et les valeurs corrigées gardent leur provenance. Les réglages Thermomix restent soumis aux contrôles de volume total, température, vitesse, accessoires et enchaînements ; ils ne certifient pas une recette testée sur machine.
 
-Au premier lancement, **si la synchronisation est configurée sur cette adresse** et qu'aucun compte n'est connecté, l'app accueille avec « Kwe. », **un bouton « Connexion avec Google »** et, dessous, **un lien « Continuer sans compte »** ; ce lien ouvre la bibliothèque locale et ne redemande plus rien sur cet appareil (l'écran revient après « Effacer les données de cet appareil »). Ailleurs — adresse sans configuration — l'app s'ouvre directement sur la bibliothèque.
+Dans Créer avec l’IA : **Un appel à l'assistant par clic** sur la commande de création. Relire une réponse déjà conservée ou enregistrer ses corrections ne relance pas cet appel.
 
-Avec un compte connecté (comptes Google de la liste autorisée seulement), **les fiches — livres, recettes, versions, repas, courses… — voyagent entre tes appareils dès que tu es connecté ; les photos elles-mêmes, pas encore (lot L4)**. Ce qui est écrit hors ligne attend dans une file et part au retour du réseau ; ce qui arrive d'un autre appareil est écrit ici ; quand la même fiche a changé des deux côtés à la même heure, Réglages te demande laquelle garder — rien n'est fusionné en cachette. Pour les photos et les PDF, et pour un appareil sans compte, le transfert reste l'archive ZIP.
+**Cookidoo : transfert manuel par champs.** L’automatisation officielle n’a pas été démontrée par la recherche ciblée et est écartée pour cette livraison. Aucun identifiant Cookidoo n’est demandé par Mistu. Voir la [décision E1](docs/superpowers/specs/2026-10-30-e1-cookidoo-design.md).
 
-Sans compte, rien ne change : « Continuer sans compte » ouvre la bibliothèque locale et aucune donnée ne quitte l'appareil. Le serveur est le projet Supabase `mitsu` (Canada), nommé dans `src/sync/config.js` pour `neegans.github.io` et `localhost`. Spécification du lot : `docs/spec-compte-et-stockage-distant.md` ; conception amont et choix d'hébergement : `docs/compte-et-stockage-distant.md` ; application du serveur et preuves : `supabase/README.md` ; carte des modules : `docs/architecture.md`, section « Synchronisation (L3) ».
+## Synchronisation, photos et hors ligne
 
-**Pas encore mesuré sur deux appareils** : la synchronisation est éprouvée par la suite de tests (transport simulé, aucun réseau), pas par un aller-retour réel entre l'iPhone et le Mac. Ce parcours est la prochaine vérification (voir « Vérifications à faire sur les appareils réels »).
+Avec un compte autorisé, les fiches **et les octets des photos/PDF** empruntent le moteur de synchronisation existant. La réception des fiches, l’envoi des fichiers et leur téléchargement sont des étapes distinctes. La pastille de changements à envoyer ne prouve pas que les photos sont déjà présentes sur l’autre appareil. Certains fichiers reçus sont des copies réduites ; leur présence ne prouve pas la conservation de l’original.
 
-## Ce qui n'est pas là (et le dit dans l'interface)
+Sans compte, la bibliothèque reste locale et peut être transférée par archive. Avec un compte, une écriture hors ligne attend son envoi. Les commandes protégées de corbeille, sources, traduction, cuisine et inventaire gardent leur propre protocole ; les autres fiches conservent leur arbitrage existant. La fusion de cases de courses vérifiée entre onglets d’une même base ne constitue pas une fusion entre deux appareils.
 
-Adaptations Rapide / On se gâte / Meal prep, moteur de salubrité, planificateur multi-repas, synthèse de recettes (hors « Créer avec l'IA », qui propose une recette à vérifier), reconnaissance vocale, lecture d'EPUB ; côté synchronisation : les octets des photos et des PDF (lot L4), la purge du serveur et « Supprimer ma bibliothèque du serveur » (lot L5). Voir `docs/architecture.md`.
+La préparation hors ligne porte sur les versions et langues choisies, les notes et les médias sélectionnés. Elle relit les données et décode les images ; fichier absent, image illisible et vérification inconnue restent distincts. Le bilan est daté et reste en mémoire : après rechargement du repas, il faut vérifier à nouveau. Un lien de consultation garde sa version et sa candidate explicites. Les choix du mode cuisine restent séparés. Les fonctions d’assistance et de recherche en ligne nécessitent une connexion.
 
-## Vérifications à faire sur les appareils réels
+Les mises à jour compatibles attendent la fin d’utilisation de l’ancienne livraison. Le message propose de conserver le travail, puis de fermer toutes les fenêtres Mistu, y compris celles de la PWA, et de rouvrir. Aucun rechargement forcé ne vient interrompre une saisie ou une cuisson. La première transition depuis l’ancien worker exige cette fermeture/réouverture : le nouveau code ne peut pas corriger rétroactivement un ancien onglet déjà ouvert.
 
-1. Capture photo iPhone (`<input capture>`), sélection de fichiers iPad, dépôt PDF Mac.
-2. Raccourci `CuisineOS-Minuterie` : `docs/raccourci-minuterie.md`.
-3. Générer un ZIP, vérifier sa présence dans Téléchargements/Fichiers, puis le restaurer dans un autre navigateur avec une base vide. Conserver la bibliothèque d’origine pendant cette validation.
-4. Import du YAML dans Paprika et lecture du JSON-LD dans l'application cible.
-5. Appels de l'assistant par la passerelle, connecté (il est servi par le compte : la clé vit côté serveur, rien à configurer) : aucun appel réel n'est encore passé par elle. Avant elle, seule la recherche web avait été exercée (17 octobre, site public) ; « Créer avec l'IA », « Adapter avec l'IA » et la lecture de pages ne l'ont jamais été (pour une création : noter la durée, les jetons affichés et le coût dans la console Anthropic).
-6. **Synchronisation, aller-retour réel entre deux appareils** (spec § 7.3) : iPhone hors ligne → écrire une recette → voir le compteur « non envoyés » → remettre le réseau → la recette arrive sur le Mac ; la bibliothèque du Mac arrive entièrement sur l'iPhone ; une suppression se propage ; un conflit volontaire (la même fiche modifiée des deux côtés hors ligne) se tranche par « Garder celle d'ici ».
+## Archives et limites à vérifier
 
+L’archive ZIP contient les fiches et les fichiers locaux, avec empreintes et inspection avant restauration. Elle distingue copies réduites, originaux inconnus et fichiers manquants. Les brouillons et réponses brutes conservés localement sont exclus : récupérer leur texte depuis leur écran avant d’effacer un appareil. « Archive générée » ne confirme pas son enregistrement dans Téléchargements ou Fichiers.
 
-## Lot sauvegarde/restauration — à réviser et valider
+Une incohérence peut être signalée à l’export de secours puis empêcher la restauration ; conserver le ZIP et son bilan. Le traitement ZIP reste en mémoire. Les mesures de volume et de mémoire JavaScript sur ordinateur ne prédisent pas la mémoire disponible sur iPhone.
 
-- Export cohérent des magasins, contrôle des empreintes des sources et signalement des relations déjà incohérentes sans empêcher de conserver une copie.
-- Inspection stricte avant restauration : magasins requis, structure des lignes et clés uniques, décomptes, empreintes, chemins ZIP et relations déclarées.
-- Fusion/remplacement en une transaction : une erreur d’écriture annule tout le lot, y compris les vidages.
-- Vérification du contenu des fiches et des fichiers après import ; bilan conservé à l’écran jusqu’au rechargement choisi par l’utilisateur.
-- « Dernière archive générée » ne signifie pas que le téléchargement a été enregistré sur l’appareil.
-- Régressions ajoutées : aller-retour IndexedDB/binaire, double import, archives invalides, secrets, erreurs synchrones et asynchrones avec annulation, contenu altéré et distinction fusion/remplacement. Aucun résultat d’exécution n’est revendiqué pour ces ajouts.
+Essais physiques restant séparés des tests automatisés :
 
-Les contrôles renforcés peuvent refuser une archive ancienne aux relations déjà cassées. Conserver le ZIP et le bilan ; aucune réparation ni suppression automatique n’est effectuée. Le ZIP reste entièrement en mémoire ; les volumes photo importants et un véritable manque d’espace doivent encore être vérifiés sur appareil.
+- Capture sur iPhone, sélection sur iPad, installation PWA et rechargement en mode avion avec photos/pages ouvertes.
+- Aller-retour réel entre deux appareils connectés au même compte, y compris les octets d’une photo et la reprise après coupure.
+- Enregistrement et restauration d’une archive depuis les fichiers de l’appareil, forte pression de stockage et éviction par l’OS.
+- Lecture vocale, maintien d’écran, raccourci de minuterie, transfert manuel Cookidoo/TM7 au Canada et import Paprika dans leurs applications.
+
+Les minuteries sont des suivis indicatifs ; aucune alarme système n’est confirmée par leur seule présence dans Mistu. La lecture complète d’EPUB, une extension native de partage iPhone et une automatisation Cookidoo ne sont pas fournies.
+
+Voir [AGENTS.md](AGENTS.md), [architecture](docs/architecture.md), [serveur](supabase/README.md), [plan directeur](docs/lots/2026-10-29-plan-directeur-interface-fonctions.md) et les rapports dans `docs/superpowers/plans/`.

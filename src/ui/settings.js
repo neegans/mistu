@@ -7,7 +7,9 @@ import { t, getUiLocale } from '../core/i18n.js';
 import { refresh, currentPath } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { logError } from '../core/log.js';
-import { reprendreEnvoi, retirerEnvoi, fileDe } from '../sync/outbox.js';
+import { reprendreEnvoi, retirerEnvoi, fileDe, estDeCeCompte } from '../sync/outbox.js';
+import {obtenirControleLivraison} from '../core/livraison.js';
+import {projeterDiagnosticApp,texteDiagnosticApp} from '../domain/diagnostic-app.js';
 import { estCommandeTraduction, estPhaseJournalTraduction } from '../sync/commandes-traduction.js';
 import { estCommandeCuisine } from '../sync/commandes-cuisine.js';
 import { estCommandeInventaire } from '../sync/commandes-inventaire.js';
@@ -25,7 +27,7 @@ import { etatAssistant, sessionValide } from '../domain/passerelle.js';
 import { shortcutUrl, SHORTCUT_NAME, isAppleTouchDevice } from '../domain/timers.js';
 import { STORES, SYNC_INTERNAL_STORES, APP_VERSION, ARCHIVE_FORMAT_VERSION } from '../model/schema.js';
 import { pageHeader, section, field, select, segmented, majPastille, sessionAssistant, TEXTE_CONNEXION, boutonSeConnecter, messageGardeRefusee, motifFichier } from './components.js';
-import { invalidate, setSyncState, getSyncState, relireReglages, SYNC_ROUTE_KEY } from './state.js';
+import { invalidate, setSyncState, getSyncState, getSyncGeneration, relireReglages, SYNC_ROUTE_KEY } from './state.js';
 
 // Évite deux opérations d’archive concurrentes, même après un changement d’écran.
 let archiveOperation = false;
@@ -39,11 +41,68 @@ export const archiveEnCours = () => archiveOperation;
 // Posée par le bouton d’archive de cette page, jamais déduite d’un réglage ni d’une date.
 const ARCHIVE_FLAG = 'cuisineos.archive_created';
 
+async function compteursDiagnostic(base) {
+  const stores=[...new Set([...MAGASINS_FICHIERS,'outbox','sync_conflicts','sync_state'])],tx=await base.tx(stores,'readonly');
+  return new Promise((resolve,reject)=>{
+    let owner=null,epoque=null;const refs=new Set(),fichiers=new Map(),erreurs=new Map();
+    const envois={en_attente:0,bloques:0,conflits:0};
+    tx.onerror=()=>reject(tx.error||Error('lecture_impossible'));tx.onabort=()=>reject(tx.error||Error('lecture_impossible'));
+    tx.oncomplete=()=>{
+      const compte={declares:refs.size,locaux:0,manquants:0,octets_locaux:0},motifs={reseau:0,quota:0,refus:0,autre:0};
+      for(const sha of refs){const f=fichiers.get(sha);if(f?.local){compte.locaux++;compte.octets_locaux+=f.taille;}else compte.manquants++;const e=erreurs.get(sha);if(e){const type=['reseau','delai'].includes(e)?'reseau':['quota','quota_stockage'].includes(e)?'quota':['refus','introuvable','auth','type'].includes(e)?'refus':'autre';motifs[type]++;}}
+      resolve({owner,epoque,envois,fichiers:compte,erreurs:motifs});
+    };
+    const user=tx.objectStore('sync_state').get('user_id');user.onsuccess=()=>{owner=user.result?.value??null;};
+    const epoch=tx.objectStore('sync_state').get('editor_library_epoch:v1');epoch.onsuccess=()=>{epoque=epoch.result??null;};
+    for(const store of stores){const request=tx.objectStore(store).openCursor();request.onsuccess=()=>{
+      const cursor=request.result;if(!cursor)return;const row=cursor.value;
+      if(store==='files')fichiers.set(row.sha256,{local:row.blob instanceof Blob,taille:row.blob instanceof Blob?row.blob.size:0});
+      else if(store==='outbox'&&estDeCeCompte(row,owner)){envois.en_attente++;if(row.quarantined_at||row.lifecycle_blocked)envois.bloques++;}
+      else if(store==='sync_conflicts'&&!row.resolution&&estDeCeCompte(row,owner))envois.conflits++;
+      else if(store==='sync_state'&&typeof row.key==='string'&&row.key.startsWith('file_error:'))erreurs.set(row.key.slice(11),row.value?.motif||'autre');
+      else if(MAGASINS_FICHIERS.includes(store))for(const sha of referencesFichiers({[store]:[row]}))refs.add(sha);
+      cursor.continue();
+    };}
+  });
+}
+
+// Le diagnostic ne conserve jamais les lignes lues : uniquement une projection de nombres/codes admis.
+export async function collecterDiagnosticApp({depot=repo,livraison=obtenirControleLivraison(),navigateur=navigator,estCourante=()=>true,getGeneration=getSyncGeneration,maintenant=()=>new Date().toISOString(),preparation=null}={}){
+  const base=depot.db,generation=getGeneration();const valide=()=>depot.db===base&&getGeneration()===generation&&estCourante();
+  if(!valide())throw Error('contexte_change');
+  const [db,coquille,stockage]=await Promise.allSettled([compteursDiagnostic(base),livraison?.verifier(),navigateur.storage?.estimate?.()]);
+  if(!valide())throw Error('contexte_change');let compte=db.status==='fulfilled'?db.value:null;
+  if(compte){try{const [owner,epoch]=await Promise.all([base.get('sync_state','user_id'),base.get('sync_state','editor_library_epoch:v1')]);if(!valide()||(owner?.value??null)!==compte.owner||JSON.stringify(epoch??null)!==JSON.stringify(compte.epoque))throw Error('contexte_change');}catch(e){if(e?.message==='contexte_change')throw e;compte=null;}}
+  const observation=coquille.status==='fulfilled'&&livraison?.estCourante(coquille.value)?coquille.value:null;
+  return projeterDiagnosticApp({version:APP_VERSION,observe_le:maintenant(),livraison:observation,reseau:navigateur.onLine===true?'en_ligne':navigateur.onLine===false?'hors_ligne':'inconnu',
+    proprietaire:compte?compte.owner===null?'absent':'present':'inconnu',envois:compte?.envois,fichiers:compte?.fichiers,erreurs:compte?.erreurs,
+    stockage:stockage.status==='fulfilled'?{utilisation_estimee:stockage.value?.usage,quota_estime:stockage.value?.quota}:null,preparation});
+}
+
+export function creerPanneauDiagnostic({collecter=collecterDiagnosticApp,navigateur=navigator,estCourante=()=>true}={}){
+  let detruit=false,enCours=false;
+  const etat=el('p',{role:'status',class:'muted'}),texte=el('textarea',{readOnly:true,hidden:true,rows:12,'aria-label':t('Diagnostic expurgé'),class:'diagnostic-texte'});
+  const bouton=el('button',{type:'button',class:'btn',dataset:{role:'copier-diagnostic'},onClick:async()=>{
+    if(detruit||enCours||!estCourante())return;enCours=true;bouton.disabled=true;etat.textContent=t('Lecture du diagnostic…');
+    try{const resultat=await collecter({estCourante:()=>!detruit&&estCourante()}),copie=texteDiagnosticApp(resultat);if(detruit||!estCourante())return;texte.value=copie;texte.hidden=false;
+      try{if(typeof navigateur.clipboard?.writeText!=='function')throw Error('presse_papiers');await navigateur.clipboard.writeText(copie);if(!detruit&&estCourante())etat.textContent=t('Diagnostic copié.');}
+      catch{if(!detruit&&estCourante())etat.textContent=t('Copie impossible. Tu peux sélectionner le diagnostic ci-dessous.');}
+    }catch{if(!detruit&&estCourante()){texte.value='';texte.hidden=true;etat.textContent=t('Le diagnostic n’a pas pu être relu. Réessaie sur cet écran.');}}
+    finally{enCours=false;if(!detruit)bouton.disabled=false;}
+  }},t('Copier le diagnostic'));
+  const root=section(t('Diagnostic à partager'),el('p',null,t('Ce diagnostic contient des versions, des compteurs et des états, sans texte de recette, photo ni identité du compte. Les tailles du navigateur sont des estimations.')),
+    el('p',{class:'muted'},t('Les fichiers comptés sont ceux référencés dans cette bibliothèque. Leur présence ne certifie pas leur lecture hors ligne. Une valeur inconnue reste indiquée comme telle.')),bouton,etat,texte);
+  root.classList.add('diagnostic-app');root.dispose=()=>{detruit=true;};return root;
+}
+
 // Injections (lot G, tâche 2) : createArchive, pickFiles (le choix de l’archive à restaurer) et telechargerArchive (l’enregistrement de l’archive
 // créée) — le bilan de création et le vrai rapport d’inspection s’éprouvent sans téléchargement réel dans le Chrome sans tête.
 export async function renderSettings(params, query, ctx, { fetch, createArchive = createArchiveReel, pickFiles: choisirArchive = pickFiles, telechargerArchive = downloadBlob, telechargerRecettes = downloadBlob } = {}) {
   const s = ctx.settings;
-  const root = el('div', null, pageHeader(t('Réglages'), { subtitle: `Cuisine OS ${APP_VERSION}` }));
+  const root = el('div', {class:'reglages-page'}, pageHeader(t('Réglages'), { subtitle: `Cuisine OS ${APP_VERSION}` }));
+  let detruit=false;
+  const diagnostic=creerPanneauDiagnostic({estCourante:()=>!detruit&&root.isConnected});
+  root.dispose=()=>{detruit=true;diagnostic.dispose();};
 
   // Préférences
   root.append(section(t('Préférences'),
@@ -256,6 +315,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
           reload: () => { location.hash = '#/'; location.reload(); },
         });
       } }, t('Effacer les données de cet appareil')))));
+  root.append(diagnostic);
   return root;
 
   async function restoreReport(insp) {

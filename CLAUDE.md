@@ -3790,3 +3790,16 @@ Parcours publics : navigation **12 observations**, dialogues **20 observations**
 E1 est clos par décision documentaire ; **L10 reste à terminer**. Les mentions de lots restants ci-dessous décrivent les reçus historiques à leur date.
 
 Preuves : `.superpowers/sdd/2026-10-30-l9/`, fichiers publics, suite et parcours publics.
+
+
+## L10 — hors ligne, mises à jour et volumes (30 octobre 2026)
+
+**L10 — hors ligne, mises à jour et volumes : réception locale terminée, publication en préparation.**
+[Spec](docs/superpowers/specs/2026-10-29-l10-hors-ligne-volumes-design.md), [rapport](docs/superpowers/plans/2026-10-30-l10-hors-ligne-volumes.md).
+Contrat `145ccf1`, base L9 code `ed454203` / reçu `14cc996`. Revues techniques A/B/C/root ; aucune relecture personnelle attribuée à Neegan.
+Préparation d’un repas avec versions/langues/candidates exactes, notes et médias sélectionnés ; images réellement décodées, réception par moteur existant et réessai conditionné. Bilan en mémoire protégé des actualisations, sans certificat conservé après rechargement.
+Livraison immuable **0.32.0-2**, APP_VERSION **0.32.0** : manifeste généré de **208 fichiers / 3 605 171 octets**, SHA256 `500570fb449db2090cd7a43d28e0a70e90dca687a9dedbe6d3fc0bea7e83cf86`. Démarrage contrôlé avant métier, activation naturelle, conservation explicite par les gardes existantes, diagnostic expurgé.
+**11498/11498** navigateur, épingle11497 (+236 depuis L9, aucun scénario supprimé), zéro erreur JavaScript/requête extérieure ; Node **271/271**, deux générateurs `--check`0, syntaxe49 fichiers et diff propres.
+Preuves Chrome : deux livraisons A/B **14 contrôles**, transition historique **14**, vraie application/démarrage/diagnostic **14**, repas hors ligne **34 contrôles/5 mesures**, présentation **24 configurations**. Captures relues ; photo, page source, note et candidate choisie conservées après rechargement réellement hors ligne.
+Volumes :123 recettes,100 pages,103 images dont trois grandes et un PDF ; archive complète restaurée et103 images décodées, copies réduites/inconnues/manques distingués dans une archive partielle. Mesures détaillées sur Apple M3 Pro au rapport, sans extrapolation au téléphone.
+**DB6/archive7 inchangés, aucun SQL L10.** Aucun compte privé, appel assistant réel ou essai physique iPhone/Safari/lecteur vocal/TM7. Les lots L0–L10 sont implémentés ; réception publique L10 encore attendue à ce reçu. E1 clos par décision documentaire, transfert Cookidoo manuel conservé. Le site public reste0.31.0 jusqu’à son reçu de publication.

@@ -1,5 +1,5 @@
 import { renderCorbeille } from './ui/corbeille.js';
-// Point d'entrée : initialise la base, la langue de l'interface, la coquille et le routeur ; enregistre le service worker.
+// Entrée métier après décision du démarrage : base, langue, coquille et routeur.
 import { el, replace, toast } from './core/dom.js';
 import { route, setNotFound, start, parseHash, refresh, remplacerAdresse } from './core/router.js';
 import { setUiLocale, t } from './core/i18n.js';
@@ -16,6 +16,8 @@ import { createTransport, createStockage } from './sync/transport.js';
 import { configAssistantSuitLeCompte } from './sync/config.js';
 import { majPastille } from './ui/components.js';
 import { NAV, coquille } from './ui/coquille.js';
+import {obtenirControleLivraison} from './core/livraison.js';
+import {creerStatutMiseAJour} from './ui/mise-a-jour.js';
 
 import { renderHome } from './ui/home.js';
 import { renderSearch } from './ui/search.js';
@@ -42,7 +44,17 @@ import { porteEntreeModel, renderPorteEntree } from './ui/porte-entree.js';
 
 import { activerEntree, porteeNavigation, capturerVue, preparerPresentationVue, annulerPresentationVue, restaurerVue, suivreTitreVue, invaliderNavigation, installerRetours, lienBibliotheque } from './ui/navigation-contexte.js';
 
-function shell() { return coquille(parseHash().path); }
+function shell() {
+  const nouvelle=coquille(parseHash().path),dispose=nouvelle.dispose;
+  const lireVue=()=>{
+    const racine=current?.main.firstElementChild,base=repo.db,generation=getSyncGeneration(),seq=renderSeq,portee=porteeAffichee;
+    return{racine,estCourante:()=>current===nouvelle&&current.main.firstElementChild===racine&&base===repo.db&&generation===getSyncGeneration()&&seq===renderSeq&&portee===porteeAffichee&&!current.main.hasAttribute('aria-busy')};
+  };
+  nouvelle.miseAJour=creerStatutMiseAJour({livraison:obtenirControleLivraison(),lireVue});
+  nouvelle.root.insertBefore(nouvelle.miseAJour,nouvelle.root.querySelector('.frame'));
+  nouvelle.dispose=()=>{nouvelle.miseAJour.dispose();dispose();};
+  return nouvelle;
+}
 
 let current = null;
 let coquilleARefaire = false;
@@ -97,6 +109,7 @@ async function onRoute({ handler, params, query, path, navigation = {} }) {
   libererVue();
   current.main.setAttribute('aria-busy', 'true');
   replace(current.main, el('p', { class: 'muted' }, t('Chargement…')));
+  current.miseAJour.actualiserVue();
   let porteeRendue = porteeAffichee;
   try {
     const ctx = await getData();
@@ -118,6 +131,7 @@ async function onRoute({ handler, params, query, path, navigation = {} }) {
     replace(current.main, node);
     for (const a of current.root.querySelectorAll('[data-nav-destination="/library"]')) a.href = lienBibliotheque();
     current.main.removeAttribute('aria-busy');
+    current.miseAJour.actualiserVue();
     arreterTitre = suivreTitreVue({ racine: node, estCourante });
     await restaurerVue({ racine: node, main: current.main, cleEntree: navigation.cleEntree, portee, estCourante, presentation });
   } catch (e) {
@@ -125,6 +139,7 @@ async function onRoute({ handler, params, query, path, navigation = {} }) {
     if (!estCourante()) { annulerPresentationVue(presentation); if (seq === renderSeq) refresh(); return; }
     const erreur = el('div', { class: 'card danger' }, el('h1', null, t('Une erreur est survenue')), el('p', { class: 'muted' }, t('Code : {c}', { c: e?.name || 'Erreur' })), el('button', { class: 'btn', onClick: () => location.reload() }, t('Recharger')));
     replace(current.main, erreur); current.main.removeAttribute('aria-busy');
+    current.miseAJour.actualiserVue();
     arreterTitre = suivreTitreVue({ racine: erreur, estCourante });
     const effet = await restaurerVue({ racine: erreur, main: current.main, cleEntree: navigation.cleEntree, portee: porteeRendue || porteeNavigation({}), estCourante, presentation });
     if (estCourante() && !effet.focusDeplace) erreur.querySelector('h1').setAttribute('role', 'alert');
@@ -328,11 +343,7 @@ async function boot() {
     const settings = await relireReglages();
     setUiLocale(settings.ui_locale);
     on('settings', ({ key, value }) => { if (key === 'ui_locale') { capturerVue(current?.main); setUiLocale(value); coquilleARefaire = true; refresh(); } });
-    // Avant la porte (R34) : l'app doit être installable dès la première visite, même si la personne reste devant
-    // l'écran d'accueil sans rien toucher.
-    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-      navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('Service worker non enregistré', e));
-    }
+    // Le démarrage est l'unique autorité d'enregistrement et d'admission du worker.
     await bootSync();
     // La porte attend un geste ; si elle casse, l'app s'ouvre quand même (invariant I4).
     try { await porteDEntree(); }

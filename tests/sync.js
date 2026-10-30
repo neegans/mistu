@@ -1,3 +1,4 @@
+import {lireLivraison} from './livraison-fixture.js';
 // Tests du lot « compte et stockage distant » : constantes, tables, types, base, capture, connexion.
 // Bases IndexedDB temporaires cuisine-os-sync-test-* seulement ; aucun réseau.
 import { STORES, SYNC_STORES, SYNC_INTERNAL_STORES } from '../src/model/schema.js';
@@ -348,12 +349,12 @@ export async function runSyncTests({ eq, ok }) {
     }
   }
   // Test statique : aucune écriture directe hors repo.js, src/sync/ et backup.js (spec § 5.2)
-  const swText = await (await fetch('../sw.js')).text();
-  const shell = [...swText.matchAll(/'(\.\/src\/[^']+\.js)'/g)].map((m) => m[1]);
+  const livraison = await lireLivraison();
+  const shell = livraison.modules.map(p=>'./'+p);
   const forbidden = new RegExp('\\bdb\\.(' + [...MUTATING_METHODS].join('|') + ')\\s*\\(');
-  // Garde du garde (F2) : si SHELL devenait illisible (regex, renommage, sw.js servi depuis le cache), la boucle
+  // Garde du garde (F2) : si le manifeste devenait illisible ou vide, la boucle
   // ci-dessous ne parcourrait rien et les deux listes resteraient vides — vertes sans rien avoir vérifié.
-  ok(shell.length > 30, 'SHELL lu : ' + shell.length + ' modules à relire avant de conclure');
+  ok(shell.length > 30, 'Manifeste lu : ' + shell.length + ' modules à relire avant de conclure');
   const offenders = [];
   const deviceKeyOffenders = []; // R20 : une seule identité d'appareil, et une seule migration qui nomme l'ancienne clé
   for (const file of shell) {
@@ -978,17 +979,12 @@ export async function runSyncTests({ eq, ok }) {
     eq(await repo.lirePorteEntree(), null, 'R34 : après « Effacer les données de cet appareil », la porte revient');
   });
 
-  // --- Clôture : SHELL complet (tâche 14)
-  // Ce test LIT du source (sw.js et les modules) : c'est voulu ici, et seulement ici. Il ne vérifie pas un
-  // comportement mais la COHÉRENCE D'UNE LISTE — le SHELL du service worker contre le graphe d'imports réel.
-  // Un module atteignable depuis app.js et absent de SHELL fait répondre 404 à cache.addAll : l'installation du
-  // service worker échoue en entier et il n'y a plus aucune consultation hors connexion. Rien de ce comportement
-  // n'est observable depuis la page de tests ; la liste, elle, se compare.
-  const sourceSw = await (await fetch('../sw.js', { cache: 'no-store' })).text();
-  const blocShell = sourceSw.match(/const SHELL = \[([\s\S]*?)\];/);
-  ok(!!blocShell, 'sw.js : le tableau SHELL est lisible');
-  const listeShell = [...(blocShell?.[1] || '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
-  // Résolution relative à la main : aucun bundler ici, les chemins du SHELL sont ceux que le réseau sert.
+  // --- Clôture : inventaire généré complet (tâche14, manifeste L10).
+  // Ce contrôle documentaire confronte toujours la liste servie au graphe réel, y compris le démarrage.
+  const fermeture = await lireLivraison();
+  ok(fermeture.entries.length>30&&fermeture.octets>300,'manifeste : inventaire lisible et non vide');
+  const listeShell = fermeture.chemins;
+  // Résolution relative : aucun bundler, chemins effectivement servis par la livraison.
   const resoudre = (depuis, specifier) => {
     const parts = depuis.split('/').slice(0, -1);
     for (const seg of specifier.split('/')) {
@@ -999,14 +995,14 @@ export async function runSyncTests({ eq, ok }) {
     return parts.join('/');
   };
   const atteints = new Set();
-  const aVisiter = ['src/app.js'];
+  const aVisiter = ['src/app.js','src/demarrage.js'];
   while (aVisiter.length) {
     const chemin = aVisiter.pop();
     if (atteints.has(chemin)) continue;
     atteints.add(chemin);
     const source = await (await fetch('../' + chemin, { cache: 'no-store' })).text();
-    for (const m of source.matchAll(/(?:from\s+'([^']+)'|import\s+'([^']+)')/g)) {
-      const specifier = m[1] || m[2];
+    for (const m of source.matchAll(/(?:from\s+['"]([^'"]+)['"]|import\s+['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\))/g)) {
+      const specifier = m[1] || m[2] || m[3];
       if (!specifier.startsWith('.')) continue; // aucune dépendance npm à l'exécution : rien d'autre à suivre
       aVisiter.push(resoudre(chemin, specifier));
     }
@@ -1015,9 +1011,9 @@ export async function runSyncTests({ eq, ok }) {
   // `atteints` se réduirait à `src/app.js` et la comparaison resterait verte sans rien prouver (mineur, tâche 14).
   ok(atteints.size >= 40, 'le graphe d’imports a bien été parcouru (' + atteints.size + ' modules atteints)');
   const absentsDuShell = [...atteints].map((c) => './' + c).filter((c) => !listeShell.includes(c)).sort();
-  eq(absentsDuShell, [], 'tout module atteignable depuis app.js est dans SHELL');
+  eq(absentsDuShell, [], 'tout module atteignable depuis app.js/démarrage est dans le manifeste');
   // Chargés hors du graphe d'imports : le bundle UMD par un <script> classique (index.html et tests/index.html),
   // sw-rules.js par importScripts du service worker et par tests/index.html.
   eq(['./src/vendor/supabase-2.117.3.umd.js', './sw-rules.js'].filter((c) => !listeShell.includes(c)), [],
-    'dépendance embarquée et règles du service worker dans SHELL');
+    'dépendance embarquée et règles historiques dans le manifeste');
 }

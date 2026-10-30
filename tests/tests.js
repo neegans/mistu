@@ -1,3 +1,23 @@
+import {runL10HorsLigneActualisationTests} from './l10-hors-ligne.js';
+import {runL10ConservationTests} from './l10-conservation.js';
+import {runL10ReponseBruteTests} from './l10-conservation.js';
+import {runL10GardesMetierTests} from './l10-conservation.js';
+import {runL10ConservationConcurrenceTests} from './l10-conservation.js';
+import {runL10DemarrageTests} from './l10-demarrage.js';
+import {runL10DiagnosticTests} from './l10-diagnostic.js';
+import {runL10DiagnosticCollecteTests} from './l10-diagnostic.js';
+import {runL10HorsLigneMediasTests} from './l10-hors-ligne-medias.js';
+import {runL10HorsLigneCoursesTests} from './l10-hors-ligne-medias.js';
+import {runL10HorsLigneCycleTests} from './l10-hors-ligne-medias.js';
+import {runL10HorsLigneEchecsTests} from './l10-hors-ligne-medias.js';
+import {runL10HorsLigneTests} from './l10-hors-ligne.js';
+import {runL10LiensExactsTests} from './l10-hors-ligne.js';
+import {runL10HorsLigneEcranTests} from './l10-hors-ligne.js';
+import {runL10HorsLigneFermetureTests} from './l10-hors-ligne.js';
+import {runL10HorsLigneCandidatesTests} from './l10-hors-ligne.js';
+import {runL10LivraisonTests} from './l10-livraison.js';
+import {runL10MiseAJourTests} from './l10-mise-a-jour.js';
+import {runL10ReessaiFichierTests} from './l10-reessai-fichier.js';
 import {runL9CadreTests} from './l9-navigation.js';
 import {runL9DialoguesTests} from './l9-dialogues.js';
 import {runL9DialoguesRepliTests} from './l9-dialogues.js';
@@ -629,6 +649,26 @@ try { await runL9SelecteursTests({eq,ok}); } catch (e) { ok(false, 'runL9Selecte
 try { await runL9ContraintesRepasTests({eq,ok}); } catch (e) { ok(false, 'runL9ContraintesRepasTests : ' + (e.stack || e)); }
 try { await runL9RaccordsSelecteursTests({eq,ok}); } catch (e) { ok(false, 'runL9RaccordsSelecteursTests : ' + (e.stack || e)); }
 try { await runL9CadreTests({eq,ok}); } catch (e) { ok(false, 'runL9CadreTests : ' + (e.stack || e)); }
+try { await runL10ConservationTests({eq,ok}); } catch (e) { ok(false, 'runL10ConservationTests : ' + (e.stack || e)); }
+try { await runL10ReponseBruteTests({eq,ok}); } catch (e) { ok(false, 'runL10ReponseBruteTests : ' + (e.stack || e)); }
+try { await runL10GardesMetierTests({eq,ok}); } catch (e) { ok(false, 'runL10GardesMetierTests : ' + (e.stack || e)); }
+try { await runL10ConservationConcurrenceTests({eq,ok}); } catch (e) { ok(false, 'runL10ConservationConcurrenceTests : ' + (e.stack || e)); }
+try { await runL10DemarrageTests({eq,ok}); } catch (e) { ok(false, 'runL10DemarrageTests : ' + (e.stack || e)); }
+try { await runL10DiagnosticTests({eq,ok}); } catch (e) { ok(false, 'runL10DiagnosticTests : ' + (e.stack || e)); }
+try { await runL10DiagnosticCollecteTests({eq,ok}); } catch (e) { ok(false, 'runL10DiagnosticCollecteTests : ' + (e.stack || e)); }
+try { await runL10HorsLigneMediasTests({eq,ok}); } catch (e) { ok(false, 'runL10HorsLigneMediasTests : ' + (e.stack || e)); }
+try { await runL10HorsLigneCoursesTests({eq,ok}); } catch (e) { ok(false, 'runL10HorsLigneCoursesTests : ' + (e.stack || e)); }
+try { await runL10HorsLigneCycleTests({eq,ok}); } catch (e) { ok(false, 'runL10HorsLigneCycleTests : ' + (e.stack || e)); }
+try { await runL10HorsLigneEchecsTests({eq,ok}); } catch (e) { ok(false, 'runL10HorsLigneEchecsTests : ' + (e.stack || e)); }
+try { await runL10HorsLigneTests({eq,ok}); } catch (e) { ok(false, 'runL10HorsLigneTests : ' + (e.stack || e)); }
+try { await runL10LiensExactsTests({eq,ok}); } catch (e) { ok(false, 'runL10LiensExactsTests : ' + (e.stack || e)); }
+try { await runL10HorsLigneEcranTests({eq,ok}); } catch (e) { ok(false, 'runL10HorsLigneEcranTests : ' + (e.stack || e)); }
+try { await runL10HorsLigneFermetureTests({eq,ok}); } catch (e) { ok(false, 'runL10HorsLigneFermetureTests : ' + (e.stack || e)); }
+try { await runL10HorsLigneCandidatesTests({eq,ok}); } catch (e) { ok(false, 'runL10HorsLigneCandidatesTests : ' + (e.stack || e)); }
+try { await runL10LivraisonTests({eq,ok}); } catch (e) { ok(false, 'runL10LivraisonTests : ' + (e.stack || e)); }
+try { await runL10MiseAJourTests({eq,ok}); } catch (e) { ok(false, 'runL10MiseAJourTests : ' + (e.stack || e)); }
+try { await runL10ReessaiFichierTests({eq,ok}); } catch (e) { ok(false, 'runL10ReessaiFichierTests : ' + (e.stack || e)); }
+try { await runL10HorsLigneActualisationTests({eq,ok}); } catch (e) { ok(false, 'runL10HorsLigneActualisationTests : ' + (e.stack || e)); }
 try { await runL7ObservationsBaseTests({eq,ok}); } catch (e) { ok(false, 'runL7ObservationsBaseTests : ' + (e.stack || e)); }
 
 try { await runL7CuisineArchiveTests({eq,ok}); } catch (e) { ok(false, 'runL7CuisineArchiveTests : ' + (e.stack || e)); }
@@ -643,7 +683,7 @@ try { await runL7MinuteursCommandesTests({eq,ok}); } catch (e) { ok(false, 'runL
 try { await runL7MinuteursDepotEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursDepotEcranTests : ' + (e.stack || e)); }
 try { await runL7MinuteursEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursEcranTests : ' + (e.stack || e)); }
 try { await runL7VoixTests({eq,ok}); } catch (e) { ok(false, 'runL7VoixTests : ' + (e.stack || e)); }
-eq(results.length, 11261,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 11497,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

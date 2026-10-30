@@ -1,3 +1,4 @@
+import {lireLivraison} from './livraison-fixture.js';
 // Suite L3 — envoi et réception (spec § 5.3, § 5.5). Transport factice : aucun réseau.
 import { classerErreur, createTransport } from '../src/sync/transport.js';
 import { createAuth } from '../src/sync/auth.js';
@@ -1862,20 +1863,20 @@ export async function runSyncL3Tests({ eq, ok }) {
   // Un module atteignable et absent de SHELL fait répondre 404 à cache.addAll : l'installation du service worker
   // échoue EN ENTIER et il n'y a plus aucune consultation hors connexion.
   {
-    const source = await (await fetch('../sw.js', { cache: 'no-store' })).text();
-    const liste = [...(source.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] || '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    const source = await lireLivraison();
+    const liste = source.chemins;
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.31\.0-\d+'/.test(source), 'sw.js : VERSION incrémentée (format cuisine-os-vMAJOR.MINOR.PATCH-N), l’ancien cache est purgé à l’activation');
+    ok(/^0\.32\.0-[1-9]\d*$/.test(source.release), 'manifeste : livraison incrémentée (format MAJOR.MINOR.PATCH-N), la livraison conserve son identité immuable');
     // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
     // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
     // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever). Le contrôle porte
     // sur le MAJOR.MINOR.PATCH (pas le suffixe -N, qui avance à chaque tâche touchant un fichier servi) : il reste
     // vrai tâche après tâche sans retouche, tant que les deux ne divergent jamais (R-UX-5).
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(source.match(/VERSION = 'cuisine-os-v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+'/)?.[1], APP_VERSION,
-      'sw.js et APP_VERSION disent la même version');
+    eq(source.release.split('-')[0], APP_VERSION,
+      'Le manifeste et APP_VERSION disent la même version');
   }
 
   // --- Ronde 1 du câblage --------------------------------------------------

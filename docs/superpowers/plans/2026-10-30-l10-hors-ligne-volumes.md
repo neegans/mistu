@@ -1,6 +1,6 @@
 # L10 — Plan de construction et réception hors ligne
 
-**30 octobre 2026 — préparation documentaire uniquement, revue B/A intégrée.** [Spec](../specs/2026-10-29-l10-hors-ligne-volumes-design.md), plan directeur §17. Base reçue : **L9 0.31.0, DB6, archive7**, code `ed454203`, reçu `14cc996` ; cible **L10 0.32.0, DB6, archive7**, sans migration SQL. Réception L9 acquise ; la construction attend le commit des signatures et le GO. Aucun code, test de succès ou essai physique L10 réalisé. La poursuite globale est autorisée ; aucune relecture personnelle de Neegan n’est revendiquée.
+**30 octobre 2026 — réception locale terminée après contrat `145ccf1`, publication en préparation.** [Spec](../specs/2026-10-29-l10-hors-ligne-volumes-design.md), plan directeur §17. Base reçue : **L9 0.31.0, DB6, archive7**, code `ed454203`, reçu `14cc996` ; cible **L10 0.32.0, DB6, archive7**, sans migration SQL. Réception L9 acquise ; le GO technique du §6 a suivi le commit des signatures. Les sections 1–5 décrivent le plan initial ; les reçus ci-dessous consignent les résultats effectivement lus. La poursuite globale est autorisée ; aucune relecture personnelle de Neegan n’est revendiquée.
 
 Construire après GO explicite sur le contrat fermé. Annexes : [livraison A](../specs/2026-10-30-l10-protocole-livraison.md), [hors ligne B](../specs/2026-10-30-l10-protocole-hors-ligne.md), [conservation et diagnostic C](../specs/2026-10-30-l10-protocole-conservation.md). Le lot réutilise les repas, versions, traductions, fichiers, archives et gardes existants. Pas de second moteur de synchronisation, nouveau magasin synchronisé, migration SQL ou format d’archive pour le diagnostic local.
 
@@ -126,3 +126,64 @@ Base publique L9 code `ed454203`, reçu `14cc996`, 11262/11262 publics. Les troi
 Aucun commit ni déploiement par les agents. Pas d'édition simultanée d'un même fichier sans transfert explicite. Les témoins causaux précèdent les corrections. Aucun SQL, changement de DB6 ou d'archive7 prévu. Les résultats d'implémentation restent à recevoir.
 
 Mesure de référence L9 sur données synthétiques, avant construction L10 : 123 recettes, 124 versions, 100 pages, 103 images dont trois3200×2400 et un PDF, 18 266 307 octets. Pagination réelle123, export/inspection/restauration et décodage des103 images réussis dans Chrome156 sur Apple M3 Pro ; aucun essai physique iPhone. Artefacts `volumes-l9/resultat.json` et harnais dans `.superpowers/sdd/2026-10-30-l10/`. Ce reçu de référence ne certifie pas la préparation hors ligne L10.
+
+
+## 7. Réception de volume et de présentation — locale
+
+Jeu synthétique : **123 recettes, 124 versions, 100 pages image, 103 images au total dont trois 3200×2400, un PDF valide et quatre traductions**, dont une partielle et deux candidates pour la même version. Les trois grandes images représentent chacune 30 720 000 octets RGBA après décodage ; les 100 autres pages font 512×768. Fichiers compressés : **18 266 307 octets**. La version demandée par le repas diffère volontairement de la version courante.
+
+Chrome **156.0.8078.76**, macOS arm64, **Apple M3 Pro**, RAM système 19 327 352 832 octets ; profil isolé et service worker bloqué pour cette mesure. Aucun résultat « prêt hors ligne » n’est revendiqué par ce harnais : le cycle réel est reçu séparément.
+
+| Mesure locale | Résultat |
+| --- | --- |
+| Bibliothèque avec rechargement | 253 ms ; pagination réelle 60 → 120 → 123 |
+| Livre de 100 pages | 126 ms |
+| Repas de trois recettes | 71 ms |
+| Préparation de trois recettes et sept médias | 211 ms ; relecture 169 ms |
+| Médias du repas | Six images décodées, PDF conservé ; 16 084 130 octets connus |
+| Export ZIP / inspection | 107,6 / 74 ms |
+| Restauration / vérification | 84,6 / 47,1 ms |
+| Décodage des 103 images restaurées | 253,6 ms |
+| ZIP complet | 18 577 123 octets, 104 fichiers ; aucun manque ni avertissement |
+| Tas JavaScript observé | Pic échantillonné 26 528 884 octets ; tas alloué 51 609 600 octets |
+
+La mémoire a été échantillonnée toutes les 50 ms (74 observations) ; elle exclut la mémoire native des images et du processus. Ces durées sont des observations sur cet ordinateur, pas une garantie de performance sur téléphone. La vérification garde au plus deux décodages en cours ; les blobs ne sont pas conservés dans le résultat du panneau.
+
+Une seconde archive contient une copie réduite connue, une copie dont l’original est inconnu et un fichier manquant : chacun conserve son état après restauration. Les images des copies sont décodées ; le manque reste sans blob. Le brouillon local et la réponse brute synthétique sont effectivement exclus, sans les effacer de la base source. Archive partielle : 18 624 127 octets, 106 entrées de fichiers.
+
+Présentation : **24 configurations** (repas, bannière, diagnostic × 320/390/768/1280 px × texte 100/200 %), sans débordement horizontal et avec commandes d’au moins 44 px. La bannière est injectée uniquement pour mesurer l’affichage ; elle ne constitue pas une preuve de mise à jour réelle. Le refus simulé du presse-papiers affiche le diagnostic sélectionnable, sans texte de recette, note, identifiant ou empreinte privée. Les captures ont conduit à réduire les marges imbriquées du panneau et à corriger le débordement de certains textes/boutons historiques de Réglages.
+
+## 8. Contre-vérifications causales et revues
+
+Root a reproduit puis relu quatre contre-épreuves indépendantes sur B : notification de livraison pendant la vérification, portée initiale incompatible, deux vérifications concurrentes et note modifiée durant la relecture finale. Les défauts initiaux (auto-invalidation, seconde passe acceptant une portée incompatible et quatre décodages simultanés) ont reçu des témoins permanents avant correction. Les résultats finaux gardent le bon état et au plus deux décodages.
+
+La revue C du worker a prouvé que des métadonnées anciennes mal formées pouvaient autoriser un nettoyage : les trois formes null/suffixe texte/saut de ligne sont désormais refusées sans effacement. La revue du démarrage a reproduit l’enregistrement suspendu qui empêchait l’accès au contrôleur déjà disponible ; les délais et recours sont désormais éprouvés. Le générateur a reçu un témoin causal pour les expressions régulières contenant des guillemets, puis la lecture de tous les modules réels. Aucun module métier n’a été réécrit pour contourner le scanner.
+
+La conservation explicite réutilise les gardes montées et vérifie leur portée. Le défaut de seconde boîte de sortie pendant une conservation et le vol de focus après refus tardif du presse-papiers ont chacun reçu leur reproduction puis leur correction. Les résultats complets, le cycle réel A/B et la réception publique restent à ajouter avant de déclarer L10 terminé.
+
+
+## 9. Réception locale finale — livraison 0.32.0-2
+
+**11498/11498** assertions navigateur (épingle11497), **271/271** tests Node, générateurs migrations et livraison `--check` à0, syntaxe49 fichiers et diff propres. Zéro erreur JavaScript ou requête extérieure. Progression **+236** depuis L9 ; aucun scénario retiré. Les anciens filets de sources lisent désormais le manifeste validé ; le test Aperçus web conserve son blocage réseau métier et utilise le lecteur réseau original pour cet inventaire documentaire. Le contrôle Node du README suit sa nouvelle structure tout en gardant le contrat compte/clé côté serveur. Ces adaptations n’affaiblissent pas les comportements métier testés.
+
+Livraison finale : **208 fichiers, 3 605 171 octets**, SHA256 du manifeste `500570fb449db2090cd7a43d28e0a70e90dca687a9dedbe6d3fc0bea7e83cf86`. `0.32.0-1` n’a jamais été publiée ; le suffixe2 ferme le chargement accessible du démarrage et la largeur du titre repas. Le générateur refuse de réécrire une identité de livraison avec d’autres octets. Les79 nouvelles entrées EN sont intégrées ; le petit recours de démarrage reste en français avant le montage des traductions et des données métier.
+
+| Réception | Résultat et portée |
+| --- | --- |
+| Ciblés B | 99/99 ; diagnostic, fermetures exactes, médias, concurrence, réessai conditionné, protection d’actualisation |
+| Régression synchronisation | 318/318, inventaire adapté, mêmes assertions historiques |
+| Ciblés C | 98/98 ; conservation, réponse L6 réellement montée avec quota/fournisseur injectés, formulaires et diagnostic |
+| Démarrage | 18/18, dont rouge puis vert du chargement accessible ; reprise après erreur contre-vérifiée |
+| Cycle A/B réel | 14 contrôles : deux fenêtres, B incomplète, import tardif A, B en attente, fermeture puis B, éviction/réparation et reload hors ligne |
+| Transition historique réelle | 14 contrôles : worker L9 exact, dépendance reçue lors d’un update, ancien cache conservé, adoption explicite et nouvelle livraison après fermeture |
+| Application finale réelle | 14 contrôles : première visite, véritable diagnostic copié, cache208 ressources, deux onglets et reload hors ligne |
+| Repas réel final | 34 contrôles /5 mesures, ancienne version et candidateB exactes, média exclu, traduction partielle nommée, note/photo/page512×768 décodée après reload hors ligne |
+| Présentation | 24 configurations, quatre largeurs et texte100/200 %, captures relues |
+
+Le cycle A/B utilise de petites applications synthétiques avec les vrais modules/protocole ; la transition historique utilise le vrai worker L9 et sa dépendance avec métier synthétique. Ils sont distincts des parcours de la véritable application et de la vraie base de recettes synthétiques. Aucun compte utilisateur ni appel payé réel n’est utilisé.
+
+Le dernier défaut B reproduit était la perte des choix du panneau au refresh de synchronisation : sa protection montée empêche ce remontage et se libère avec **Fermer la préparation** ou à la navigation volontaire, sans déclarer une saisie enregistrée. Quatre rouges causaux puis cinq contrôles verts. La conservation globale refuse honnêtement cette autre protection connue tant qu’elle est présente.
+
+Le démarrage retirait trop tard `aria-busy` : l’écran de connexion était déjà disponible mais restait annoncé occupé. Le témoin causal précède sa correction ; la vraie porte, la vraie application et le reload hors ligne sont maintenant reçus. Le titre d’un plat à320px/texte200% disposait de quelques pixels à côté de sa vignette ; il passe désormais sous la photo avec **124px** de largeur. La preuve historique375px/texte normal reste verte. Captures finales relues par root/B/C.
+
+**APP_VERSION0.32.0, DB6 et archive7 inchangés ; aucune migration SQL.** README et AGENTS décrivent désormais l’inventaire généré et les vérifications exécutables. Publication autorisée par la poursuite/déploiement du contexte ; son résultat doit être ajouté après comparaison des fichiers publics et parcours réels. Aucun essai physique iPhone/Safari/PWA, lecteur vocal, éviction OS ou transfert Cookidoo/TM7 n’est revendiqué.
