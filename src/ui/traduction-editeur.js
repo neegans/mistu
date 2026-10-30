@@ -35,7 +35,7 @@ export async function renderTraductionEditeur(params,query,ctx,deps={}){
   const hote=el('div',{class:'stack'});root.append(hote);
   root.dispose=()=>{dispose=true;vol?.detruire();retirerGarde?.();controleur?.detruire();};root.flushEditeur=()=>controleurSortie?.flush()||Promise.resolve({issue:'ok'});root.etatEditeur=()=>controleurSortie?.etat();
   const p=await depot.capturerPortee({owner_id:ctx.proprietaireDonnees??null,estCourante});if(p.issue!=='ok'){hote.append(el('p',{role:'status'},erreurTraduction(p)));return root;}const portee=p.portee;
-  const lectures=new Map();let erreurs,comparaison,propositions,actionsLecture,etatLecture,selection;
+  const lectures=new Map();let erreurs,comparaison,propositions,actionsLecture,etatLecture,selection,actualiserCommandesVol=()=>{};
   const afficherErreur=r=>{if(erreurs){erreurs.textContent=erreurTraduction(r);erreurs.hidden=false;}};
   const comparer=async()=>{const r=await controleur.flush();if(r.issue!=='ok'){afficherErreur(r);return;}const e=controleur.etat(),c=await depot.comparerBrouillon({id:e.id,portee,expectedRevision:e.revision});if(!estCourante())return;if(c.issue!=='ok'){afficherErreur(c);return;}comparaison.replaceChildren(panneauComparaisonBrouillon({service,id:e.id,portee,revision:e.revision,session:sessionActive,resultat:c,estCourante,onReprendre:monter}));};
   async function montrerLecture(journalId){
@@ -86,14 +86,27 @@ export async function renderTraductionEditeur(params,query,ctx,deps={}){
       const f=await controleur.flush();if(f.issue!=='ok'){afficherErreur(f);return;}const r=await depot.preparerLectureTraduction({session:sessionActive,selection:[...selection],limiteAppels:32});if(!estCourante())return;if(r.issue!=='ok'){afficherErreur(r);return;}
       actionsLecture.replaceChildren(el('p',null,t('Cette sélection demande au maximum {n} appels à l’assistant.',{n:r.bilan.appelsMax})),el('p',{class:'muted'},t('La série se met en pause si la réserve de 8 réponses ou de 8 Mio est pleine. Aucune réponse conservée ne sera relancée automatiquement.')),el('button',{class:'btn primary',type:'button',dataset:{role:'lancer-traduction'},onClick:async()=>{
         actionsLecture.querySelector('button').disabled=true;
-        if(!vol)vol=creerLectureTraduction({depot,provider,repo,estCourante,onEtat:e=>{etatLecture.textContent=e.statut==='en_cours'?t('Traduction en cours…'):e.statut==='a_conserver'?t('La réponse est reçue, mais sa conservation a échoué. Réessaie de la conserver sans nouvel appel.'):e.statut==='termine'?t('Les réponses reçues sont conservées et prêtes à relire.'):e.raison?erreurTraduction(e):'';},onLecture:r=>montrerLecture(r.journalId)});
+        if(!vol)vol=creerLectureTraduction({depot,provider,repo,estCourante,onEtat:e=>{etatLecture.textContent=e.statut==='en_cours'?t('Traduction en cours…'):e.statut==='a_conserver'?t('La réponse est reçue, mais sa conservation a échoué. Réessaie de la conserver sans nouvel appel.'):e.statut==='termine'?t('Les réponses reçues sont conservées et prêtes à relire.'):e.raison?erreurTraduction(e):'';actualiserCommandesVol(e);},onLecture:r=>montrerLecture(r.journalId)});
         const result=await vol.lancer({plan:r.plan,ordinals:r.portions.map((p,i)=>p.ordinal??i)});if(estCourante()&&!['termine','pause'].includes(result.issue))afficherErreur(result);
       }},t('Lancer cette traduction')));
     }},t('Préparer la traduction avec l’assistant'));
-    hote.replaceChildren(statutBrouillon(controleur),el('p',{class:'muted'},t('Cette traduction reste liée à cette version. Les quantités, les réglages et la recette originale ne seront pas modifiés.')),champs,preparer,actionsLecture,etatLecture,
-      el('div',{class:'row'},el('button',{class:'btn',type:'button',onClick:()=>vol?.annuler()},t('Annuler l’appel')),el('button',{class:'btn',type:'button',onClick:async()=>{const r=await vol?.reessayerConservation();if(r&&r.issue!=='conserve')afficherErreur(r);}},t('Réessayer de conserver la réponse')),el('button',{class:'btn',type:'button',onClick:()=>{const bytes=vol?.reponseEnAttente();if(bytes)downloadBlob(new Blob([bytes],{type:'application/octet-stream'}),'reponse-traduction-non-conservee.bin');}},t('Récupérer la réponse non conservée'))),propositions,erreurs,comparaison,
+    let conservationEnCours=false;
+    const annuler=el('button',{class:'btn',type:'button',onClick:()=>vol?.annuler()},t('Annuler l’appel'));
+    const conserver=el('button',{class:'btn',type:'button',onClick:async()=>{if(conservationEnCours||!vol?.etat().reponseAConserver)return;conservationEnCours=true;actualiserCommandesVol();try{const r=await vol.reessayerConservation();if(r.issue!=='conserve')afficherErreur(r);}finally{conservationEnCours=false;actualiserCommandesVol();}}},t('Réessayer de conserver la réponse'));
+    const recuperer=el('button',{class:'btn',type:'button',onClick:()=>{const bytes=vol?.reponseEnAttente();if(bytes)downloadBlob(new Blob([bytes],{type:'application/octet-stream'}),'reponse-traduction-non-conservee.bin');}},t('Récupérer la réponse non conservée'));
+    const commandesVol=el('div',{class:'row'},annuler,conserver,recuperer);
+    actualiserCommandesVol=(e=vol?.etat())=>{
+      annuler.hidden=e?.statut!=='en_cours';annuler.disabled=annuler.hidden;
+      conserver.hidden=!e?.reponseAConserver;conserver.disabled=conserver.hidden||conservationEnCours;
+      recuperer.hidden=!e?.reponseAConserver||!vol?.reponseEnAttente();recuperer.disabled=recuperer.hidden;
+      commandesVol.hidden=[annuler,conserver,recuperer].every(b=>b.hidden);
+    };
+    actualiserCommandesVol();
+    const panneauAssistant=el('div',{class:'stack',dataset:{role:'assistant-traduction'}},preparer,actionsLecture,etatLecture,commandesVol);
+    if(!provider.configured)panneauAssistant.append(carteConnexion(()=>demarrerConnexion(ctx),ctx));
+    const contenu=query.assistant==='1'?[panneauAssistant,champs]:[champs,panneauAssistant];
+    hote.replaceChildren(statutBrouillon(controleur),el('p',{class:'muted'},t('Cette traduction reste liée à cette version. Les quantités, les réglages et la recette originale ne seront pas modifiés.')),...contenu,propositions,erreurs,comparaison,
       el('div',{class:'row'},garder,el('button',{class:'btn',type:'button',onClick:comparer},t('Comparer les valeurs')),el('button',{class:'btn',type:'button',onClick:async()=>{const r=await depot.copierBrouillon({session:sessionActive,payload:structuredClone(modele)});if(r.issue==='ok')await monter({...r,source,aConserver:true});else afficherErreur(r);}},t('Conserver une copie séparée'))),boutonsRecuperationTexte(()=>modele.segments.map(s=>s.text||'').join('\n\n')));
-    if(!provider.configured)hote.append(carteConnexion(()=>demarrerConnexion(ctx),ctx));
     dessinerLectures();if(ouverture.aConserver)controleur.modifier();
   }
   async function publier(){

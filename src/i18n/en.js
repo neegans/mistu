@@ -2239,4 +2239,13 @@ export const EN = {
   "Les fichiers comptés sont ceux référencés dans cette bibliothèque. Leur présence ne certifie pas leur lecture hors ligne. Une valeur inconnue reste indiquée comme telle.": "The files counted are those referenced in this library. Their presence does not confirm they can be read offline. Unknown values remain marked as unknown.",
   "Recette non vérifiée": "Recipe not verified",
   "Fermer la préparation": "Close preparation",
+  "Texte original affiché.": "Original text displayed.",
+  "Choisis une traduction ci-dessous pour l’afficher.": "Choose a translation below to display it.",
+  "Cette recette est déjà en anglais.": "This recipe is already in English.",
+  "Cette recette est déjà en français.": "This recipe is already in French.",
+  "Traduction anglaise non disponible. Le texte original est affiché.": "English translation unavailable. The original text is displayed.",
+  "Traduction française non disponible. Le texte original est affiché.": "French translation unavailable. The original text is displayed.",
+  "Traduction anglaise affichée.": "English translation displayed.",
+  "Traduction française affichée.": "French translation displayed.",
+  "Le coût en appels est indiqué avant de lancer la traduction. Traduction manuelle sans appel.": "The call cost is shown before starting the translation. Manual translation uses no calls.",
 };

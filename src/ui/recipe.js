@@ -9,7 +9,7 @@ import { lireEtatRecette } from '../domain/cycle-edition.js';
 // « Avec quoi on mange ça ? », autres recettes du plat, historique et « Refaire comme la dernière fois ».
 import { el, toast, chooseDialog, promptDialog, confirmDialog, formatDate, formatMinutes, downloadBlob } from '../core/dom.js';
 import { t, label } from '../core/i18n.js';
-import { navigate, buildQuery, refresh } from '../core/router.js';
+import { navigate, buildQuery, refresh, parseHash, remplacerAdresse } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { currentVersion } from '../domain/search.js';
 import { sectionLisible } from '../domain/llm.js';
@@ -265,7 +265,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   if (original) versionOptions.push({ value: original.id, label: libelleOption(original, { adaptation: false }) });
   for (const a of adaptations) versionOptions.push({ value: a.id, label: libelleOption(a, { adaptation: true }) });
   const estUneCreation = estCreationIA(version);
-  const selectVersion = (id) => navigate(`/recipes/${rid}${buildQuery({ ...query, v: id, servings: state.servings || '', lang:state.lang })}`, { replace: true });
+  const selectVersion = (id) => navigate(`/recipes/${rid}${buildQuery({ ...query, v: id, translation:undefined, servings: state.servings || '', lang:state.lang })}`, { replace: true });
   // Les gestes de tête (D-UI-6, B-I-8) : les repères, le lien d'origine (toute adresse lisible, http compris : I-B5), puis « Commencer à cuisiner » pleine
   // largeur et, tant que la version AFFICHÉE n'est pas vérifiée, « Corriger » en lien texte à côté — le seul geste que « — vérifie » et « {n} lignes à
   // vérifier » réclament ; il reste aussi dans « autres gestes ».
@@ -289,14 +289,23 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // « Commencer à cuisiner » et le « Corriger » de tête — replié sous 760 px, ouvert au-dessus (le matchMedia, relu sur change) ; jamais « Réglages »
   // (l'app a déjà un écran de ce nom). L'Export reste en bas de la fiche, hors du details (H-3).
   const langues=[{value:'original',label:t('Original')},{value:'fr',label:t('Français')},...((recipe.original_language?.startsWith('en')||(ctx.recipe_translations||[]).some(x=>x.recipe_version_id===version.id&&x.locale==='en'))?[{value:'en',label:t('Anglais')}]:[])];
+  const conserverLangue = () => {
+    query = {...query,lang:state.lang,translation:state.translationId||undefined};
+    const adresse=`#/recipes/${rid}${buildQuery(query)}`;
+    // Remplacer l'entrée courante conserve le choix après synchronisation/rechargement sans remonter la fiche.
+    if(deps.historique?.remplacer)deps.historique.remplacer(adresse);
+    else if(root.isConnected&&parseHash().path===`/recipes/${rid}`)remplacerAdresse(adresse);
+  };
   const langueLecture = segmented(langues, state.lang, (valeur) => {
     state.lang = valeur;state.translationId=null;
-    // Le corps se redessine, mais ce contrôle reste monté dans le volet : son état doit suivre la lecture.
+    conserverLangue();
+    // Le contrôle reste monté, y compris son focus clavier.
     langueLecture.selectionner(valeur);
     drawBody();
   }, {nom:t('Langue de lecture')});
   langueLecture.dataset.role='langue-recette';
-  const choixLangue=el('div',{class:'lecture-langue stack'},el('span',{class:'muted'},t('Langue de lecture')),langueLecture);
+  const avisLecture=el('div',{class:'stack',dataset:{role:'etat-lecture'}});
+  const choixLangue=el('div',{class:'lecture-langue stack'},el('span',{class:'muted'},t('Langue de lecture')),langueLecture,avisLecture);
   etat.insertBefore(choixLangue,etat.querySelector('.resume-reperes'));
   const unitesLecture = segmented([{value:'original',label:t('Original')},{value:'metric',label:t('Métrique')},{value:'us',label:'US'}], state.units, v => {
     state.units=v;unitesLecture.selectionner(v);drawBody();
@@ -415,12 +424,19 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
       if(!lectureSeule)li.append(el('button',{class:'btn link small remplacer',onClick:()=>modifier(contexte=>replaceIngredient(ri,contexte,i))},t('Remplacer')));
       ingList.append(li);
     }
-    const avisLecture=el('div',{class:'stack',dataset:{role:'etat-lecture'}});
+    avisLecture.replaceChildren();
+    const messageLecture=state.lang==='original'?t('Texte original affiché.')
+      :projection.candidates.length>1&&!state.translationId?t('Choisis une traduction ci-dessous pour l’afficher.')
+      :!projection.traductionDemandee?(state.lang==='en'?t('Cette recette est déjà en anglais.'):t('Cette recette est déjà en français.'))
+      :!projection.traductionId?(state.lang==='en'?t('Traduction anglaise non disponible. Le texte original est affiché.'):t('Traduction française non disponible. Le texte original est affiché.'))
+      :projection.manque?t('Les passages non traduits restent dans leur langue d’origine.')
+      :state.lang==='en'?t('Traduction anglaise affichée.'):t('Traduction française affichée.');
+    avisLecture.append(el('p',{class:projection.manque?'status warn':'muted',role:'status'},messageLecture));
     if(projection.structure==='invalide')avisLecture.append(el('p',{class:'status warn'},t('Les groupes sont à vérifier. Tous les ingrédients sources restent consultables.')));
-    if(projection.candidates.length>1)avisLecture.append(field(t('Plusieurs traductions existent. Choisis celle à lire.'),select([{value:'',label:t('Original')},...projection.candidates.map((x,i)=>({value:x.id,label:t('Traduction {n}',{n:i+1})}))],state.translationId||'',id=>{state.translationId=id||null;drawBody();})));
-    else if(projection.traductionDemandee&&projection.manque)avisLecture.append(el('p',{class:'status warn'},t('Les passages non traduits restent dans leur langue d’origine.')));
+    if(projection.candidates.length>1)avisLecture.append(field(t('Plusieurs traductions existent. Choisis celle à lire.'),select([{value:'',label:t('Original')},...projection.candidates.map((x,i)=>({value:x.id,label:t('Traduction {n}',{n:i+1})}))],state.translationId||'',id=>{state.translationId=id||null;conserverLangue();drawBody();avisLecture.querySelector('select')?.focus();})));
     if(projection.contenuAncien){avisLecture.append(textesTraductionConserves(projection.contenuAncien));if(!lectureSeule)avisLecture.append(el('a',{class:'btn small',href:lienEdition('translation',version.id,state.lang,{legacy:true})},t('Vérifier l’ancienne traduction')));}
     if(!lectureSeule)avisLecture.append(el('div',{class:'row'},el('a',{class:'btn small',href:lienEdition('translation',version.id,'fr',{format:2,assistant:true})},t('Traduire en français avec l’assistant')),el('a',{class:'btn small',href:lienEdition('translation',version.id,state.lang==='en'?'en':'fr')},t('Traduire moi-même'))));
+    if(!lectureSeule)avisLecture.append(el('small',{class:'muted'},t('Le coût en appels est indiqué avant de lancer la traduction. Traduction manuelle sans appel.')));
     // § 3.3, C-6, C-9 : sur une création, ce que l'assistant a dit (préfixé « Selon l’assistant »), sa durée ESTIMÉE (jamais dans
     // timeText), et l'avertissement fixe — relus et rebornés par lireCreation (une ligne reçue peut porter n'importe quoi), en texte seul.
     const lc = lireCreation(version);
@@ -436,7 +452,6 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     const ingredients = sectionPlain(`${t('Ingrédients')}${scaled.ok && scaled.factor !== 1 ? ` — ${t('recalculés pour {n} portions', { n: state.servings })}` : version.servings ? ` — ${t('{n} portions', { n: version.servings })}` : ''}`,
       el('div', { class: 'row between' }, el('span', { class: 'muted' }, timeText(version, recipe)), dietSel),
       assessment ? el('div', { style: { margin: '.4rem 0' } }, dietChip(assessment), assessment.unknown.length ? el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `${t('Inconnus')} : ${assessment.unknown.join(', ')}`) : null) : null,
-      avisLecture,
       ingList, ...scaled.notes.map((n) => el('small', { class: 'muted', style: { display: 'block' } }, n)),
       !conventionId && scaled.ingredients.some((i) => ['cup', 'tbsp', 'tsp', 'fl_oz'].includes(i.unit_id)) ? el('div', { class: 'status warn', style: { marginTop: '.5rem' } }, t('Tasses/cuillères : convention non confirmée pour cette édition — quantités d’origine affichées.'), edition ? el('a', { class: 'btn small', href: `#/books/${edition.id}` }, t('Préciser')) : null) : null);
     ingredients.dataset.role = 'section-ingredients';

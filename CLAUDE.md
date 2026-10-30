@@ -3815,3 +3815,10 @@ Parcours publics finaux : **14 contrôles** de démarrage/diagnostic réel/deux 
 Le défaut de refresh du diagnostic découvert publiquement est fermé par un témoin causal et la réception réelle. Node271/271, générateurs et syntaxe propres ; **DB6/archive7 inchangés, aucun SQL L10**.
 **Les lots de développement L0–L10 sont livrés. E1 est clos par décision documentaire : transfert Cookidoo manuel conservé, automatisation écartée pour cette livraison.** Les anciens états ci-dessous sont historiques. Restent distincts les essais sur les appareils réels de Neegan (iPhone/Safari/PWA, aller-retour avec son compte, stockage OS, voix et Cookidoo/TM7) ; aucun essai physique ou appel assistant payé n’est revendiqué.
 [Rapport de construction et réception L10](docs/superpowers/plans/2026-10-30-l10-hors-ligne-volumes.md).
+
+
+## Correctif des boutons de langue — 30 octobre 2026
+
+[Contrat](docs/superpowers/specs/2026-10-30-correctif-langue-recette-design.md), [réception](docs/superpowers/plans/2026-10-30-correctif-langue-recette.md).
+L’absence de traduction est annoncée près du sélecteur, avec les actions utilisables dans tous les onglets. Le choix de langue/candidate survit au refresh et au rechargement ; une autre version ne reprend pas une candidate étrangère. Préparation assistant remontée avant les champs ; commandes de vol rendues selon leur état réel.
+Rouges causaux puis24/24 fiche et26/26 éditeur ; suite11539/11539 (+35, aucun scénario supprimé), Node271/271, générateurs/syntaxe propres,24 contrôles réels Chrome dont hors ligne. Livraison0.32.0-5 générée, APP_VERSION0.32.0/DB6/archive7, aucun SQL ni appel payé. Publication encore à recevoir au présent enregistrement. Données privées de Trinity bread non consultées, aucun essai physique iPhone/Safari revendiqué.
