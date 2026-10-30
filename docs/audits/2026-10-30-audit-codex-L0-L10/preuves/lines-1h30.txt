@@ -1,0 +1,4 @@
+Cuire 1 h 30 à 180 °C => {"timers":[{"label":"1 h","seconds":3600}]}
+Cuire 1 h 30 puis servir => {"timers":[{"label":"1 h 30","seconds":5400}]}
+Cuire 1 h 30. => {"timers":[{"label":"1 h 30","seconds":5400}]}
+Laisser 2 h 15 au four => {"timers":[{"label":"2 h","seconds":7200}]}

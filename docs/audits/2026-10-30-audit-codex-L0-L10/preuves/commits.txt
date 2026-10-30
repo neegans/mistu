@@ -1,0 +1,43 @@
+247b2e5 2026-10-30 08:20:43 -0400 docs: record public acceptance of language controls fix
+fbbb76c 2026-10-30 08:16:40 -0400 fix: clarify recipe language controls and translation flow
+7fb583c 2026-10-30 03:58:05 -0400 docs: record final public L10 acceptance
+6532c43 2026-10-30 03:53:56 -0400 fix: preserve settings diagnostic across sync refreshes
+a54a4ce 2026-10-30 03:41:17 -0400 feat: deliver verified offline meals and immutable app updates
+145ccf1 2026-10-30 02:54:24 -0400 docs: define L10 offline and delivery contracts
+14cc996 2026-10-30 02:49:37 -0400 docs: record public L9 acceptance
+ed45420 2026-10-30 02:43:13 -0400 Improve L9 navigation keyboard dialogs and layout
+25e3420 2026-10-30 02:23:04 -0400 Document E1 decision on official Cookidoo automation
+36caf1f 2026-10-30 02:17:54 -0400 Specify L9 navigation dialogs and accessibility
+c9b2048 2026-10-30 02:15:30 -0400 Record L8 production verification
+9bb96ac 2026-10-30 02:11:44 -0400 Implement L8 meals groceries and guarded inventory
+1c42241 2026-10-30 01:32:00 -0400 docs: define L8 meals groceries and inventory contract
+f7e836a 2026-10-30 01:30:50 -0400 docs: record verified L7 production release
+8fb0784 2026-10-30 01:26:20 -0400 feat: persist cooking sessions and timers
+0e50996 2026-10-30 00:54:37 -0400 docs: fermer la reprise explicite des conflits cuisine
+e6360a9 2026-10-30 00:31:38 -0400 docs: preciser les interfaces cuisine avant raccords
+0900465 2026-10-30 00:30:43 -0400 docs: fixer le contrat L7 cuisine et minuteries
+c5b6c08 2026-10-30 00:20:39 -0400 docs: record verified L6 production release
+87855c4 2026-10-30 00:16:02 -0400 feat: preserve ingredient groups and versioned French translations
+3ca2255 2026-10-29 22:58:03 -0400 Specify L6 ingredient groups and complete translations
+8e6a82f 2026-10-29 22:54:16 -0400 docs: record L5 public and server verification
+66734c5 2026-10-29 22:44:27 -0400 Preserve source revisions and resume large indexes
+7c34255 2026-10-29 20:31:04 -0400 Specify L5 source revisions and resumable index
+db085ee 2026-10-29 20:14:43 -0400 docs: consigner la publication et la reception publique L4
+39a890a 2026-10-29 20:09:31 -0400 feat: conserver les brouillons et structurer les editeurs (L4)
+de858f9 2026-10-29 19:08:45 -0400 docs: definir les editeurs et brouillons durables L4
+9ecf826 2026-10-29 19:08:27 -0400 docs: consigner la publication et la reception publique L3
+ea25232 2026-10-29 19:04:51 -0400 feat: rendre la gestion et les retours de navigation visibles (L3)
+f869c18 2026-10-29 18:23:48 -0400 merge: conserver la reception publique du lot L2
+c555617 2026-10-29 18:23:41 -0400 docs: consigner la publication verifiee du lot L2
+6112fd1 2026-10-29 18:19:32 -0400 docs: definir la gestion visible et les retours de navigation L3
+fc407df 2026-10-29 18:16:44 -0400 merge: conserver le bilan de publication 0.23.2
+9ec738c 2026-10-29 18:16:27 -0400 feat: ajouter la corbeille des livres et proteger leurs sources
+5b1c5fa 2026-10-29 17:28:41 -0400 docs: consigner la publication verifiee des correctifs 0.23.2
+74af562 2026-10-29 17:27:06 -0400 merge: integrer les correctifs 0.23.2 avant la reprise L2
+5412745 2026-10-29 17:25:35 -0400 fix: securiser Thermomix et conserver les propositions payees
+acec0c0 2026-10-29 16:25:49 -0400 docs: definir la corbeille des livres et son contrat L2
+752566d 2026-10-29 16:20:23 -0400 docs: consigner la publication verifiee de L0 et L1
+d6b4488 2026-10-29 16:17:35 -0400 fix: retirer les textes parasites des courses et de la cuisine
+52338ec 2026-10-29 16:00:09 -0400 feat: ajouter la corbeille individuelle et proteger les cycles
+cf539fb 2026-10-29 14:02:20 -0400 docs: specifier la corbeille individuelle L1
+9c823b0 2026-10-29 11:37:56 -0400 fix: fiabiliser traductions repas cuisine et courses

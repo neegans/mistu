@@ -1,0 +1,7 @@
+### normal + rechargement
+{"t":1791,"texte":"Cuisine OSKwe.Ta bibliothèque de recettes, sur tous tes appareils.Connexion avec GoogleContinuer sans compte","busy":null,"ctrl":true,"caches":2}
+{"apresRechargement":true,"t":3008,"texte":"Cuisine OSKwe.Ta bibliothèque de recettes, sur tous tes appareils.Connexion avec GoogleContinuer sans compte","busy":null,"ctrl":true,"caches":2}
+console: info: Autofocus processing was blocked because a document already has a focused element. | info: Autofocus processing was blocked because a document already has a focused element.
+### sw.js bloque (reseau)
+{"t":2015,"texte":"Démarrage de MistuLa livraison hors ligne n’est pas vérifiée. Fermez les anciens onglets puis reprenez le démarrage, ou continuez en ligne sans cette garantie.Reprendre le démarrageContinuer en ligne","busy":"false","ctrl":false,"caches":0}
+console: error: An unknown error occurred when fetching the script.
