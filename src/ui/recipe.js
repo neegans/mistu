@@ -428,15 +428,20 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     const messageLecture=state.lang==='original'?t('Texte original affiché.')
       :projection.candidates.length>1&&!state.translationId?t('Choisis une traduction ci-dessous pour l’afficher.')
       :!projection.traductionDemandee?(state.lang==='en'?t('Cette recette est déjà en anglais.'):t('Cette recette est déjà en français.'))
-      :!projection.traductionId?(state.lang==='en'?t('Traduction anglaise non disponible. Le texte original est affiché.'):t('Traduction française non disponible. Le texte original est affiché.'))
+      :!projection.traductionId?(state.lang==='en'?t('Traduction anglaise non disponible. Le texte original est affiché.'):t('Crée une version française pour lire cette recette en français.'))
       :projection.manque?t('Les passages non traduits restent dans leur langue d’origine.')
       :state.lang==='en'?t('Traduction anglaise affichée.'):t('Traduction française affichée.');
     avisLecture.append(el('p',{class:projection.manque?'status warn':'muted',role:'status'},messageLecture));
     if(projection.structure==='invalide')avisLecture.append(el('p',{class:'status warn'},t('Les groupes sont à vérifier. Tous les ingrédients sources restent consultables.')));
     if(projection.candidates.length>1)avisLecture.append(field(t('Plusieurs traductions existent. Choisis celle à lire.'),select([{value:'',label:t('Original')},...projection.candidates.map((x,i)=>({value:x.id,label:t('Traduction {n}',{n:i+1})}))],state.translationId||'',id=>{state.translationId=id||null;conserverLangue();drawBody();avisLecture.querySelector('select')?.focus();})));
     if(projection.contenuAncien){avisLecture.append(textesTraductionConserves(projection.contenuAncien));if(!lectureSeule)avisLecture.append(el('a',{class:'btn small',href:lienEdition('translation',version.id,state.lang,{legacy:true})},t('Vérifier l’ancienne traduction')));}
-    if(!lectureSeule)avisLecture.append(el('div',{class:'row'},el('a',{class:'btn small',href:lienEdition('translation',version.id,'fr',{format:2,assistant:true})},t('Traduire en français avec l’assistant')),el('a',{class:'btn small',href:lienEdition('translation',version.id,state.lang==='en'?'en':'fr')},t('Traduire moi-même'))));
-    if(!lectureSeule)avisLecture.append(el('small',{class:'muted'},t('Le coût en appels est indiqué avant de lancer la traduction. Traduction manuelle sans appel.')));
+    const francaise=state.lang==='fr'?projection:projeterLectureRecette(lecturePreparee,{locale:'fr'});
+    const francaisePrete=!francaise.traductionDemandee||!!francaise.traductionId&&!francaise.manque;
+    if(!lectureSeule){
+      const href=francaisePrete?lienAvecOrigine(`/recipes/${rid}${buildQuery({...query,v:version.id,lang:'fr',translation:francaise.traductionId||undefined})}`,origine):lienEdition('translation',version.id,'fr',{format:2,assistant:true});
+      avisLecture.append(el('div',{class:'row'},el('a',{class:'btn primary',href,dataset:{role:'version-francaise'}},francaisePrete?t('Lire la version française'):francaise.traductionId?t('Compléter la version française'):t('Créer la version française')),el('a',{class:'btn small',href:lienEdition('translation',version.id,state.lang==='en'?'en':'fr')},t('Traduire moi-même'))));
+      if(!francaisePrete)avisLecture.append(el('small',{class:'muted'},t('Le coût en appels est indiqué avant de lancer la traduction. Traduction manuelle sans appel.')));
+    }
     // § 3.3, C-6, C-9 : sur une création, ce que l'assistant a dit (préfixé « Selon l’assistant »), sa durée ESTIMÉE (jamais dans
     // timeText), et l'avertissement fixe — relus et rebornés par lireCreation (une ligne reçue peut porter n'importe quoi), en texte seul.
     const lc = lireCreation(version);

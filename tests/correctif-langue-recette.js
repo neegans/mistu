@@ -20,9 +20,11 @@ export async function runCorrectifLangueRecetteTests({eq,ok}){
   const avis=()=>root.querySelector('[data-role=etat-lecture]');
   ok(!!avis()?.closest('.lecture-langue'),'Langue : état et accès traduction auprès des boutons');
   ok(!avis()?.closest('[data-role=section-ingredients]'),'Langue : état indépendant de l’onglet Ingrédients');
-  ok(avis()?.textContent.includes('Traduction française non disponible'),'Langue : absence de traduction explicitement nommée');
+  ok(avis()?.textContent.includes('Crée une version française'),'Langue : absence de traduction propose sa création');
   eq(root.querySelector('h1')?.textContent,'Bread','Langue : absence ne fabrique pas un titre traduit');
   const action=avis()?.querySelector('a[href*="assistant=1"]');
+  eq(action?.textContent,'Créer la version française','Langue : action annonce le résultat enregistré attendu');
+  ok(action?.classList.contains('primary'),'Langue : création française est l’action principale');
   ok(!!action?.closest('[data-role=fiche-etat]'),'Langue : préparation assistant visible dans l’en-tête');
   ok(avis()?.textContent.includes('avant de lancer la traduction'),'Langue : coût annoncé avant lancement sans nombre inventé');
   eq(new URLSearchParams(action?.hash.split('?')[1]).get('locale'),'fr','Langue : préparation vise le français');
@@ -46,6 +48,8 @@ export async function runCorrectifLangueRecetteTests({eq,ok}){
   ok(!!choix?.closest('.lecture-langue'),'Langue : choix concurrent près du sélecteur de langue');
   if(choix){choix.value='langue-seconde';choix.dispatchEvent(new Event('change',{bubbles:true}));}
   eq(root.querySelector('h1')?.textContent,'Pain','Langue : traduction choisie réellement affichée');
+  const lire=avis()?.querySelector('a[data-role=version-francaise]');
+  ok(lire?.hash.includes('translation=langue-seconde')&&!lire.hash.includes('assistant=1'),'Langue : version française complète se relit sans refaire la traduction');
   eq(parseHash(adresses.at(-1)||'').query.translation,'langue-seconde','Langue : candidate choisie conservée dans l’adresse');
   const adresseChoisie=parseHash(adresses.at(-1)||'');root.dispose?.();root.remove();
   root=await renderRecipe({id:f.recipe.id},adresseChoisie.query,ctx,deps);roots.push(root);scene.append(root);

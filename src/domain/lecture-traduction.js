@@ -41,7 +41,7 @@ export function creerLectureTraduction({depot,provider,onEtat=()=>{},onLecture=(
         const commence=await depot.commencerPortionTraduction({reservation:reserve.reservation});
         if(commence.issue==='deja_conserve'){let set=termines.get(plan);if(!set){set=new Set();termines.set(plan,set);}set.add(ordinal);if(commence.lecture&&!dispose&&estCourante())await onLecture(commence);continue;}
         if(commence.issue!=='ok'){notifier({statut:'pause',raison:commence.raison});return commence;}
-        const battre=()=>repo?.battre?.(reserve.journalId,DOCUMENT_ID)?.catch?.(()=>{});
+        const battre=()=>repo?.battre?.(reserve.journalId,new Date().toISOString())?.catch?.(()=>{});
         battre();if(repo?.battre)battement=setInterval(battre,BATTEMENT_MS);
         let reponse;
         try{reponse=await provider.completeTranslation({...commence.portion,signal:maTenue.controller.signal});}

@@ -22,7 +22,7 @@ export async function runL10LivraisonTests({eq,ok}){
 async function testerRechercheMiseAJour(api,{eq,ok,Canal}){
  const base='https://example.test/mistu/',hash='a'.repeat(64),suivant='b'.repeat(64),pause=()=>new Promise(r=>setTimeout(r,0));
  const worker=(release,manifest_sha256,state='activated')=>{const w=new EventTarget();Object.assign(w,{scriptURL:base+'sw.js',state,postMessage(req,ports){ports[0].postMessage({protocol:1,type:'shell_status',request_id:req.request_id,release,manifest_sha256,complete:true});}});return w;};
- function fixture(){const active=worker('0.32.0-1',hash),attente=worker('0.32.0-2',suivant,'installed'),reg=new EventTarget(),sw=new EventTarget();let updates=0,lectures=0,action=async()=>reg;Object.assign(reg,{scope:base,active,waiting:null,installing:null,update(){updates++;return action();}});Object.assign(sw,{controller:active,getRegistration:async()=>{lectures++;return reg;}});const service=api.creerControleLivraison({releasePage:'0.32.0-1',baseURL:base,serviceWorker:sw,MessageChannel:Canal,delaiMs:10,delaiRechercheMs:40});return{service,reg,sw,attente,updates:()=>updates,lectures:()=>lectures,action:fn=>action=fn};}
+ function fixture(){const active=worker('0.32.0-1',hash),attente=worker('0.32.0-2',suivant,'installed'),reg=new EventTarget(),sw=new EventTarget();let updates=0,lectures=0,connecte=true,action=async()=>reg;Object.assign(reg,{scope:base,active,waiting:null,installing:null,update(){updates++;return action();}});Object.assign(sw,{controller:active,getRegistration:async()=>{lectures++;return reg;}});const service=api.creerControleLivraison({releasePage:'0.32.0-1',baseURL:base,serviceWorker:sw,MessageChannel:Canal,delaiMs:10,delaiRechercheMs:40,enLigne:()=>connecte});return{service,reg,sw,attente,updates:()=>updates,lectures:()=>lectures,action:fn=>action=fn,reseau:valeur=>connecte=valeur};}
  const f=fixture();ok(typeof f.service.rechercherMiseAJour==='function','L10 recherche : opération réseau distincte disponible');if(!f.service.rechercherMiseAJour){f.service.dispose();return;}
  try{
   await f.service.verifier();api.installerControleLivraison(f.service,{mode:'controlee',manifest_sha256:hash});await f.service.verifier();
@@ -34,6 +34,19 @@ async function testerRechercheMiseAJour(api,{eq,ok,Canal}){
   f.action(async()=>{throw Error('hors ligne');});const erreur=await f.service.rechercherMiseAJour();eq([erreur.issue,erreur.raison],['echec','indisponible'],'L10 recherche : échec réseau ne devient pas absence de mise à jour');
   eq(f.service.etat().attente?.release,'0.32.0-2','L10 recherche : échec réseau conserve l’attente réellement connue');
  }finally{f.service.dispose();}
+ const horsLigne=fixture();try{
+  const connue=await horsLigne.service.verifier();horsLigne.reseau(false);
+  const r=await horsLigne.service.rechercherMiseAJour();eq([r.issue,r.raison,horsLigne.updates()],['echec','hors_ligne',0],'L10 recherche : réseau absent refuse avant update même si le navigateur le résoudrait');
+  ok(r.observation===connue,'L10 recherche : refus hors ligne conserve l’observation locale connue');
+  horsLigne.reseau(true);const reprise=await horsLigne.service.rechercherMiseAJour();eq([reprise.issue,horsLigne.updates()],['ok',1],'L10 recherche : retour réseau permet un nouvel essai après refus');
+ }finally{horsLigne.service.dispose();}
+ const coupureAvantUpdate=fixture();coupureAvantUpdate.sw.getRegistration=async()=>{coupureAvantUpdate.reseau(false);return coupureAvantUpdate.reg;};try{
+  const r=await coupureAvantUpdate.service.rechercherMiseAJour();eq([r.issue,r.raison,coupureAvantUpdate.updates()],['echec','hors_ligne',0],'L10 recherche : réseau relu après attente de registration avant update');
+ }finally{coupureAvantUpdate.service.dispose();}
+ const coupureRelecture=fixture();coupureRelecture.service.observer(()=>coupureRelecture.reseau(false));try{
+  const r=await coupureRelecture.service.rechercherMiseAJour();eq([r.issue,r.raison,coupureRelecture.updates()],['echec','hors_ligne',1],'L10 recherche : réseau perdu pendant la relecture interdit un succès de recherche');
+  ok(coupureRelecture.service.estCourante(r.observation),'L10 recherche : perte réseau garde la preuve locale courante sans certifier la recherche');
+ }finally{coupureRelecture.service.dispose();}
  const installation=fixture();let reglee=false;installation.attente.state='installing';installation.action(async()=>{installation.reg.installing=installation.attente;installation.reg.dispatchEvent(new Event('updatefound'));return installation.reg;});
  try{const p=installation.service.rechercherMiseAJour().then(r=>{reglee=true;return r;});await pause();await pause();ok(!reglee,'L10 recherche : installation en cours ne devient pas aucune mise à jour');installation.reg.waiting=installation.attente;installation.reg.installing=null;installation.attente.state='installed';installation.attente.dispatchEvent(new Event('statechange'));const r=await p;eq([r.issue,r.observation?.attente?.release],['ok','0.32.0-2'],'L10 recherche : fin d’installation relue avant résultat');}finally{installation.service.dispose();}
  const ratee=fixture();ratee.attente.state='installing';ratee.action(async()=>{ratee.reg.installing=ratee.attente;ratee.reg.dispatchEvent(new Event('updatefound'));return ratee.reg;});try{const p=ratee.service.rechercherMiseAJour();await pause();ratee.reg.installing=null;ratee.attente.state='redundant';ratee.attente.dispatchEvent(new Event('statechange'));const r=await p;eq([r.issue,r.raison],['echec','installation_echouee'],'L10 recherche : installation échouée reste un échec explicite');}finally{ratee.service.dispose();}

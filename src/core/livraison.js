@@ -7,7 +7,7 @@ export function installerControleLivraison(instance,{mode,manifest_sha256}={}){
  const i=internes.get(instance);if(!i||i.detruit()||singleton&&singleton!==instance||!['controlee','en_ligne_non_verifiee'].includes(mode))throw new ErreurLivraison('execution_invalide');
  i.admettre(mode,manifest_sha256);singleton=instance;return instance;
 }
-export function creerControleLivraison({releasePage,baseURL,serviceWorker=globalThis.navigator?.serviceWorker,MessageChannel=globalThis.MessageChannel,maintenant=()=>new Date().toISOString(),delaiMs=LIMITES_LIVRAISON.delai,delaiRechercheMs=30000}={}){
+export function creerControleLivraison({releasePage,baseURL,serviceWorker=globalThis.navigator?.serviceWorker,MessageChannel=globalThis.MessageChannel,maintenant=()=>new Date().toISOString(),delaiMs=LIMITES_LIVRAISON.delai,delaiRechercheMs=30000,enLigne=()=>globalThis.navigator?.onLine!==false}={}){
  const base=normaliserPorteeLivraison(baseURL);if(!releaseValide(releasePage))throw new ErreurLivraison('livraison_incompatible');
  const delai=Number.isFinite(delaiMs)?Math.max(1,Math.min(LIMITES_LIVRAISON.delaiMax,delaiMs)):LIMITES_LIVRAISON.delai;
  const delaiRecherche=Number.isFinite(delaiRechercheMs)?Math.max(1,Math.min(60000,delaiRechercheMs)):30000;
@@ -78,10 +78,12 @@ export function creerControleLivraison({releasePage,baseURL,serviceWorker=global
    timer=setTimeout(()=>fin('echec','delai'),delaiRecherche);
    void(async()=>{
     try{
+     if(!enLigne()){fin('echec','hors_ligne');return;}
      if(!serviceWorker?.getRegistration){fin('echec','indisponible');return;}
      const reg=await serviceWorker.getRegistration(base);if(fini)return;
      if(!reg||typeof reg.update!=='function'){fin('echec','indisponible');return;}
      if(reg.scope!==base){fin('echec','portee_incompatible');return;}
+     if(!enLigne()){fin('echec','hors_ligne');return;}
      regRecherche=reg;reg.addEventListener?.('updatefound',suivreInstallation);suivreInstallation();
      await reg.update();if(fini)return;
      const erreur=await new Promise(resoudre=>{attenteInstallation=resoudre;suivreInstallation();});attenteInstallation=null;
@@ -89,6 +91,7 @@ export function creerControleLivraison({releasePage,baseURL,serviceWorker=global
      let vue=await verifier();if(fini)return;
      // Une vérification invalidée par updatefound peut précéder celle de la nouvelle attente.
      while(!estCourante(vue)||vue.raison==='worker_change'){vue=await verifier();if(fini)return;}
+     if(!enLigne()){fin('echec','hors_ligne',vue);return;}
      fin('ok',null,vue);
     }catch{if(!fini)fin('echec','indisponible');}
    })();

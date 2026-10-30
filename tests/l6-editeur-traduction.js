@@ -27,16 +27,16 @@ export async function runL6EditeurTraductionTests({eq,ok}){
     const attendre=async test=>{for(let i=0;i<100;i++){if(test())return;await new Promise(r=>setTimeout(r,5));}throw Error('État du parcours de traduction attendu absent');};
     let appel=0,conservations=0,repondre,signalAppel;
     const provider={configured:true,completeTranslation:({signal})=>{appel++;signalAppel=signal;return new Promise(resolve=>{repondre=resolve;});}};
-    const depotVol={...depot,preparerLectureTraduction:async()=>({issue:'ok',plan:{},portions:[{ordinal:0}],bilan:{appelsMax:1}}),reserverPortionTraduction:async()=>({issue:'ok',journalId:'j-parcours',reservation:{}}),commencerPortionTraduction:async()=>({issue:'ok',portion:{},vol:{}}),conserverReponseTraduction:async()=>++conservations===1?{issue:'echec',raison:'quota_stockage'}:{issue:'conserve',journalId:'j-parcours'},lireLectureTraduction:async()=>({issue:'ok',lecture:{resultat:{segments:[]},remaining_refs:[]}})};
+    const depotVol={...depot,preparerLectureTraduction:async({selection})=>({issue:'ok',plan:{},portions:[{ordinal:0,segment_refs:source.segments.filter(s=>selection.includes(s.ref))}],bilan:{appelsMax:1}}),reserverPortionTraduction:async()=>({issue:'ok',journalId:'j-parcours',reservation:{}}),commencerPortionTraduction:async()=>({issue:'ok',portion:{},vol:{}}),conserverReponseTraduction:async()=>++conservations===1?{issue:'echec',raison:'quota_stockage'}:{issue:'conserve',journalId:'j-parcours'},lireLectureTraduction:async()=>({issue:'ok',lecture:{resultat:{segments:[]},remaining_refs:[]}})};
     const assiste=await renderTraductionEditeur({id:recipe.id},{kind:'translation',format:'2',v:version.id,locale:'fr',assistant:'1'},ctx,{depot:depotVol,provider});document.body.append(assiste);
     const bouton=texte=>[...assiste.querySelectorAll('button')].find(b=>b.textContent===texte),actif=texte=>{const b=bouton(texte);return !!b&&!b.disabled&&!b.closest('[hidden]');};
     const commandes=()=>['Annuler l’appel','Réessayer de conserver la réponse','Récupérer la réponse non conservée'].map(actif);
     const avantChamps=node=>!!(node.compareDocumentPosition(assiste.querySelector('[data-role=segment-traduction]'))&Node.DOCUMENT_POSITION_FOLLOWING);
     try{
-      ok(avantChamps(assiste.querySelector('[data-role=preparer-traduction]')),'Correctif traduction : entrée assistant propose la préparation avant les champs');
+      ok(avantChamps(assiste.querySelector('[data-role=lancer-traduction]')),'Traduction guidée : préparation locale et lancement avant les champs');
       eq(commandes(),[false,false,false],'Correctif traduction : aucune commande de vol active avant un appel');
       eq(appel,0,'Correctif traduction : entrée assistant ne lance aucun appel');
-      assiste.querySelector('[data-role=preparer-traduction]').click();await attendre(()=>assiste.querySelector('[data-role=lancer-traduction]'));
+      await attendre(()=>assiste.querySelector('[data-role=lancer-traduction]'));
       ok(avantChamps(assiste.querySelector('[data-role=lancer-traduction]')),'Correctif traduction : coût et lancement restent avant les champs');
       eq(appel,0,'Correctif traduction : préparer le coût ne lance aucun appel');
       assiste.querySelector('[data-role=lancer-traduction]').click();await attendre(()=>signalAppel);

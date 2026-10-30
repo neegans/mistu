@@ -120,6 +120,7 @@ import { runL6CommandesTraductionTests } from './l6-commandes-traduction.js';
 import { runL6LectureExportsTests } from './l6-lecture-exports.js';
 import { runL6LectureEcransTests } from './l6-lecture-ecrans.js';
 import { runCorrectifLangueRecetteTests } from './correctif-langue-recette.js';
+import { runTraductionGuideeTests } from './traduction-guidee.js';
 import { runL6LectureRecetteTests } from './l6-lecture-recette.js';
 import { runL6PasserelleBrutTests } from './l6-passerelle-brut.js';
 import { runL6StructureIngredientsTests } from './l6-structure-ingredients.js';
@@ -453,6 +454,8 @@ try { await runL6LectureRecetteTests({ eq, ok }); }
 catch (e) { ok(false, 'L6 lecture-recette : ' + (e.stack || e)); }
 try { await runCorrectifLangueRecetteTests({ eq, ok }); }
 catch (e) { ok(false, 'Correctif langue recette : ' + (e.stack || e)); }
+try { await runTraductionGuideeTests({ eq, ok }); }
+catch (e) { ok(false, 'Traduction guidée : ' + (e.stack || e)); }
 try { await runL6LectureEcransTests({ eq, ok }); }
 catch (e) { ok(false, 'L6 lecture-ecrans : ' + (e.stack || e)); }
 try { await runL6LectureExportsTests({ eq, ok }); }
@@ -688,7 +691,7 @@ try { await runL7MinuteursCommandesTests({eq,ok}); } catch (e) { ok(false, 'runL
 try { await runL7MinuteursDepotEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursDepotEcranTests : ' + (e.stack || e)); }
 try { await runL7MinuteursEcranTests({eq,ok}); } catch (e) { ok(false, 'runL7MinuteursEcranTests : ' + (e.stack || e)); }
 try { await runL7VoixTests({eq,ok}); } catch (e) { ok(false, 'runL7VoixTests : ' + (e.stack || e)); }
-eq(results.length, 11589,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 11683,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

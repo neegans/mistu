@@ -22,4 +22,22 @@ export async function runL6TraductionVolTests({eq,ok}){
   let sequence,states=[];sequence=creerLectureTraduction({depot,provider:{completeTranslation:async()=>{states.push(sequence.etat().statut);return{text:'{}',reponseBrute:new Uint8Array([123,125])};}}});await sequence.lancer({plan:{},ordinals:[0,1]});eq(states,['en_cours','en_cours'],'L6 vol : chaque portion protège la sortie pendant son appel');
   let replayCalls=0,replayShown=0;const replay=creerLectureTraduction({depot:{...depot,commencerPortionTraduction:async()=>({issue:'deja_conserve',journalId:'j0',lecture:{id:'j0'}})},provider:{completeTranslation:async()=>{replayCalls++;}},onLecture:()=>replayShown++});const replayResult=await replay.lancer({plan:{},ordinals:[0]});eq([replayResult.issue,replayCalls,replayShown],['termine',0,1],'L6 vol : réponse durable découverte au départ affichée sans nouvel appel');sequence.detruire();replay.detruire();
   vol.detruire();slow.detruire();reinitialiserVol();
+  // Un départ ancien sans device_id reste vivant si le contrôleur entretient son battement local.
+  const {withRepo}=await import('./sync-fixture.js'),{creerDepotTraductions}=await import('../src/domain/depot-traductions.js');
+  await withRepo(async(repo,db)=>{
+    await db.mutate({origin:'device',puts:{sync_state:[{key:'user_id',value:'vol-traduction'}]}});
+    const recipe={id:'vol-r',original_title:'Soup',original_language:'en',availability:'available',current_version_id:'vol-v'},version={id:'vol-v',recipe_id:'vol-r',ingredients:[],steps:[{id:'vol-s',text:'Mix.'}]};
+    await db.mutate({origin:'remote',puts:{recipes:[recipe],recipe_versions:[version]}});
+    const depotReel=creerDepotTraductions({repo,getGeneration:()=>0,maintenant:()=>new Date(Date.now()-11*60*1000).toISOString()}),portee=(await depotReel.capturerPortee({owner_id:'vol-traduction'})).portee,ouvert=await depotReel.ouvrirTraduction({portee,affiche:{recipe,version,traductions:[]},locale:'fr'}),prepare=await depotReel.preparerLectureTraduction({session:ouvert.session,selection:ouvert.source.segments.map(s=>s.ref)});
+    let terminer,appels=0;const reponse={text:JSON.stringify({format:1,segments:prepare.portions[0].segment_refs.map(s=>({ref:s.ref,text:s.kind==='title'?'Soupe':'Mélanger.'}))}),stopReason:'end_turn',reponseBrute:new Uint8Array([123,125])};
+    const actif=creerLectureTraduction({depot:depotReel,repo,provider:{completeTranslation:()=>{appels++;return new Promise(resolve=>terminer=resolve);}}}),enCours=actif.lancer({plan:prepare.plan,ordinals:[0]});
+    try{
+      let journal,hb;for(let i=0;i<100;i++){journal=(await repo.all('imports')).find(j=>j.kind==='traduction');hb=journal&&await db.get('sync_state','battement:'+journal.id);if(hb&&terminer)break;await new Promise(resolve=>setTimeout(resolve,5));}
+      ok(typeof hb?.value==='string'&&Number.isFinite(Date.parse(hb.value))&&new Date(hb.value).toISOString()===hb.value,'L6 vol : battement local daté en ISO, compatible avec la récupération des appels interrompus');
+      eq(await repo.marquerInterrompus(),0,'L6 vol : battement vivant protège un appel même si son départ a plus de dix minutes');
+      eq((await repo.get('imports',journal.id)).status,'en_cours','L6 vol : la récupération ne coupe pas le journal du POST vivant');
+      terminer(reponse);eq((await enCours).issue,'termine','L6 vol : la réponse du POST protégé reste conservable');
+      eq([appels,(await repo.get('imports',journal.id)).status],[1,'a_verifier'],'L6 vol : une seule réponse reçue, aucun appel payé relancé après la vérification');
+    }finally{terminer?.(reponse);await enCours;actif.detruire();reinitialiserVol();}
+  });
 }
