@@ -54,6 +54,7 @@ export async function runL9ContraintesRepasTests({eq,ok}) {
     }});
     document.body.append(racine);
     try {
+      racine.querySelector('[data-role=organisation-repas] > summary').click();
       const groupe=racine.querySelector('[data-role=contraintes-repas]');
       ok(!!groupe, `L9 contraintes ${scenario} : groupe nommé présent`);
       const bouton=groupe?.querySelector('button')??racine.querySelector('.chip.clickable');

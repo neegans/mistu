@@ -306,6 +306,8 @@ input[type=text], input[type=number], input[type=search], input[type=url], input
   background: #fff; color: var(--ink); width: 100%; min-width: 0; max-width: 100%; min-height: 44px;
 }
 textarea { min-height: 96px; resize: vertical; }
+/* WebKit ne respecte pas toujours min-height sur un menu natif ; garder sa flèche et une cible tactile réelle. */
+select:not([multiple]):is(:not([size]),[size="0"],[size="1"]) { height: max(44px, 2.75rem); }
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--action); border-color: var(--action); }
 label.check { display: inline-flex; gap: .45rem; align-items: center; font-size: .95rem; }
 .search-bar { display: flex; gap: .5rem; }
@@ -623,7 +625,7 @@ details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
 .ingredients-cuisine, .photo-cuisine { border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem 1rem; background: var(--card); }
 .ingredients-cuisine > summary, .photo-cuisine > summary { min-height: 44px; align-content: center; }
 .photo-cuisine-image { max-width: 320px; aspect-ratio: 1; margin-top: .6rem; }
-.navigation-cuisine { position: sticky; bottom: calc(var(--nav-h) + 4px + var(--safe-b)); z-index: 15; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); gap: .6rem; padding: .7rem 0; margin: 1rem auto 0; max-width: 850px; background: var(--paper); }
+.navigation-cuisine { position: sticky; bottom: calc(var(--nav-h) + 4px); z-index: 15; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); gap: .6rem; padding: .7rem 0; margin: 1rem auto 0; max-width: 850px; background: var(--paper); }
 .navigation-cuisine .btn { min-height: 56px; font-size: 1.05rem; justify-content: center; }
 .reperes-formulaire { display: grid; gap: 1rem; }
 .reperes-plage { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
@@ -640,6 +642,16 @@ details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
 .bibliotheque-commandes .btn, .bibliotheque-selection .btn, .bibliotheque-resultats .btn { min-height: 44px; }
 .bibliotheque-commandes label { display: grid; gap: .25rem; }
 .bibliotheque-commandes select { max-width: 100%; }
+.bibliotheque-options-toggle { display: none; }
+.bibliotheque-options { display: contents; }
+.bibliotheque-options > label { flex: 1 1 10rem; }
+@media (max-width: 599px) {
+  .bibliotheque-options-toggle { display: inline-flex; justify-content: space-between; flex: 1 1 100%; }
+  .bibliotheque-options-toggle::after { content: '+'; margin-left: .5rem; }
+  .bibliotheque-options-toggle[aria-expanded="true"]::after { content: '−'; }
+  .bibliotheque-options { display: none; }
+  .bibliotheque-options.est-ouvert { display: flex; flex-wrap: wrap; gap: .7rem; flex: 1 1 100%; }
+}
 .bibliotheque-filtres { margin-block: .8rem; border-block: 1px solid var(--line); }
 .bibliotheque-filtres > summary { min-height: 48px; padding-block: .7rem; color: var(--action); cursor: pointer; }
 .bibliotheque-filtres-champs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); align-items: start; gap: .8rem 1.2rem; padding-bottom: 1rem; }
@@ -848,6 +860,7 @@ dialog::backdrop { background: var(--backdrop); }
 /* L9 : une navigation haute revient dans le flux, sans recouvrir la lecture. */
 .coquille { min-height: 100dvh; display: flex; flex-direction: column; --barre-fixable: 1; }
 .coquille.nav-dans-flux nav.tabs { position: static; width: 100%; }
+.coquille.nav-dans-flux .navigation-cuisine { position: static; }
 .coquille.barre-dans-flux .topbar { position: static; }
 .coquille .frame { min-width: 0; }
 .coquille main { min-width: 0; scroll-margin-top: calc(var(--topbar-h) + 1rem); }
@@ -856,7 +869,27 @@ dialog::backdrop { background: var(--backdrop); }
 .lien-evitement:focus { transform: none; }
 button.chip { font: inherit; cursor: pointer; min-width: 44px; min-height: 44px; }
 .repas-planification { min-width: 0; max-width: 100%; }
+.repas-apercu { color: var(--muted); margin-block: .5rem; }
+.repas-organisation { border-block: 1px solid var(--line); margin-block: 1rem; }
+.repas-organisation > summary { min-height: 44px; padding-block: .6rem; color: var(--action); cursor: pointer; }
+.repas-organisation[open] > summary { margin-bottom: .75rem; }
+.repas-actions-secondaires { margin-bottom: 1rem; }
 @media (max-width: 899.98px) { .topbar { position: static; } .coquille { --barre-fixable: 0; } }
+/* PWA mobile : respecter les bords émis par le navigateur avec viewport-fit=cover. */
+@media (max-width: 899.98px) {
+  .topbar, main.content { padding-left: max(1rem, env(safe-area-inset-left, 0px)); padding-right: max(1rem, env(safe-area-inset-right, 0px)); }
+  nav.tabs { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+  .porte { padding-left: max(1.25rem, env(safe-area-inset-left, 0px)); padding-right: max(1.25rem, env(safe-area-inset-right, 0px)); }
+  dialog { width: calc(100vw - 2 * max(12px, env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px))); }
+  .dialogue-actions { padding-left: max(1rem, env(safe-area-inset-left, 0px)); padding-right: max(1rem, env(safe-area-inset-right, 0px)); }
+}
+@media (max-width: 439.98px) {
+  .topbar { padding-left: max(.75rem, env(safe-area-inset-left, 0px)); padding-right: max(.75rem, env(safe-area-inset-right, 0px)); }
+}
+@media (max-width: 899.98px) and (max-height: 500px) {
+  .coquille main h1 { font-size: 2rem; line-height: 1.2; }
+  .navigation-cuisine { position: static; }
+}
 .dialogue-inline[open] { display: block; position: relative; inset: auto; margin: 1rem auto; max-height: none; }
 .dialogue-inline::backdrop { background: transparent; }
 /* Les états restent immédiats ; seuls leurs couleurs et contours évoluent. */

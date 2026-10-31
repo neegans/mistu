@@ -90,18 +90,22 @@ export function parseHash(hash = location.hash) {
 
 export function navigate(path, { replace = false } = {}) {
   const target = '#' + (path.startsWith('/') ? path : '/' + path);
-  if (replace) { remplacerAdresse(target); window.dispatchEvent(new Event('cuisineos:replace')); }
+  if (replace) { remplacerAdresse(target, { notifier: false }); window.dispatchEvent(new Event('cuisineos:replace')); }
   else location.hash = target;
 }
 
 // Retire ou pose un paramètre d'adresse SANS re-rendu : history.replaceState ne déclenche pas hashchange. Injecté dans les
 // vues qui s'en servent (geste `historique.remplacer`), donc espionnable dans la suite.
 export const CLE_ENTREE_NAV = 'mistuNavigation';
+const ADRESSE_REMPLACEE = 'cuisineos:adresse-remplacee';
 const nouvelleCle = () => globalThis.crypto?.randomUUID?.() || 'n-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
-export function remplacerAdresse(hash, { fenetre = window } = {}) {
+export function remplacerAdresse(hash, { fenetre = window, notifier = true } = {}) {
   const href = hash.startsWith('#') ? hash : '#' + hash;
   const state = fenetre.history.state && typeof fenetre.history.state === 'object' ? fenetre.history.state : {};
   fenetre.history.replaceState({ ...state, ...(state[CLE_ENTREE_NAV] ? { [CLE_ENTREE_NAV]: { ...state[CLE_ENTREE_NAV], href } } : {}) }, '', href);
+  // Présentation de l'entrée déjà admise seulement. navigate(replace) conserve
+  // au contraire sa précédente jusqu'à la décision de sa garde.
+  if (notifier) fenetre.dispatchEvent(new CustomEvent(ADRESSE_REMPLACEE, { detail: { precedente: state[CLE_ENTREE_NAV] } }));
 }
 
 export function currentPath() { return parseHash().path; }
@@ -128,6 +132,15 @@ export function resolve(hash = location.hash) {
 
 export function start(onRoute, { fenetre = window, avantRoute = avantNavigation, normaliserAdresse = href => href } = {}) {
   let derniere = null, dernierEtat = null, observee = null, compensation = null, demandeId = 0, arretee = false;
+  const memoriserAdresse = event => {
+    const precedente = event.detail?.precedente, state = fenetre.history.state, entree = state?.[CLE_ENTREE_NAV];
+    if (arretee || compensation || !precedente || !entree || !derniere || !observee
+      || precedente.cle !== derniere.cle || precedente.href !== derniere.href
+      || observee.cle !== derniere.cle || observee.href !== derniere.href
+      || entree.cle !== derniere.cle || entree.href !== (fenetre.location.hash || '#/')) return;
+    derniere = { ...derniere, href: entree.href }; dernierEtat = { ...state };
+    observee = { ...observee, href: entree.href };
+  };
   const run = (event) => {
     const hrefBrut = fenetre.location.hash || '#/';
     const href = normaliserAdresse(hrefBrut);
@@ -169,9 +182,10 @@ export function start(onRoute, { fenetre = window, avantRoute = avantNavigation,
     catch { finir(false); return; }
     if (accord?.then) Promise.resolve(accord).then(finir, () => finir(false)); else finir(accord);
   };
+  fenetre.addEventListener(ADRESSE_REMPLACEE, memoriserAdresse);
   for (const nom of ['popstate', 'hashchange', 'cuisineos:refresh', 'cuisineos:replace']) fenetre.addEventListener(nom, run);
   run();
-  return () => { arretee = true; demandeId++; for (const nom of ['popstate', 'hashchange', 'cuisineos:refresh', 'cuisineos:replace']) fenetre.removeEventListener(nom, run); };
+  return () => { arretee = true; demandeId++; fenetre.removeEventListener(ADRESSE_REMPLACEE, memoriserAdresse); for (const nom of ['popstate', 'hashchange', 'cuisineos:refresh', 'cuisineos:replace']) fenetre.removeEventListener(nom, run); };
 }
 
 // Re-rend la route courante (après une écriture ou un changement de réglage).

@@ -1,12 +1,12 @@
 import { capturerRecette } from './recette-garde.js';
 import { recetteActiveDansContexte } from './state.js';
 import { mentionCycleRecette, TEXTE_NOUVEL_USAGE_REFUSE } from './corbeille.js';
-import { documentsActifs } from './state.js';
+import { documentsActifs, getSyncGeneration } from './state.js';
 // Composer un repas (spec §26) : éléments avec rôle, portions et verrouillage ; remplacer cible un élément précis ;
 // résumé du temps et des conflits d'appareils ; contraintes du repas distinctes du profil ; duo réussi mémorisé.
 import { el, toast, chooseDialog, promptDialog, confirmDialog, formatDate } from '../core/dom.js';
 import { t, label } from '../core/i18n.js';
-import { navigate, buildQuery, refresh } from '../core/router.js';
+import { navigate, buildQuery, refresh, remplacerAdresse } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { summarizeMeal } from '../domain/pairing.js';
 import { assessMeal } from '../domain/diet.js';
@@ -33,7 +33,7 @@ export async function renderMeals(params, query, ctx) {
   if(!ctx.meals.length)root.append(emptyState('couverts',t('Aucun repas composé. Depuis une recette : « Ajouter à mon repas » ou « Avec quoi on mange ça ? ».')));
   for(const g of groupesRepas(ctx.meals)){if(!g.rows.length)continue;const body=el('div',{class:'stack'},...g.rows.map(m=>el('a',{class:'item-link card flat',href:lienAvecOrigine('/meals/'+encodeURIComponent(m.id))},el('div',{class:'row between'},el('strong',null,m.title||t('Repas')),el('span',{class:'muted'},m.serve_at?formatDate(m.serve_at,{withTime:true}):jourRepas(m)||t('Sans date'))),el('div',{class:'muted'},(m.items||[]).map(it=>ctx.recipesById.get(it.recipe_id)?.display_title||ctx.recipesById.get(it.recipe_id)?.original_title||t('Recette indisponible')).join(' · ')))));
    root.append(g.id==='archives'?el('details',{class:'card'},el('summary',null,labels[g.id]),body):section(labels[g.id],body));}
-  const lists=[...ctx.shopping_lists].sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));if(lists.length)root.append(section(t('Courses'),...lists.slice(0,10).map(l=>el('a',{class:'item-link card flat',href:lienAvecOrigine('/lists/'+encodeURIComponent(l.id))},el('strong',null,l.title||t('Courses')),el('span',{class:'muted'},formatDate(l.created_at))))));
+  const lists=[...ctx.shopping_lists].sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));if(lists.length)root.append(section(t('Courses'),...lists.slice(0,10).map(l=>el('a',{class:'item-link card flat',href:lienAvecOrigine('/lists/'+encodeURIComponent(l.id))},el('div',{class:'row between'},el('strong',null,l.title||t('Courses')),' ',el('span',{class:'muted'},formatDate(l.created_at)))))));
   return root;
 }
 
@@ -86,13 +86,16 @@ export async function addToMealFlow(ctx, doc, { role = 'accompagnement', mainDoc
 }
 
 export async function renderMeal(params, query, ctx, deps = {}) {
+  const R={...repo,...(deps.repo||{})},baseCourante=()=>deps.repo?.db??repo.db;
+  const presentation={id:params.id,base:R.db,generation:getSyncGeneration(),owner:ctx.proprietaireDonnees};
+  const organisationOuverte=query.organisation==='ouverte';
   const ctxF = await contexteFichiers(ctx);
   const meal = ctx.meals.find((m) => m.id === params.id);
   if (!meal) return el('div', { class: 'card' }, t('Repas introuvable.'));
   let creationListe=null,envoiListe=false,copieRepas=null,recopieEnCours=false,preparationHorsLigne=null;
   const mealAffiche = structuredClone(meal);
   let confirme=structuredClone(mealAffiche),dispose=false;const planification={serve_at:meal.serve_at??null,planned_on:meal.planned_on??null};
-  const R={...repo,...(deps.repo||{})},garde=creerGardeRepas(R,ctx,()=>!dispose);
+  const garde=creerGardeRepas(R,ctx,()=>!dispose);
   meal.items = meal.items || [];
   meal.constraints_snapshot = meal.constraints_snapshot || { diets: [] };
   const items = meal.items.map((it) => ({ ...it, recipe: ctx.recipesById.get(it.recipe_id), version: it.recipe_version_id ? ctx.versionsById.get(it.recipe_version_id) : null }));
@@ -126,17 +129,33 @@ export async function renderMeal(params, query, ctx, deps = {}) {
     }},label('diet',d));
     return bouton;
   }));
-  root.append(pageHeader(meal.title, { back: { href: '/meals', label: t('Repas') }, actions: [
+  root.append(pageHeader(meal.title, { back: { href: '/meals', label: t('Repas') } }));
+  const jour=jourRepas(meal);
+  root.append(el('p',{class:'muted repas-apercu',dataset:{role:'apercu-repas'}},meal.servings==null?t('Portions inconnues'):t('{n} portions',{n:meal.servings}),' · ',jour?formatDate(meal.serve_at||jour,{withTime:!!meal.serve_at}):t('Sans date')));
+  const actions=el('div',{class:'row repas-actions-secondaires'},
     el('button', { class: 'btn', onClick: async () => { const v = await promptDialog(t('Titre'), { value: meal.title }); if (v) { meal.title = v.trim(); save(['title']); } } }, t('Renommer')),
     el('button', { class: 'btn', onClick: redo }, t('Refaire ce repas')),
-    el('button',{class:'btn',onClick:async()=>{meal.archived_at=meal.archived_at?null:R.nowIso();await save(['archived_at']);}},meal.archived_at?t('Rouvrir ce repas'):t('Archiver ce repas')),
-  ] }));
-  root.append(el('div', { class: 'card sage row' },
+    el('button',{class:'btn',onClick:async()=>{meal.archived_at=meal.archived_at?null:R.nowIso();await save(['archived_at']);}},meal.archived_at?t('Rouvrir ce repas'):t('Archiver ce repas')));
+  const configuration=el('div', { class: 'card sage row' },
     field(t('Portions du repas'), el('input', { type: 'number', min: 1, value: meal.servings??'', placeholder:t('inconnues'), onChange: async (e) => { try{meal.servings=portionsSaisies(e.target.value);for(const it of meal.items)if(!it.servings_custom){it.servings=meal.servings;it.servings_custom=false;}await save(['servings','items']);}catch{(deps.toast??toast)(t('Indique des portions valides ou laisse vide.'));} } })),
     champPlanificationRepas(meal,{...deps,repo:R,garde,saisie,planification,capturerHistorique:contextesHistoriques}),
     champHeureRepas(meal, {...deps,repo:R,garde,saisie,planification,capturerHistorique:contextesHistoriques}),
     field(t('Contraintes de ce repas (invités inclus)'), contraintes,
-      t('Liées à ce repas seulement ; le profil personnel n’est pas modifié.')), etatContraintes));
+      t('Liées à ce repas seulement ; le profil personnel n’est pas modifié.')), etatContraintes);
+  const organisation=el('details',{class:'repas-organisation',dataset:{role:'organisation-repas'}},el('summary',null,t('Organisation du repas')),actions,configuration);
+  const presentationCourante=()=>baseCourante()===presentation.base&&getSyncGeneration()===presentation.generation&&ctx.proprietaireDonnees===presentation.owner;
+  organisation.open=organisationOuverte;let ouvertureSignalee=organisation.open;
+  organisation.addEventListener('toggle',()=>{
+    if(organisation.open===ouvertureSignalee)return;ouvertureSignalee=organisation.open;
+    if(dispose||!root.isConnected||!presentationCourante())return;
+    const adresse=String((deps.routeCourante??(()=>window.location.hash))()).replace(/^#/,''),separateur=adresse.indexOf('?');
+    const chemin=separateur<0?adresse:adresse.slice(0,separateur);
+    if(chemin!=='/meals/'+encodeURIComponent(presentation.id))return;
+    const parametres=new URLSearchParams(separateur<0?'':adresse.slice(separateur+1));
+    if(organisation.open)parametres.set('organisation','ouverte');else parametres.delete('organisation');
+    const cible=chemin+(parametres.size?'?'+parametres.toString():'');
+    if(cible!==adresse)(deps.remplacerAdresse??remplacerAdresse)(cible);
+  });
 
   root.append(...mentions);
   // Éléments
@@ -169,10 +188,11 @@ export async function renderMeal(params, query, ctx, deps = {}) {
     else if (!gardeThermomix(it.version, portionsRepas(it, meal)).ok) card.append(el('div', { class: 'status warn', dataset: { role: 'thermomix-portions' } }, t(BLOCAGE_THERMOMIX), el('button', { class: 'btn small', onClick: async () => { const cible = meal.items.find(x => x.id === it.id); cible.servings = it.version.servings ?? null; cible.servings_custom = true; await save(['items']); } }, t('Revenir aux quantités adaptées'))));
     list.append(card);
   }
-  root.append(section(t('Mon repas — {n} élément(s)', { n: items.length }), list,
+  const plats=section(t('Mon repas — {n} élément(s)', { n: items.length }), list,
     el('div', { class: 'row' },
       main ? el('a', { class: 'btn', href: `#/search${buildQuery({ for: main.recipe.id, role: 'salade', mode: 'all', meal: meal.id })}` }, t('Chercher un accompagnement')) : null,
-      el('a', { class: 'btn', href: '#/search'+buildQuery({mode:'all',meal:meal.id}) }, t('Ajouter un plat')))));
+      el('a', { class: 'btn', href: '#/search'+buildQuery({mode:'all',meal:meal.id}) }, t('Ajouter un plat'))));
+  plats.classList.add('repas-plats');plats.dataset.role='plats-repas';root.append(organisation,plats);
 
   // Résumé : temps, conflits, contraintes
   const summary = summarizeMeal(items.filter(it=>it.recipe).map((it) => ({ version: it.version, recipe: it.recipe, title: it.recipe.original_title })));

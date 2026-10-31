@@ -53,11 +53,16 @@ export async function renderListeBibliotheque(ctx,{etat={},route='/library',edit
   const choisir=(name,label,values,value,change)=>{
     const node=el('select',{name,'aria-label':label,onChange:e=>change(e.target.value)},...values.map(([v,l])=>el('option',{value:v,selected:v===value},l)));controls.push(node);return el('label',{class:'field'},el('span',null,label),node);
   };
-  const command=el('div',{class:'bibliotheque-commandes filtre-recettes'},el('label',{class:'champ-recherche'},icone('loupe'),input),
+  const options=el('div',{class:'bibliotheque-options',id:`bibliotheque-options-${crypto.randomUUID()}`},
     choisir('tri',t('Trier'),[['modification',t('Dernière modification')],['titre',t('Titre')],...(editionId?[['page',t('Page')]]:[])],state.tri,v=>modifier({tri:v})),
     choisir('presentation',t('Présentation'),[['grille',t('Grille')],['liste',t('Liste')]],state.presentation,v=>modifier({presentation:v},{garder:true})));
+  const ouvrirOptions=el('button',{type:'button',class:'btn bibliotheque-options-toggle',dataset:{role:'affichage-selection'},'aria-expanded':'false','aria-controls':options.id,onClick:()=>{
+    const ouvert=ouvrirOptions.getAttribute('aria-expanded')!=='true';
+    ouvrirOptions.setAttribute('aria-expanded',String(ouvert));options.classList.toggle('est-ouvert',ouvert);
+  }},t('Affichage et sélection'));
+  const command=el('div',{class:'bibliotheque-commandes filtre-recettes'},el('label',{class:'champ-recherche'},icone('loupe'),input),ouvrirOptions,options);
   const mode=el('button',{type:'button',class:'btn',dataset:{role:'mode-selection'},onClick:()=>{if(occupe)return;modeSelection=!modeSelection;selection.clear();generation++;barre.hidden=!modeSelection;mode.textContent=modeSelection?t('Annuler la sélection'):t('Sélectionner');dessiner();}},t('Sélectionner'));
-  command.append(mode);
+  options.append(mode);
   const champs=el('div',{class:'bibliotheque-filtres-champs'}),filtres=el('details',{class:'bibliotheque-filtres'},el('summary',null,t('Filtres')),champs);
   const groupe=(name,label,values)=>{
     const field=el('fieldset',null,el('legend',null,label));

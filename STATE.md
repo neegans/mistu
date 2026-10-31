@@ -1,4 +1,10 @@
-# STATE.md — Mistu — 31 octobre 2026 — CONFORT MOBILE ; PUBLIC 0.32.11-4
+# STATE.md — Mistu — 31 octobre 2026 — PWA MOBILE ; PUBLIC 0.32.11-4
+
+**Seconde passe mobile — livraison locale 0.32.12-3, reçue avant publication.** Dix étapes inspectées, vingt captures dans le [comparatif](docs/audits/2026-10-31-pwa-mobile.md). Menus natifs WebKit réellement tactiles, commandes de bibliothèque repliables, premier plat du repas remonté de1102 à364px, bilan ouvert sur son titre, navigation de cuisine et marges latérales corrigées en paysage. Le volet du repas reste ouvert après sauvegarde et rechargement. [Réception détaillée](docs/superpowers/plans/2026-10-31-pwa-mobile-reception.md).
+
+**15085/15085**, +122 nouvelles assertions ; outils Node281/281 et outils CI29/29. Trois anciens scénarios de focus L9 ouvrent désormais le volet avant d’utiliser ses contrôles ;35/35 ciblé puis15060/15060 sous suffixe2. Correction complémentaire du routeur : « Rester » ne demande plus deux fois ;25/25 ciblé,137/137 régressions voisines et15085/15085 complets sous suffixe3. La dernière attente de fixture L6 est ensuite renforcée après reproduction déterministe de son nettoyage prématuré :22/22 causal et22/22 natif, assertions inchangées ; CI du commit exact à recevoir. APP_VERSION0.32.12, DB6/archive7 inchangés, aucun SQL ni déploiement assistant. Tests WebKit/Chromium, données fictives, aucun compte privé/appel payé ; aucun iPhone physique, clavier iOS, caméra ou VoiceOver testé. Courses, inventaire et réglages restent longs ; valeur Date parfois tronquée à texte200%.
+
+## Livraison précédente : confort de lecture
 
 **Confort de lecture mobile — 0.32.11-4 publié et reçu.** Code `1543b07`, Pages confirmé à19:45:18UTC (15h45HAE). **472/472 fichiers publics conformes** ; **26/26 contrôles publics**, captures relues sur ordinateur et téléphone émulé. Huit écrans inspectés avant/après : bibliothèque compacte, six choix d’ajout visibles, recherche au clavier, focus de saisie manuelle, accès direct à la lecture et options de cuisson repliées. Identité crème/olive conservée. [Comparatif avec17 captures](docs/audits/2026-10-31-confort-mobile.md) · [Réception](docs/superpowers/plans/2026-10-31-confort-lecture-mobile-reception.md).
 

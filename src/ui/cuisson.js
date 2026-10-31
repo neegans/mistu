@@ -249,7 +249,7 @@ export function ouvrirCuissons(items, options = {}) {
     } }, t('Enregistrer'));
     dlg.append(el('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '1rem' } }, annuler, enregistrer));
     dlg.addEventListener('cancel', e => { e.preventDefault(); if (!enCours) fermer(false); });
-    presentation = ouvrirDialogue(dlg, { focusInitial: annuler, estCourante: courante });
+    presentation = ouvrirDialogue(dlg, { focusInitial: dlg.querySelector('h2'), estCourante: courante });
   });
 }
 

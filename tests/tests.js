@@ -1,3 +1,7 @@
+import {runPwaBilanTests} from './pwa-bilan.js';
+import {runPwaBibliothequeTests} from './pwa-bibliotheque.js';
+import {runPwaRepasTests} from './pwa-repas.js';
+import {runPwaNavigationTests} from './pwa-navigation.js';
 import {runConfortLectureTests} from './confort-lecture.js';
 import {runConfortEntreesTests} from './confort-entrees.js';
 import {runConfortCuisineTests} from './confort-cuisine.js';
@@ -501,6 +505,14 @@ try { await runL6LectureRecetteTests({ eq, ok }); }
 catch (e) { ok(false, 'L6 lecture-recette : ' + (e.stack || e)); }
 try { await runCorrectifLangueRecetteTests({ eq, ok }); }
 catch (e) { ok(false, 'Correctif langue recette : ' + (e.stack || e)); }
+try { await runPwaBilanTests({eq,ok}); }
+catch (e) { ok(false, 'PWA bilan : ' + (e.stack || e)); }
+try { await runPwaBibliothequeTests({eq,ok}); }
+catch (e) { ok(false, 'PWA bibliotheque : ' + (e.stack || e)); }
+try { await runPwaRepasTests({eq,ok}); }
+catch (e) { ok(false, 'PWA repas : ' + (e.stack || e)); }
+try { await runPwaNavigationTests({eq,ok}); }
+catch (e) { ok(false, 'PWA navigation : ' + (e.stack || e)); }
 try { await runConfortLectureTests({ eq, ok }); }
 catch (e) { ok(false, 'Confort lecture : ' + (e.stack || e)); }
 try { await runConfortEntreesTests({ eq, ok }); }
@@ -796,7 +808,7 @@ try { await runAuditImportRouteTests({eq,ok}); } catch (e) { ok(false, 'runAudit
 
 try { await runAuditRepoAbsenceTests({eq,ok}); } catch (e) { ok(false, 'runAuditRepoAbsenceTests : ' + (e.stack || e)); }
 
-eq(results.length, 14962,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 15084,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

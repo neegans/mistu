@@ -1,6 +1,8 @@
 // Dictionnaire anglais : clé = chaîne française de référence. Une clé absente affiche le français.
 // Couverture : navigation, accueil, recherche, fiche recette, mode cuisine, réglages et libellés d'état.
 export const EN = {
+  "Organisation du repas": "Meal settings",
+  "Affichage et sélection": "Display and selection",
   "Lire la recette": "Read the recipe",
   "Options de cuisson": "Cooking options",
   "La photo n’a pas pu être enregistrée. Elle reste en mémoire sur cet écran ; réessaie avant de quitter.": "The photo could not be saved. It remains in memory on this screen; try again before leaving.",
