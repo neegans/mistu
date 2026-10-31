@@ -28,18 +28,40 @@ function liste(v, max, min = 0) {
   return v;
 }
 const codepoints = (s) => Array.from(s).length;
-function texte(v, max, { vide = false, hostile = false, affiche = true } = {}) {
+// Exemption étroite pour quelques formulations de refus : une négation ne couvre
+// jamais une autre phrase/clause. Ce filtre ne prétend pas analyser toute la prose.
+function refusPrudent(phrase) {
+  const directe = /^(?:(?:je|nous|i|we)\s+)?(?:ne\s+(?:peux|peut|pouvons|pouvez|peuvent)\s+(?:pas|jamais)|(?:il\s+est\s+)?impossible\s+de|cannot|can['’]t|unable\s+to)\s+(?:vous\s+)?(?:garantir|certifier|proposer|adapter|guarantee|certify|propose|adapt)\b/iu;
+  if (directe.test(phrase)) return true;
+  const inverse = /^(.{1,100}?)\s+(?:ne\s+peut\s+pas\s+[eê]tre\s+(?:garanti(?:e|es|s)?|certifi[eé](?:e|es|s)?)|cannot\s+be\s+(?:guaranteed|certified))(?:\s+(?:sans risque|sans danger|safe))?$/iu.exec(phrase);
+  // Le sujet d'un refus passif n'est pas lui-même une affirmation indépendante.
+  return !!inverse && !/\b(?:est|sont|sera|seront|is|are|will)\b/iu.test(inverse[1]);
+}
+const allegations = phrase => phrase.match(/\b(?:garanti(?:e|es|s)?|certifi[eé](?:e|es|s)?|sans danger|sans risque|safe)\b|(?:gluten|dairy|nut|allergen).free|sans[\s-]*(?:gluten|lactose|noix|allerg[eè]ne)/giu) || [];
+function texte(v, max, { vide = false, hostile = false, affiche = true, refus = false } = {}) {
   if (typeof v !== 'string' || codepoints(v) > max || (!vide && !v.trim())) erreur('texte');
   if (!hostile) return v;
   const s = v.replace(/[\t\n\r\p{Zl}\p{Zp}]/gu, ' ').normalize('NFC').replace(/ +/g, ' ').trim();
   const compare = s.normalize('NFKC').toLowerCase();
-  if (/[\p{Cc}\p{Cf}]/u.test(s) || /[<>]|https?:|www\.|\b[\p{L}\d-]+\.(?:com|ca|fr|net|org|test)\b/iu.test(compare)) erreur('texte_interdit');
+  // Seuls les angles d'un comparateur numérique sont admis ; tout reste ferme
+  // notamment les balises, commentaires HTML et faux « <2> ».
+  const sansComparateurs = compare.replace(/[<>]=?\s*\d+(?:[.,]\d+)?(?![\p{L}\p{N}_]|[.,]\d)/gu, '');
+  if (/[\p{Cc}\p{Cf}]/u.test(s) || /[<>]/u.test(sansComparateurs) || /https?:|www\.|\b[\p{L}\d-]+\.(?:com|ca|fr|net|org|test)\b/iu.test(compare)) erreur('texte_interdit');
   if (affiche) {
-    if (/(?:retir(?:er|ez|e)|ouvr(?:ir|ez)|enlev(?:er|ez)|[oô]t(?:er|ez|e)|remove|open).{0,50}(?:couvercle|gobelet|bouchon|lid|cap)|(?:mix(?:er|ez)|blend).{0,80}(?:chaud|hot|vitesse\s*(?:[3-9]|10))|contourner.{0,25}s[eé]curit|bypass/iu.test(compare)) erreur('instruction_libre');
-    // Un refus prudent n'est pas une garantie. Ne pas confondre un nom d'aliment avec une allégation.
-    const refusGarantie = /(?:ne\b.{0,60}(?:pas|jamais|impossible)|impossible de|cannot|can['’]t|unable to).{0,30}(?:garanti|certifi|guarantee|certify)|(?:sans risque|sans danger|safe).{0,60}(?:ne peut pas|cannot|can['’]t)/iu.test(compare);
-    if (!refusGarantie && (/\b(?:garanti(?:e|es|s)?|certifi[eé](?:e|es|s)?|sans danger|sans risque|safe)\b/iu.test(compare)
-      || /(?:gluten|dairy|nut|allergen).free|sans[\s-]*(?:gluten|lactose|noix|allerg[eè]ne)|^\s*(?:vegan|v[eé]g[eé]tarien(?:ne)?|celiac|cœliaque)[.!]?\s*$/iu.test(compare))) erreur('texte_interdit');
+    if (/(?:retir(?:er|ez|e)|ouvr(?:ir|ez)|enlev(?:er|ez)|[oô]t(?:er|ez|e)|remove|open).{0,50}(?<![\p{L}\p{N}_])(?:couvercles?|gobelets?|bouchons?|lids?|caps?)(?![\p{L}\p{N}_])|(?:mix(?:er|ez)|blend).{0,80}(?:chaud|hot|vitesse\s*(?:[3-9]|10|[<>]=?\s*\d))|contourner.{0,25}s[eé]curit|bypass/iu.test(compare)
+      // Décision explicite du plan10.4, distincte du faux positif « cap ».
+      || compare.includes('retirer du liquide pour respecter la capacité du bol')) erreur('instruction_libre');
+    // Les retours à la ligne bornent la négation même si le texte rendu les replie.
+    const clauses = v.normalize('NFKC').toLowerCase().split(/[\r\n\p{Zl}\p{Zp}.!?;,:—–]|\s-\s|\b(?:et|mais|ou|car|donc|pourtant|cependant|and|but|or|because|however|yet)\b/iu);
+    if (/^\s*(?:vegan|v[eé]g[eé]tarien(?:ne)?|celiac|cœliaque)[.!]?\s*$/iu.test(compare)) erreur('texte_interdit');
+    let allegationsLocalisees = 0;
+    for (const fragment of clauses) {
+      const clause = fragment.replace(/\s+/gu, ' ').trim(), nombre = allegations(clause).length;
+      allegationsLocalisees += nombre;
+      if (nombre && !(refus && refusPrudent(clause))) erreur('texte_interdit');
+    }
+    // Une coupure ne doit pas faire disparaître « sans\nrisque » ou « sans - gluten ».
+    if (allegationsLocalisees !== allegations(compare).length) erreur('texte_interdit');
   }
   if (!s && !vide) erreur('texte');
   return s;
@@ -322,7 +344,7 @@ function reponseDe(raw, c, securite = erreur) {
     ferme(raw, ['type', 'questions']);
     return { type: 'questions', questions: liste(raw.questions, LIMITES_THERMOMIX.questions, 1).map(q => texte(q, LIMITES_THERMOMIX.question, { hostile: true })) };
   }
-  if (raw.type === 'refus') { ferme(raw, ['type', 'raison']); return { type: 'refus', raison: texte(raw.raison, LIMITES_THERMOMIX.raison, { hostile: true }) }; }
+  if (raw.type === 'refus') { ferme(raw, ['type', 'raison']); return { type: 'refus', raison: texte(raw.raison, LIMITES_THERMOMIX.raison, { hostile: true, refus: true }) }; }
   ferme(raw, ['type', 'blocs']);
   if (raw.type !== 'proposition' || c.selection.length < 1) erreur('selection');
   if (c.source.plan_invalide && c.selection.length !== c.source.steps.length) erreur('plan_invalide');
