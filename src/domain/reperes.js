@@ -25,7 +25,7 @@ function texte(v, max, { vide = false, hostile = false } = {}) {
   if (/[\p{Cc}\p{Cf}]/u.test(s)) erreur('texte');
   const compare = s.normalize('NFKC');
   if (hostile && (/[<>]|(?:[a-z][a-z0-9+.-]*:)?\/\/|https?:|www\.|(?:javascript|data|vbscript):|\b[\p{L}\d-]+\.[\p{L}]{2,24}\b|```|\beval\s*\(/iu.test(compare)
-    || /(?:sans[ -](?:gluten|lactose|noix|allerg[eè]nes?)|gluten.free|dairy.free|allergen.free|v[eé]g[eé]tari|v[eé]g[eé]tali|\bvegan\b|garanti|sans danger)/iu.test(compare))) erreur('texte_interdit');
+    || /(?:sans[ -](?:gluten|lactose|noix|allerg[eè]nes?)|gluten.free|dairy.free|allergen.free|v[eé]g[eé]tali|\bvegan\b|garanti|sans danger)/iu.test(compare))) erreur('texte_interdit');
   return s;
 }
 function id(v) { const s = texte(v, 160); if (['__proto__', 'constructor', 'prototype'].includes(s)) erreur('identifiant'); return s; }
@@ -104,9 +104,9 @@ function contexteLiaison(source) {
   if (source.version_id !== contexte.version_id) erreur('signature');
   return contexte;
 }
-function references(refs, contexte, manuel = false) {
+function references(refs, contexte, manuel = false, vides = false) {
   const arr = liste(refs ?? (manuel ? [] : null), LIMITES_REPERES.references);
-  if (!manuel && !arr.length) erreur('references');
+  if (!manuel && !vides && !arr.length) erreur('references');
   return arr.map(r => {
     ferme(r, ['type', 'index', 'champ', 'extrait'], ['type', 'extrait']);
     const extrait = texte(r.extrait, LIMITES_REPERES.extrait);
@@ -118,6 +118,26 @@ function references(refs, contexte, manuel = false) {
     return { type: r.type, ...(own(r, 'index') ? { index: r.index } : {}), ...(own(r, 'champ') ? { champ: r.champ } : {}), extrait };
   });
 }
+function dureesExplicites(extrait) {
+  const minute = '(?:minutes?|mins?)(?![\\p{L}\\p{N}_])', heure = '(?:heures?|hours?|h)(?![\\p{L}_])';
+  const autre = '(?:mg|g|gr|kg|grammes?|grams?|kilogrammes?|kilograms?|ml|cl|dl|l|millilitres?|milliliters?|centilitres?|decilitres?|litres?|liters?|oz|lbs?|livres?|secondes?|seconds?|secs?|s|degr[eé]s?)(?![\\p{L}\\p{N}_])|°';
+  // Seule la notation abrégée est bornée à 59 : « 1 h 60 min » reste deux unités explicites.
+  const suiteMinutes = `(?:\\d{1,2}(?!\\d|[.,]\\d)\\s*${minute}|[0-5]?\\d(?![\\p{L}\\p{N}_]|[.,]\\d)(?!\\s*(?:${autre}|${heure}|${minute})))`;
+  const unite = '(?:minutes?|mins?|heures?|hours?|h|jours?|days?)';
+  const valeur = `\\d+\\s*(?:${heure}(?:\\s*${suiteMinutes})?|(?:minutes?|mins?|jours?|days?)(?![\\p{L}\\p{N}_]))`;
+  // Consommer d'abord la plage complète, y compris ses heures composées, puis la durée simple.
+  const re = new RegExp(`(?<![\\p{L}\\p{N}_.,])(?:((?:${valeur}|\\d+))\\s*(?:à|a|to|[-–—])\\s*(${valeur})|(${valeur}))(?![\\p{L}\\p{N}_]|[.,]\\d)`, 'giu');
+  const lire = new RegExp(`^(\\d+)\\s*(${unite})?(?:\\s*(\\d{1,2})(?:\\s*${minute})?)?$`, 'iu');
+  const facteur = u => /^(h|heure|hour)/i.test(u) ? 60 : /^(jour|day)/i.test(u) ? 1440 : 1;
+  const resultat = []; let m;
+  while ((m = re.exec(extrait))) {
+    const fin = lire.exec((m[2] || m[3]).trim()), debut = m[1] ? lire.exec(m[1].trim()) : fin;
+    if (!debut || !fin) continue;
+    const min = +debut[1] * facteur(debut[2] || fin[2]) + +(debut[3] || 0), max = +fin[1] * facteur(fin[2]) + +(fin[3] || 0);
+    if (min <= max) resultat.push({ min, max });
+  }
+  return resultat;
+}
 function explicite(duree, nom, refs, contexte) {
   if (contexte.source.estimation_ia) return false;
   const champ = { total: 'total_minutes', actif: 'active_minutes', cuisson: 'cook_minutes' }[nom];
@@ -126,14 +146,9 @@ function explicite(duree, nom, refs, contexte) {
   if (!['cuisson', 'attentes'].includes(nom)) return false;
   return refs.some(r => {
     if (r.type !== 'etape') return false;
-    const indicateur = nom === 'cuisson' ? /cuire|cuisson|cook|bake|r[oô]tir/i : /repos|reposer|lev[eé]e|lever|marin|refroid|rest|rise|cool/i;
+    const indicateur = nom === 'cuisson' ? /cuire|cuisson|cook|bake|r[oô]tir|(?<![\p{L}\p{N}_])(?:mijot|enfourn)(?:er|ez|e|ent|ons|ant|é(?:e?s)?)(?![\p{L}\p{N}_])/iu : /repos|reposer|lev[eé]e|lever|marin|refroid|rest|rise|cool/i;
     if (!indicateur.test(r.extrait)) return false;
-    // Une plage est consommée entière : sa borne haute ne devient pas une durée exacte.
-    const unite = '(?:minutes?|mins?|heures?|hours?|h|jours?|days?)';
-    const re = new RegExp('(?<![\\d.,])\\b(\\d+)(?:\\s*(' + unite + ')?\\s*(?:à|a|to|[-–—])\\s*(\\d+))?\\s*(' + unite + ')\\b', 'gi');
-    const facteur = u => /^(h|heure|hour)/i.test(u) ? 60 : /^(jour|day)/i.test(u) ? 1440 : 1;
-    let m; while ((m = re.exec(r.extrait))) { const min = +m[1] * facteur(m[2] || m[4]), max = m[3] == null ? min : +m[3] * facteur(m[4]); if (min === duree.min && max === duree.max) return true; }
-    return false;
+    return dureesExplicites(r.extrait).some(d => d.min === duree.min && d.max === duree.max);
   });
 }
 function duree(v, nom, refs, contexte, manuel) {
@@ -148,7 +163,7 @@ function duree(v, nom, refs, contexte, manuel) {
 }
 function champValide(nom, valeur, contexte, manuel = false) {
   if (valeur === null) return null;
-  if (nom !== 'description_fr' && !contexte.version_id) erreur('etapes_absentes');
+  if (nom === 'difficulte' && !contexte.version_id) erreur('etapes_absentes');
   if (nom === 'description_fr') {
     ferme(valeur, ['texte', 'references'], manuel ? ['texte'] : ['texte', 'references']);
     return { texte: texte(valeur.texte, LIMITES_REPERES.description, { hostile: true }), references: references(valeur.references, contexte, manuel) };
@@ -161,8 +176,9 @@ function champValide(nom, valeur, contexte, manuel = false) {
     return { niveau: valeur.niveau, raison: texte(valeur.raison, LIMITES_REPERES.raison, { hostile: true }), references: refs };
   }
   ferme(valeur, ['total', 'actif', 'cuisson', 'attentes', 'attentes_incluses', 'explication', 'references'], ['total', 'actif', 'cuisson', 'attentes', 'attentes_incluses', 'explication', ...(manuel ? [] : ['references'])]);
-  if (!manuel && (!contexte.version_id || !contexte.source.etapes.some(Boolean))) erreur('etapes_absentes');
-  const refs = references(valeur.references, contexte, manuel);
+  const inconnu = ['total', 'actif', 'cuisson', 'attentes'].every(k => valeur[k] === null);
+  if (!inconnu && (!contexte.version_id || (!manuel && !contexte.source.etapes.some(Boolean)))) erreur('etapes_absentes');
+  const refs = references(valeur.references, contexte, manuel, inconnu);
   const out = Object.fromEntries(['total', 'actif', 'cuisson', 'attentes'].map(k => [k, duree(valeur[k], k, refs, contexte, manuel)]));
   if (![true, false, null].includes(valeur.attentes_incluses)) erreur('attentes');
   if (out.total?.complet && valeur.attentes_incluses !== true) erreur('attentes');

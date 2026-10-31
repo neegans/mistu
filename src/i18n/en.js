@@ -1,6 +1,8 @@
 // Dictionnaire anglais : clé = chaîne française de référence. Une clé absente affiche le français.
 // Couverture : navigation, accueil, recherche, fiche recette, mode cuisine, réglages et libellés d'état.
 export const EN = {
+  "Remplacer la photo affichée ?": "Replace the displayed photo?",
+  "Remplacer la photo": "Replace photo",
   "Ces octets ne peuvent pas être affichés comme du texte. Tu peux récupérer le fichier complet.": "These bytes cannot be displayed as text. You can download the complete file.",
   "Cette réponse est absente de cet appareil. Ouvre l’appareil qui l’a reçue pour la consulter.": "This response is not on this device. Open the device that received it to view it.",
   "Cette réponse ne peut pas être relue dans le contexte actuel. Rouvre la recette.": "This response cannot be read in the current context. Reopen the recipe.",

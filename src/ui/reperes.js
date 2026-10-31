@@ -19,6 +19,8 @@ import { protegerSaisie } from './state.js';
 import { prendreVol, libererVol, volEnCours, DOCUMENT_ID, BATTEMENT_MS } from './vol.js';
 const CHAMPS = ['description_fr', 'difficulte', 'temps'], TERMINES = ['enregistre', 'ignore'];
 const clone = x => structuredClone(x);
+// Seulement au geste manuel : garder les séparations avant de retirer les caractères invisibles.
+const nettoyerSaisie = value => value.replace(/[\t\r\n\v\f\u0085\p{Zl}\p{Zp}]/gu, ' ').replace(/[\p{Cc}\p{Cf}]/gu, '');
 const niveaux = () => ({ facile: t('Facile'), intermediaire: t('Intermédiaire'), avance: t('Avancé'), chef: t('Chef') });
 const origines = () => ({ source: t('Source'), estimation_ia: t('Estimation IA'), manuel: t('Saisi par moi') });
 export function texteErreurReperes(e) {
@@ -150,7 +152,11 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   function champTemps(name) { return name === 'complet' ? 'total' : ['attentes_incluses', 'explication'].includes(name) ? name : name.replace(/_(min|max)$/u, ''); }
   function changed(k, name = null) { if (perime()) return; modifies.add(k); if (k === 'temps') for (const c of name ? [champTemps(name)] : CHAMPS_TEMPS_REPERES) modifiesTemps.add(c); relecture = false; relu.checked = false; persist(); synchroniser(); }
   function control(name, champ, type = 'text', options = {}) {
-    const node = el(type === 'textarea' ? 'textarea' : 'input', { ...(type === 'textarea' ? { rows: 3 } : { type }), name, value: saisie[name], ...options, onInput: e => { saisie[name] = e.target.value; changed(champ, name); } });
+    const node = el(type === 'textarea' ? 'textarea' : 'input', { ...(type === 'textarea' ? { rows: 3 } : { type }), name, value: saisie[name], ...options, onInput: e => {
+      const propre = nettoyerSaisie(e.target.value);
+      if (e.target.value !== propre) e.target.value = propre;
+      saisie[name] = propre; changed(champ, name);
+    } });
     inputs.set(name, node); controls.push({ node, champ }); return node;
   }
   function choix(name, champ, values) {

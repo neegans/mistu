@@ -14,7 +14,7 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
 export async function runVisuelReperesTests({ eq, ok }) {
   const R = await import('../src/domain/reperes.js');
   const { recipe, version } = sourceReperes(), contexte = R.construireContexteReperes({ recipe, version });
-  const refus = (fn, msg) => { let e; try { fn(); } catch (x) { e = x; } ok(!!e?.raison, 'Repères : ' + msg); };
+  const refus = (fn, raison, msg) => { let e; try { fn(); } catch (x) { e = x; } eq(e?.raison, raison, 'Repères : ' + msg); };
   const proposition = (ctx = contexte, raw = reponseReperes()) => R.fabriquerPropositionReperes({ contexte: ctx, resultat: R.validerReponseReperes(raw, ctx), modele: 'modele-test', maintenant: '2026-10-28T12:00:00.000Z' });
   const fiche = (raw = reponseReperes()) => ({ ...recipe, reperes: R.fusionnerReperes(null, { proposition: proposition(contexte, raw) }) });
   eq(contexte.source.ingredients, ['400 g de tomates'], 'Repères : références d’ingrédients stables');
@@ -28,20 +28,34 @@ export async function runVisuelReperesTests({ eq, ok }) {
   ok(R.construireContexteReperes({ recipe: { ...recipe, original_title: 'Autre soupe' }, version }).signature !== contexte.signature, 'Repères : changement de titre périme');
   const ordered = { ...version, ingredients: [{ unit_id: 'g', name_text: 'tomates', quantity: { value: 400 }, source_text: '400 g de tomates' }] };
   eq(R.construireContexteReperes({ recipe, version: ordered }).signature, contexte.signature, 'Repères : ordre des propriétés sans effet');
-  refus(() => R.construireContexteReperes({ recipe, version: { ...version, recipe_id: 'étrangère' } }), 'version étrangère refusée');
-  refus(() => R.construireContexteReperes({ recipe, version: { ...version, steps: [{ text: 'a'.repeat(8001) }] } }), 'contexte trop long refusé sans troncature');
+  refus(() => R.construireContexteReperes({ recipe, version: { ...version, recipe_id: 'étrangère' } }), 'source_etrangere', 'version étrangère refusée');
+  refus(() => R.construireContexteReperes({ recipe, version: { ...version, steps: [{ text: 'a'.repeat(8001) }] } }), 'texte', 'contexte trop long refusé sans troncature');
   eq(R.validerReponseReperes({ description_fr: null, difficulte: null, temps: null }, contexte), { description_fr: null, difficulte: null, temps: null }, 'Repères : inconnus explicites');
   const reference = R.construireContexteReperes({ recipe: { ...recipe, availability: 'reference_only' }, version: null });
   eq(R.validerReponseReperes({ description_fr: { texte: 'Une soupe de tomates.', references: [{ type: 'titre', extrait: 'Soupe de tomates' }] }, difficulte: null, temps: null }, reference).temps, null, 'Repères : référence sans version descriptible sans durée inventée');
-  refus(() => R.validerReponseReperes(reponseReperes(), reference), 'référence sans étapes ne reçoit pas de difficulté ni temps');
+  refus(() => R.validerReponseReperes(reponseReperes(), reference), 'reference_inventee', 'description citant un ingrédient absent de la référence refusée');
+  refus(() => R.validerReponseReperes({ ...reponseReperes(), description_fr: null }, reference), 'etapes_absentes', 'référence sans étapes ne reçoit pas de difficulté ni temps');
   for (const value of ['<b>Soupe</b>', 'Voir https://evil.test', 'Voir www.exemple.org', 'Voir exemple.xyz', 'ｈｔｔｐｓ：／／ｅｘｅｍｐｌｅ．ｘｙｚ', 'javascript:alert(1)', 'a'.repeat(401), 'Sans gluten garanti.']) {
     const raw = reponseReperes(); raw.description_fr.texte = value;
-    refus(() => R.validerReponseReperes(raw, contexte), 'texte hostile ou non borné refusé');
+    refus(() => R.validerReponseReperes(raw, contexte), value.length > 400 ? 'texte' : 'texte_interdit', 'texte hostile ou non borné refusé');
   }
   const nuit = reponseReperes(); nuit.temps.attentes = { min: 720, max: 720, origine: 'estimation_ia' };
-  refus(() => R.validerReponseReperes(nuit, contexte), 'total complet incompatible avec une attente plus longue refusé');
-  for (const change of [r => { r.url = 'intrus'; }, r => { r.description_fr.references[0].index = 1; }, r => { r.description_fr.references[0].extrait = 'carottes'; }, r => { r.difficulte.niveau = 'expert'; }, r => { r.temps.total.max = 19; }, r => { r.temps.total.min = -1; }, r => { r.temps.total.max = Infinity; }, r => { r.temps.total.max = 43201; }, r => { r.temps.total.max = 20.5; }, r => { r.temps.actif.min = 40; r.temps.actif.max = 40; }, r => { r.temps.total.origine = 'source'; }, r => { r.temps.actif.min = 9; r.temps.actif.max = 9; }, r => { r.temps.total.min = 0; }, r => { r.temps.attentes_incluses = false; }]) {
-    const raw = reponseReperes(); change(raw); refus(() => R.validerReponseReperes(raw, contexte), 'réponse incohérente ou référence fabriquée refusée');
+  refus(() => R.validerReponseReperes(nuit, contexte), 'total_incompatible', 'total complet incompatible avec une attente plus longue refusé');
+  for (const [raison, change] of [
+    ['structure', r => { r.url = 'intrus'; }],
+    ['reference_inventee', r => { r.description_fr.references[0].index = 1; }],
+    ['reference_inventee', r => { r.description_fr.references[0].extrait = 'carottes'; }],
+    ['niveau', r => { r.difficulte.niveau = 'expert'; }],
+    ['plage', r => { r.temps.total.max = 19; }],
+    ...[-1, Infinity, 43201, 20.5].map(n => ['minutes', r => { r.temps.total[n === -1 ? 'min' : 'max'] = n; }]),
+    ['duree_non_sourcee', r => { r.temps.actif.min = 40; r.temps.actif.max = 40; }],
+    ['actif_incompatible', r => { r.temps.actif = { min: 40, max: 40, origine: 'estimation_ia' }; }],
+    ['duree_non_sourcee', r => { r.temps.total.origine = 'source'; }],
+    ['duree_non_sourcee', r => { r.temps.actif.min = 9; r.temps.actif.max = 9; }],
+    ['duree_non_sourcee', r => { r.temps.total.min = 0; }],
+    ['attentes', r => { r.temps.attentes_incluses = false; }],
+  ]) {
+    const raw = reponseReperes(); change(raw); refus(() => R.validerReponseReperes(raw, contexte), raison, 'réponse incohérente ou référence fabriquée refusée : ' + raison);
   }
   const known = R.lireReperes(fiche(), version);
   eq(known.description_fr, 'Une soupe de tomates mixées.', 'Repères : description française relue');
@@ -76,8 +90,8 @@ export async function runVisuelReperesTests({ eq, ok }) {
   eq(R.construireContexteReperes({ recipe, version: creation }).source.durees.total_minutes, null, 'Repères : total hérité d’une création IA non envoyé comme source certaine');
   const tm = { ...version, total_minutes: 20, provenance: { thermomix: {} } };
   eq(R.lireTemps(recipe, tm).total, null, 'Repères : ancien plan TM7 sans durée globale certaine');
-  refus(() => R.fabriquerCorrectionsReperes({ temps: reponseReperes().temps }, reference), 'référence sans version ne reçoit pas de temps manuel');
-  refus(() => R.fabriquerCorrectionsReperes({ difficulte: reponseReperes().difficulte }, reference), 'référence sans version ne reçoit pas de difficulté manuelle');
+  refus(() => R.fabriquerCorrectionsReperes({ temps: reponseReperes().temps }, reference), 'etapes_absentes', 'référence sans version ne reçoit pas de temps manuel');
+  refus(() => R.fabriquerCorrectionsReperes({ difficulte: reponseReperes().difficulte }, reference), 'etapes_absentes', 'référence sans version ne reçoit pas de difficulté manuelle');
   const { buildDocs, searchDocs, parseQuery } = await import('../src/domain/search.js');
   const documents = (recipes, versions) => buildDocs({ recipes, versions, books: [], editions: [], dishes: [], links: [], translations: [], history: [] });
   const docs = documents([fiche()], [version]);

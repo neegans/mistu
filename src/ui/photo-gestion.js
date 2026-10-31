@@ -44,19 +44,21 @@ export async function modifierPhotoAffichee(recipeId, attendu, { file = null, re
     // Le helper I2 fusionne la ligne courante. La garde ne dépend ni de sa note ni de ses autres photos.
     const garde = { ...repo, saveBatch: (batch, options) => {
       const conditions = { ...options.conditions, recipes: [{ key: recipeId, fusion: c => { if (!c) changement(); return null; } }],
-        cook_history: options.conditions.cook_history.map(c => ({ ...c, fusion: courante => {
+        cook_history: [{ index: 'recipe_id', valeur: recipeId, verifier: lignes => {
+          if (!identique(photoPrincipale(vue.recipe, lignes), attendu)) changement();
+        } }, ...options.conditions.cook_history.map(c => ({ ...c, fusion: courante => {
           if (courante?.recipe_id !== recipeId || photosDeCuisson(courante).at(-1) !== attendu.sha256) changement();
           if (sha === attendu.sha256) return null;
           const suivante = c.fusion(courante);
           // Choisir une photo déjà présente la replace en dernière position, sans doublon.
           if (sha) suivante.photos = [...suivante.photos.filter(s => s !== sha), sha];
           return suivante;
-        } })) };
+        } }))] };
       return repo.saveBatch(batch, { ...options, conditions });
     } };
     await modifierPhotosCuisson(attendu.cuisson_id, { ajouter: sha ? [sha] : [], retirer: [attendu.sha256] }, { repo: garde, recettes:[contexte], fichiers });
     return { issue: 'ok', ...(sha ? { sha256: sha } : {}) };
-  } catch (e) { return ['fiche_changee','cycle_change','cycle_invalide','recette_retiree','compte_change','historique_seul'].includes(e?.code) ? refuser('fiche_changee') : { issue: 'echec', raison: 'ecriture' }; }
+  } catch (e) { return ['fiche_changee','cycle_change','cycle_invalide','recette_retiree','compte_change','contexte_change','historique_seul'].includes(e?.code) ? refuser('fiche_changee') : { issue: 'echec', raison: 'ecriture' }; }
 }
 
 export async function renderPhotoGestion({ id }, query = {}, ctx = {}, deps = {}) {
@@ -117,7 +119,15 @@ export async function renderPhotoGestion({ id }, query = {}, ctx = {}, deps = {}
       try {
         const contexte = await capturerRecette(repo, vue.recipe, {ctx, historique:!!attendu?.personnelle});
         const files = await pickFiles({ accept: 'image/*', multiple: false, ...(capture ? { capture: 'environment' } : {}) });
-        if (files?.length && !fermee) await appliquer(attendu, { file: files[0], origin: capture ? 'photo' : 'image' }, contexte);
+        if (!files?.length || fermee || occupe || !root.isConnected) return;
+        if (attendu?.personnelle) {
+          let confirme;
+          verrouiller(true);
+          try { confirme = await confirmDialog(t('Remplacer la photo affichée ?'), { okLabel: t('Remplacer la photo') }); }
+          finally { verrouiller(false); }
+          if (!confirme) return;
+        }
+        await appliquer(attendu, { file: files[0], origin: capture ? 'photo' : 'image' }, contexte);
       } catch { signaler(t('La photo du plat n’a pas pu être changée. Réessaie.')); }
     })();
   }
