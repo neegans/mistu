@@ -163,6 +163,8 @@ import { runFicheLisibleComposantsTests } from './fiche-lisible-composants.js';
 import { runTraductionGuideeTests } from './traduction-guidee.js';
 import { runTraductionHorodatagePullTests } from './traduction-horodatage-pull.js';
 import { runTraductionHorodatageRepriseTests } from './traduction-horodatage-reprise.js';
+import { runMobilePhotosSelecteurTests } from './mobile-photos-selecteur.js';
+import { runMobilePhotosConservationTests } from './mobile-photos-conservation.js';
 import { runL6LectureRecetteTests } from './l6-lecture-recette.js';
 import { runL6PasserelleBrutTests } from './l6-passerelle-brut.js';
 import { runL6StructureIngredientsTests } from './l6-structure-ingredients.js';
@@ -500,6 +502,10 @@ try { await runFicheLisibleTests({ eq, ok }); }
 catch (e) { ok(false, 'Fiche lisible : ' + (e.stack || e)); }
 try { await runFicheLisibleComposantsTests({ eq, ok }); }
 catch (e) { ok(false, 'Fiche lisible composants : ' + (e.stack || e)); }
+try { await runMobilePhotosSelecteurTests({ eq, ok }); }
+catch (e) { ok(false, 'Mobile photos sélecteur : ' + (e.stack || e)); }
+try { await runMobilePhotosConservationTests({ eq, ok }); }
+catch (e) { ok(false, 'Mobile photos conservation : ' + (e.stack || e)); }
 try { await runTraductionHorodatagePullTests({ eq, ok }); }
 catch (e) { ok(false, 'Horodatage traduction pull : ' + (e.stack || e)); }
 try { await runTraductionHorodatageRepriseTests({ eq, ok }); }
@@ -781,7 +787,7 @@ try { await runAuditImportRouteTests({eq,ok}); } catch (e) { ok(false, 'runAudit
 
 try { await runAuditRepoAbsenceTests({eq,ok}); } catch (e) { ok(false, 'runAuditRepoAbsenceTests : ' + (e.stack || e)); }
 
-eq(results.length, 14768,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 14876,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

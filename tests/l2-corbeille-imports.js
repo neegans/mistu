@@ -49,6 +49,10 @@ export async function runL2CorbeilleImportsTests({eq,ok}) {
       eq((await repo.get('source_pages',base.page.id)).rotation,0,'L5 sources restaurées : ancienne révision préservée');
     });
     await run('remplacement tardif sans octet orphelin',async(repo,db)=>{
+      // Contrôler seulement la présentation système : l'automatisation l'annule sinon avant le choix simulé.
+      const cliquer=HTMLInputElement.prototype.click;
+      HTMLInputElement.prototype.click=function(){if(this.type!=='file')return cliquer.call(this);};
+      try{
       const base=await seed(repo,db),root=await renderImport({}, {session:base.session.id},await getData(true));scene.append(root);
       const coche=root.querySelector('figure input[type=checkbox]');coche.checked=true;coche.dispatchEvent(new Event('change',{bubbles:true}));
       bouton(root,'Remplacer cette page').click();await attendre(()=>document.querySelector('input[type=file]'));
@@ -57,6 +61,7 @@ export async function runL2CorbeilleImportsTests({eq,ok}) {
       Object.defineProperty(choix,'files',{value:[f]});choix.dispatchEvent(new Event('change'));await new Promise(r=>setTimeout(r,100));
       eq(await snapshot(db),avant,'L2 sources : retrait pendant choix du fichier refuse octets, page et document ensemble');
       ok(root.isConnected,'L2 sources : ancien écran conservé après refus de remplacement');
+      }finally{HTMLInputElement.prototype.click=cliquer;}
     });
     await run('départ payé depuis ancien livre',async(repo,db)=>{
       const base=await seed(repo,db),ctx=await getData(true),capture=await capturerEdition(repo,base.ed,{ctx});

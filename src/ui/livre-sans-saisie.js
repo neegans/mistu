@@ -60,7 +60,9 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
   const maintenant = deps.maintenant || (() => new Date().toISOString()); const enLigne = deps.enLigne || (() => navigator.onLine !== false);
   const sessionDe = deps.sessionAssistant || (() => sessionAssistant(ctx));
   const cleGoogle = deps.cle ?? GOOGLE_BOOKS.key;
+  const basePhoto = repo.db, connexionPhoto = basePhoto?.idb;
   const compte = await capturerProprietaire(repo, ctx);
+  const epoquePhoto = (await repo.get('sync_state', 'editor_library_epoch:v1'))?.value ?? null;
   let row = typeof query.import === 'string' ? await repo.get('imports', query.import) : null;
   if (row?.kind === 'couverture') return renderLivreAjoutRoute(params, query, ctx, deps);
   if (query.import && (!row || row.kind !== 'livre')) return el('div', { class: 'status warn' }, t('Import introuvable.'));
@@ -92,10 +94,12 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
   };
   let importId = row?.id || null, creation = null, queue = Promise.resolve(), busy = false, preparing = false, saving = false, generation = 0, controller = null;
   let mounted = false, everConnected = false, closed = false, previewUrl = null;
+  let choixPhoto = 0, photoEnAttente = null;
   const ownId = ctx.sync?.user?.id || null;
   const root = el('div', { class: 'stack', dataset: { role: 'livre-i2' } });
   root.append(pageHeader(draft.edition_id ? t('Compléter les informations') : t('Ajouter un livre'), { back: { href: draft.edition_id ? `/books/${encodeURIComponent(draft.edition_id)}` : '/add', label: draft.edition_id ? t('Livre') : t('Ajouter') } }));
   const status = el('div', { class: 'status', role: 'status', dataset: { role: 'etat-livre' } });
+  const conservationPhoto = el('div', { class: 'status warn stack', role: 'status', hidden: true, dataset: { role: 'conservation-photo-livre' } });
   const feedback = el('div', { class: 'stack' }); const candidatesZone = el('div', { class: 'stack' });
   const duplicateZone = el('div', { class: 'stack' }); const conflictsZone = el('div', { class: 'stack' });
   const fieldsZone = el('section', { class: 'card stack livre-ajout', hidden: !row && !draft.edition_id });
@@ -108,17 +112,27 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
   } }, label);
   const message = (s) => { status.textContent = s; };
   const alive = () => !closed && (!mounted || !everConnected || root.isConnected);
-  function dispose() { if (closed) return; closed = true; generation++; controller?.abort(); observer.disconnect(); window.removeEventListener('hashchange', dispose); unsubscribe?.(); if (previewUrl) revoquerUrlDeBlob(previewUrl); }
+  function dispose() { if (closed) return; closed = true; generation++; choixPhoto++; photoEnAttente = null; controller?.abort(); observer.disconnect(); window.removeEventListener('hashchange', dispose); unsubscribe?.(); if (previewUrl) revoquerUrlDeBlob(previewUrl); }
   const observer = new MutationObserver(() => { if (root.isConnected) everConnected = true; else if (everConnected) dispose(); });
   observer.observe(document.body, { childList: true, subtree: true });
   window.addEventListener('hashchange', dispose);
   const unsubscribe = ctx.sync?.auth?.onChange?.((state) => { const id = state?.user?.id ?? null; if (id !== ownId) dispose(); });
   root.dispose = dispose;
-  const ensure = async () => {
+  const verifierPortee = () => {
+    if (!compte.contexteValide() || repo.db !== basePhoto || basePhoto?.idb !== connexionPhoto) throw Object.assign(new Error('contexte_change'), { code: 'contexte_change' });
+  };
+  const conditionsPhoto = verifier => [{ key: 'editor_library_epoch:v1', fusion: current => {
+    verifier(); if ((current?.value ?? null) !== epoquePhoto) throw Object.assign(new Error('contexte_change'), { code: 'contexte_change' }); return null;
+  } }];
+  const ensure = async (snapshot = brouillonLivre(draft), fichiers = [], verifier = verifierPortee) => {
+    verifier();
     if (importId) return importId;
     if (!creation) creation = (async () => {
-      const id = repo.newId('imp'); const fresh = { ...fabriquerImportLivre({ id, deviceId: repo.deviceId(), brouillon: draft }), owner_id:compte.owner_id, ...memoireEditionLivre(contexteEdition), ...(initial ? { initial } : {}) };
-      await repo.save('imports', fresh, journalOptions()); importId = id; row = fresh;
+      const id = repo.newId('imp'); const fresh = { ...fabriquerImportLivre({ id, deviceId: repo.deviceId(), brouillon: snapshot }), photo_sha256: snapshot.cover_sha256, owner_id:compte.owner_id, ...memoireEditionLivre(contexteEdition), ...(initial ? { initial } : {}) };
+      const options = journalOptions(!fichiers.length);
+      await repo.saveBatch({ imports: [fresh] }, { ...options, fichiers, conditions: { ...options.conditions,
+        sync_state: [...options.conditions.sync_state, ...conditionsPhoto(verifier)], imports: [{ key: id, absente: true }] } });
+      importId = id; row = fresh;
       if (alive() && typeof deps.remplacerAdresse === 'function') deps.remplacerAdresse(`#/add/livre?import=${encodeURIComponent(id)}`);
       else if (alive() && location.hash.startsWith('#/add/livre')) remplacerAdresse(`#/add/livre?import=${encodeURIComponent(id)}`);
       return id;
@@ -126,9 +140,13 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     return creation;
   };
   const persist = (fichiers = []) => {
-    const snapshot = brouillonLivre(draft);
     const capture = contexteEdition;
-    queue = queue.catch(() => {}).then(async () => { const id = await ensure(); await garderBrouillonLivre(id, snapshot, { repo,compte,contexteEdition:capture,fichiers }); });
+    // Lire au début du geste en file : une saisie arrivée pendant le commit photo ne rétablit pas ses anciens pointeurs.
+    queue = queue.catch(() => {}).then(async () => {
+      verifierPortee(); const snapshot = brouillonLivre(draft);
+      if (!importId) await ensure(snapshot, fichiers);
+      else await garderBrouillonLivre(importId, snapshot, { repo,compte,contexteEdition:capture,fichiers,verifier:verifierPortee,conditionsSync:conditionsPhoto(verifierPortee) });
+    });
     queue.catch(() => { if (alive()) message(t('Le brouillon n’a pas pu être sauvegardé. Réessaie.')); });
     return queue;
   };
@@ -148,7 +166,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     el('div', { class: 'row' }, action(t('Photographier la couverture'), 'photo-livre', () => choisirPhoto('environment', true)), action(t('Choisir une image'), 'image-livre', () => choisirPhoto(null, true))));
   const cancel = action(t('Annuler'), 'annuler-livre', () => { generation++; controller?.abort(); message(t('Recherche annulée. Ton brouillon est conservé.')); });
   cancel.hidden = true;
-  root.append(start, status, cancel, feedback, duplicateZone, candidatesZone, fieldsZone, coverZone);
+  root.append(start, status, conservationPhoto, cancel, feedback, duplicateZone, candidatesZone, fieldsZone, coverZone);
   const labels = { title: t('Titre'), subtitle: t('Sous-titre'), author: t('Auteur ou chef'), publisher: t('Éditeur'), year: t('Année'), description: t('Description courte') };
   for (const [k, label] of Object.entries(labels)) {
     const input = el(k === 'description' ? 'textarea' : 'input', { type: k === 'year' ? 'number' : 'text', name: k, rows: k === 'description' ? 3 : undefined,
@@ -189,20 +207,30 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
       action(t('Utiliser cette proposition'), `utiliser-${k}`, () => { draft = appliquerCandidateLivre(draft, { fields: { [k]: p.value }, provenance: { [k]: p.provenance } }, { forceFields: [k] }); syncPanels(); persist(); }),
       action(t('Garder ma valeur'), `garder-${k}`, () => { delete draft.proposals[k]; syncPanels(); persist(); }))));
     for (const render of listViews) render();
-    save.disabled = busy || preparing || saving || !draft.fields.title.trim(); cancel.hidden = !busy;
+    save.disabled = busy || preparing || saving || !!photoEnAttente || !draft.fields.title.trim(); cancel.hidden = !busy;
+    for (const role of ['pivoter-couverture','couverture-catalogue']) { const b=coverZone.querySelector(`[data-role="${role}"]`); if(b)b.disabled=preparing||!!photoEnAttente; }
+    const selection = photoEnAttente;
+    conservationPhoto.hidden = !photoEnAttente;
+    conservationPhoto.replaceChildren(...(photoEnAttente ? [el('p', null, photoEnAttente.erreur
+      ? t('La photo n’a pas pu être enregistrée. Elle reste en mémoire sur cet écran ; réessaie avant de quitter.')
+      : t('Photo en cours d’enregistrement.')),
+    ...(photoEnAttente.erreur ? [action(t('Réessayer de conserver la photo'), 'reessayer-photo-livre', () => conserverPhoto(selection))] : [])] : []));
+    const retry=conservationPhoto.querySelector('button');if(retry)retry.disabled=preparing;
   }
   async function showCover() {
+    const attente = photoEnAttente, sha = draft.cover_sha256;
+    const file = attente ? attente.fichier : sha ? await repo.getFile(sha) : null;
+    if (!alive() || attente !== photoEnAttente || sha !== draft.cover_sha256) return;
     if (previewUrl) { revoquerUrlDeBlob(previewUrl); previewUrl = null; }
-    const file = draft.cover_sha256 ? await repo.getFile(draft.cover_sha256) : null;
-    if (!alive()) return;
     if (file && typeAffichage(file)?.startsWith('image/')) previewUrl = displayUrl(file, urlDeBlob);
     coverZone.replaceChildren(el('h2', null, t('Couverture')),
       previewUrl ? el('img', { src: previewUrl, alt: t('Couverture'), style: { maxWidth: '180px', maxHeight: '240px', objectFit: 'contain' } }) : el('p', { class: 'muted' }, draft.cover_sha256 ? t('La couverture n’est pas sur cet appareil.') : t('Aucune couverture')),
       el('div', { class: 'row' }, action(t('Choisir une image'), 'changer-couverture', () => choisirPhoto(null, false)),
-        action(t('Retirer'), 'retirer-couverture', () => { draft.cover_sha256 = null; persist(); showCover(); }),
+        action(t('Retirer'), 'retirer-couverture', () => { annulerPhoto(); draft.cover_sha256 = null; persist(); showCover(); }),
         action(t('Pivoter'), 'pivoter-couverture', () => pivoter()),
         action(t('Chercher la couverture du catalogue'), 'couverture-catalogue', () => couvertureCatalogue())));
     if (draft.source_photo_sha256) coverZone.append(action(t('Revoir la photo source'), 'photo-source', () => revoirSource()), action(t('Relire la photo (1 appel)'), 'relire-photo', () => photoLecture(false)));
+    syncPanels();
   }
   async function revoirSource() {
     const f = await repo.getFile(draft.source_photo_sha256);
@@ -211,7 +239,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     await confirmDialog(t('Photo source'), { body: el('img', { src: u, alt: t('Photo source'), style: { maxWidth: '100%', maxHeight: '65vh', objectFit: 'contain' } }), okLabel: t('Fermer') }); revoquerUrlDeBlob(u);
   }
   async function pivoter() {
-    if (busy) return;
+    if (busy || preparing || photoEnAttente) return;
     const sha = draft.source_photo_sha256 || draft.cover_sha256; const f = sha ? await repo.getFile(sha) : null;
     if (!f?.blob) { message(t('La couverture n’est pas sur cet appareil.')); return; }
     draft.rotation = (draft.rotation + 90) % 360;
@@ -219,6 +247,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     draft.cover_sha256 = hash; await persist([{sha256:hash,blob,meta:{mime:'image/jpeg'}}]); await showCover();
   }
   async function couvertureCatalogue() {
+    if (preparing || photoEnAttente) return;
     const isbn = validerIsbn(draft.fields.isbn); if (!isbn.ok) { message(t('Saisis un ISBN valide d’abord.')); return; }
     const snapshot = draft.cover_sha256;
     const blob = await recupererCouvertureParIsbn(isbn.isbn13, { fetch }); if (!blob) { message(t('Aucune couverture reçue. Tu peux la photographier.')); return; }
@@ -226,21 +255,55 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     if (!yes || !alive() || snapshot !== draft.cover_sha256) return;
     const p = await poserCouverture(blob, { origine: 'distante', repo,prepareOnly:true }); draft.cover_sha256 = p.sha256; await persist([p.fichier]); await showCover();
   }
+  function annulerPhoto() { choixPhoto++; photoEnAttente = null; preparing = false; syncPanels(); }
+  async function conserverPhoto(selection, depuisSelection = false) {
+    if (!selection || selection !== photoEnAttente || selection.enCours || preparing && !depuisSelection) return false;
+    const verifier = () => { verifierPortee(); if (!alive() || selection !== photoEnAttente || selection.choix !== choixPhoto) throw Object.assign(new Error('photo_changee'), { code: 'photo_changee' }); };
+    preparing = true; selection.enCours = true; selection.erreur = false; syncPanels();
+    queue = queue.catch(() => {}).then(async () => {
+      verifier(); const avant = brouillonLivre(draft), snapshot = brouillonLivre(draft);
+      snapshot.cover_sha256 = selection.sha256;
+      if (selection.identify) {
+        const blank = brouillonLivre();
+        for (const key of Object.keys(snapshot.fields)) if (!snapshot.touched[key]) { snapshot.fields[key] = blank.fields[key]; delete snapshot.provenance[key]; delete snapshot.proposals[key]; }
+        snapshot.source_photo_sha256 = selection.sha256; snapshot.rotation = 0; snapshot.candidate_choisie = null;
+      }
+      const fichiers = [selection.fichier];
+      if (!importId) await ensure(snapshot, fichiers, verifier);
+      else await garderBrouillonLivre(importId, snapshot, { repo,compte,contexteEdition,fichiers,verifier,conditionsSync:conditionsPhoto(verifier) });
+      verifier();
+      draft.cover_sha256 = snapshot.cover_sha256;
+      if (selection.identify) {
+        for (const key of Object.keys(snapshot.fields)) if (!draft.touched[key] && JSON.stringify(draft.fields[key]) === JSON.stringify(avant.fields[key])) {
+          draft.fields[key] = snapshot.fields[key]; delete draft.provenance[key]; delete draft.proposals[key];
+        }
+        draft.source_photo_sha256 = snapshot.source_photo_sha256; draft.rotation = 0; draft.candidate_choisie = null;
+        generation++; candidatesZone.replaceChildren();
+      }
+      photoEnAttente = null;
+    });
+    try { await queue; if (alive()) { message(t('Photo enregistrée.')); await showCover(); } return true; }
+    catch (e) {
+      if (photoEnAttente === selection && alive()) {
+        selection.erreur = true;
+        if (['compte_change','contexte_change','cycle_change','edition_retiree','brouillon_modifie','brouillon_ferme'].includes(e?.code || e?.message)) message(t('Le livre ou le compte a changé. Ta saisie est conservée ; rouvre le livre avant de continuer.'));
+        else message('');
+      }
+      return false;
+    } finally { selection.enCours = false; if (selection.choix === choixPhoto) preparing = false; if (alive()) syncPanels(); }
+  }
   async function choisirPhoto(capture, identify) {
     if (busy || preparing) return;
+    let choix = choixPhoto;
     preparing = true; syncPanels();
     const g = generation;
     try {
-      const files = await choisir({ accept: 'image/*', multiple: false, capture }); if (!files.length || g !== generation || !alive()) return;
-      const p = await poserCouverture(files[0], { origine: 'locale', repo,prepareOnly:true }); if (!alive() || g !== generation) return;
-      draft.cover_sha256 = p.sha256;
-      if (identify) {
-        const blank = brouillonLivre();
-        for (const key of Object.keys(draft.fields)) if (!draft.touched[key]) { draft.fields[key] = blank.fields[key]; delete draft.provenance[key]; delete draft.proposals[key]; }
-        draft.source_photo_sha256 = p.sha256; draft.rotation = 0; draft.candidate_choisie = null; generation++; candidatesZone.replaceChildren(); syncPanels();
-      }
-      fieldsZone.hidden = false; await persist([p.fichier]); await showCover(); preparing = false; if (identify) await photoLecture(true);
-    } catch (e) { message(messageErreurImage(e)); } finally { preparing = false; syncPanels(); }
+      const files = await choisir({ accept: 'image/*', multiple: false, capture }); if (!files.length || g !== generation || choix !== choixPhoto || !alive()) return;
+      const p = await poserCouverture(files[0], { origine: 'locale', repo,prepareOnly:true }); if (!alive() || g !== generation || choix !== choixPhoto) return;
+      choix = ++choixPhoto;
+      photoEnAttente = { ...p, identify, choix }; fieldsZone.hidden = false; await showCover();
+      if (await conserverPhoto(photoEnAttente, true) && identify && alive() && choix === choixPhoto) await photoLecture(true);
+    } catch (e) { if (alive() && choix === choixPhoto) message(messageErreurImage(e)); } finally { if (choix === choixPhoto) preparing = false; if (alive()) syncPanels(); }
   }
   async function scanner() {
     if (busy) return;
@@ -293,6 +356,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
       renderSourcesLivre(c.provenance), action(t('Choisir cette édition'), `candidate-${i}`, () => apply(c, true)))));
   }
   async function phaseAssistant(phase, fn) {
+    if (photoEnAttente) { syncPanels(); return null; }
     if (busy || volEnCours()) { message(t('Une lecture est déjà en cours : annule-la d’abord.')); return null; }
     if (!enLigne()) { message(t('Tu es hors ligne. Ton brouillon est conservé.')); return null; }
     busy = true; controller = new AbortController(); const localController = controller;
@@ -402,7 +466,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     } finally { saving = false; syncPanels(); }
   }
   root.etatRoute = () => ({ importId, busy, saving, brouillon: brouillonLivre(draft) });
-  root.attendreEcritures = async () => { await queue; while(operations.size) await Promise.all([...operations]); await queue; };
+  root.attendreEcritures = async () => { await queue.catch(() => {}); while(operations.size) await Promise.all([...operations]); await queue; };
   async function reprendreResultats(ligne) {
     const correspond = (result) => {
       if (!result?.entree) return true;

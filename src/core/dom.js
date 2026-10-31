@@ -155,13 +155,46 @@ export function downloadBlob(blob, filename) {
   setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 4000);
 }
 
+let annulerChoixFichiers = null;
 export function pickFiles({ accept = '*/*', multiple = true, capture = null } = {}) {
-  return new Promise((resolve) => {
+  // Un nouveau geste remplace seulement un choix encore pendant, jamais un résultat déjà remis.
+  annulerChoixFichiers?.();
+  return new Promise((resolve, reject) => {
     const input = el('input', { type: 'file', accept, multiple, style: { display: 'none' } });
     if (capture) input.setAttribute('capture', capture);
-    input.addEventListener('change', () => { resolve([...input.files]); input.remove(); });
-    document.body.append(input);
-    input.click();
+    const actif = document.activeElement, adresse = location.href;
+    const declencheur = actif?.matches('button,a[href],input[type=button],input[type=submit]') ? actif : null;
+    let dialogue = actif?.closest('dialog[open]') || null;
+    // Sur écran tactile, le bouton peut ne pas prendre le focus. Le dialogue modal reste identifiable.
+    if (!dialogue) { try { dialogue = document.querySelector('dialog:modal'); } catch { /* anciens moteurs sans :modal */ } }
+    let fini = false, observer;
+    const evenements = ['hashchange', 'popstate', 'cuisineos:replace'];
+    const finir = (files, erreur = null) => {
+      if (fini) return;
+      fini = true;
+      observer?.disconnect();
+      input.removeEventListener('change', changer); input.removeEventListener('cancel', annuler);
+      dialogue?.removeEventListener('close', annuler);
+      for (const nom of evenements) window.removeEventListener(nom, quitter);
+      input.remove();
+      if (annulerChoixFichiers === annuler) annulerChoixFichiers = null;
+      if (erreur) reject(erreur); else resolve(files);
+    };
+    const annuler = () => finir([]), changer = () => finir([...input.files]);
+    const quitter = () => { if (location.href !== adresse) annuler(); };
+    annulerChoixFichiers = annuler;
+    input.addEventListener('change', changer); input.addEventListener('cancel', annuler);
+    dialogue?.addEventListener('close', annuler);
+    for (const nom of evenements) window.addEventListener(nom, quitter);
+    try {
+      document.body.append(input);
+      observer = new MutationObserver(() => {
+        if (!input.isConnected || (declencheur && !declencheur.isConnected) || (dialogue && (!dialogue.isConnected || !dialogue.open))) annuler();
+      });
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['open'] });
+      // Aucune attente avant l'ouverture ; focus, visibilité et pagehide ne prouvent pas une annulation caméra.
+      input.click();
+    } catch (erreur) { finir([], erreur); }
   });
 }
 

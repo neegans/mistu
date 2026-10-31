@@ -24,10 +24,13 @@ export async function trouverEditionsLivre(isbn, repo) {
   const v = validerIsbn(isbn); if (!v.ok) return [];
   return (await repo.all('book_editions')).filter((e) => validerIsbn(e?.isbn).isbn13 === v.isbn13);
 }
-export async function garderBrouillonLivre(id, brouillon, { repo, phase, contexteEdition = null, compte = null, fichiers = [] } = {}) {
+export async function garderBrouillonLivre(id, brouillon, { repo, phase, contexteEdition = null, compte = null, fichiers = [], verifier = () => {}, conditionsSync = [] } = {}) {
+  verifier();
   const d = brouillonLivre(brouillon);
   const avant = await repo.get('imports', id), gardeCompte = await compteLivre(repo, compte, avant);
-  await repo.saveBatch({}, { fichiers, editions: contexteEdition ? [{ ...contexteEdition, historique: !fichiers.length }] : [], conditions: { sync_state: [gardeCompte], imports: [{ key: id, fusion: (row) => {
+  verifier();
+  await repo.saveBatch({}, { fichiers, editions: contexteEdition ? [{ ...contexteEdition, historique: !fichiers.length }] : [], conditions: { sync_state: [gardeCompte, ...conditionsSync], imports: [{ key: id, fusion: (row) => {
+    verifier();
     if (!row || row.kind !== 'livre' || ['enregistre', 'ignore'].includes(row.status)) throw new Error('brouillon_ferme');
     if (row.edition_id !== avant?.edition_id || row.expected_edition_cycle_id !== avant?.expected_edition_cycle_id || row.owner_id !== avant?.owner_id) throw erreurLivre('brouillon_modifie');
     return { ...row, brouillon: d, source_photo_sha256: d.source_photo_sha256, photo_sha256: d.cover_sha256, ...(phase ? { phase } : {}) };

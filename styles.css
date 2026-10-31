@@ -221,6 +221,8 @@ section.plain > h2 { margin: 0 0 .8rem; padding-bottom: .4rem; border-bottom: 1p
 /* § 3.3 : la grille des couvertures (library.js, tâche 2) : des couvertures plus larges que la grille générale. */
 .grid.livres { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
 .stack > * + * { margin-top: .6rem; }
+.selecteur-scan-genre > span, .selecteur-scan-genre > small { display: block; }
+.selecteur-scan-genre > label.check { display: flex; }
 
 .btn {
   appearance: none; border: 1px solid var(--line); background: var(--card); color: var(--ink);

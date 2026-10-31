@@ -81,7 +81,7 @@ export function renderSelecteurScan(model, gestes = {}) {
   return el('section', { class: 'card stack selecteur-scan' },
     el('h2', null, t('Ces pages vont où ?')),
     field(t('Livre'), sel),
-    el('div', { class: 'stack' }, el('span', null, t('Genre de pages')),
+    el('div', { class: 'stack selecteur-scan-genre' }, el('span', null, t('Genre de pages')),
       radio('recette', t('Page(s) de recette'), false), radio('index', t('Index ou table des matières'), !model.indexDisponible),
       model.messageIndex ? el('small', { class: 'muted' }, model.messageIndex) : null),
     el('div', { class: 'row' },

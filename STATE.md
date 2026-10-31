@@ -1,4 +1,10 @@
-# STATE.md — Mistu — 31 octobre 2026 — INVESTIGATION PHOTO MOBILE ; PUBLIC 0.32.9-1
+# STATE.md — Mistu — 31 octobre 2026 — CORRECTIFS PHOTO ; PUBLIC 0.32.9-1
+
+**Photos mobiles — correctif0.32.10-1 reçu localement, publication en préparation.** Annuler puis reprendre une photo libère les boutons du livre, de la séance de pages et du bilan. La première couverture est conservée avec son brouillon dans une transaction ; après une panne d’écriture, elle reste disponible sur l’écran avec un réessai explicite. Une deuxième sélection annulée n’efface pas cette photo en attente. L’aide du choix des pages est séparée de ses libellés.
+
+**14877/14877** navigateur (+108), **281/281** outils Node et **29/29** outils CI ; générateurs conformes, revue indépendante. Parcours Chromium **35/35**, sept entrées avec annulation/réouverture, vrais JPEG et conservation après rechargement hors ligne ; zéro erreur JavaScript/console/HTTP, POST ou requête extérieure. Le parcours WebKit complet reste non validé : le témoin sans Mistu échoue lui aussi à écrire un fichier JPEG dans IndexedDB (`UnknownError`, préparation Blob/File). APP_VERSION0.32.10, DB6/archive7 inchangés ; aucun SQL ni déploiement assistant. Les limites16Mpx/HEIF restent distinctes ; aucun essai de caméra ou PWA sur iPhone physique revendiqué. [Spec](docs/superpowers/specs/2026-10-31-mobile-photos-correctifs-design.md) · [Réception](docs/superpowers/plans/2026-10-31-mobile-photos-correctifs-reception.md).
+
+## Investigation précédente
 
 **Investigation mobile — PWA iPhone, aucun correctif encore déployé.** Base0b0b10e, public **0.32.9-1** inchangé. Annulation du choix de photo ignorée par le helper commun : livre avec boutons actifs mais muets, séance photo verrouillée, bilan de cuisson qui refuse Enregistrer. Reproductions sur vrais composants avec événement `cancel` synthétique, confirmation des bilans dans Chromium et WebKit ; aucun essai caméra/PWA physique revendiqué. Une panne de stockage simulée révèle aussi une couverture référencée sans octets et un message « image illisible » trompeur. Limite16Mpx et HEIF non reconnu distingués des causes confirmées ; HEIC reste autorisé. Aucun obstacle tactile aux boutons photo observé sur les huit vues contrôlées. [Rapport, preuves et priorités](docs/audits/2026-10-31-mobile-photos-pwa.md).
 

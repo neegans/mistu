@@ -1,6 +1,10 @@
 // Dictionnaire anglais : clé = chaîne française de référence. Une clé absente affiche le français.
 // Couverture : navigation, accueil, recherche, fiche recette, mode cuisine, réglages et libellés d'état.
 export const EN = {
+  "La photo n’a pas pu être enregistrée. Elle reste en mémoire sur cet écran ; réessaie avant de quitter.": "The photo could not be saved. It remains in memory on this screen; try again before leaving.",
+  "Photo en cours d’enregistrement.": "Saving photo.",
+  "Réessayer de conserver la photo": "Try saving the photo again",
+  "Photo enregistrée.": "Photo saved.",
   "Remplacer la photo affichée ?": "Replace the displayed photo?",
   "Remplacer la photo": "Replace photo",
   "Ces octets ne peuvent pas être affichés comme du texte. Tu peux récupérer le fichier complet.": "These bytes cannot be displayed as text. You can download the complete file.",

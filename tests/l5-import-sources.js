@@ -35,12 +35,18 @@ export async function runL5ImportSourcesTests({eq,ok}){
    eq((await repo.get('recipes',b.recette.id)).source_page_ids,[b.page.id],'L5 Import rotation : référence historique inchangée');
   });
   await run('remplacement',async(repo,db)=>{
+   // Le sélecteur système d'un navigateur automatisé s'annule avant choisirFichier. Seule sa présentation
+   // est neutralisée ici : le helper natif, l'input, les fichiers et l'événement change restent exercés.
+   const cliquer=HTMLInputElement.prototype.click;
+   HTMLInputElement.prototype.click=function(){if(this.type!=='file')return cliquer.call(this);};
+   try{
    const b=await fixture(repo,db),nouveau=await image('#b54','remplacement.jpg');await monter(b);cocher(root,b.page.id);bouton(root,'Remplacer cette page')?.click();await choisirFichier(nouveau);
    await attendre(async()=>actives(await repo.get('scan_sessions',b.session.id))[0]!==b.page.id);
    const avant=await repo.get('source_pages',b.page.id),s=await repo.get('scan_sessions',b.session.id),apres=await repo.get('source_pages',actives(s)[0]);
    eq([avant.document_id,avant.sha256],[b.document.id,b.page.sha256],'L5 Import remplacement : document et octets de l’ancienne page intacts');
    ok(apres?.id!==b.page.id&&apres?.sha256===await sha256Hex(nouveau),'L5 Import remplacement : nouveau fichier dans une autre révision');
    eq((await repo.get('recipes',b.recette.id)).source_page_ids,[b.page.id],'L5 Import remplacement : recette conserve source exacte');
+   }finally{HTMLInputElement.prototype.click=cliquer;}
   });
   await run('retrait cité',async(repo,db)=>{
    const b=await fixture(repo,db);await monter(b);cocher(root,b.page.id);(bouton(root,'Retirer de la séance')||bouton(root,'Retirer'))?.click();

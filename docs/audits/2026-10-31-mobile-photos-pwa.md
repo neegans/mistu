@@ -4,6 +4,8 @@
 
 **Deux défauts applicatifs sont confirmés : l’annulation du choix de photo laisse plusieurs écrans bloqués ; une panne de conservation de couverture est présentée comme une photo illisible et laisse un brouillon référençant des octets absents.** La limite de résolution et le type HEIF constituent deux contraintes de compatibilité distinctes. Aucun correctif produit ni déploiement dans cette investigation.
 
+**Suite autorisée par « deploy » :** [correction et réception](../superpowers/plans/2026-10-31-mobile-photos-correctifs-reception.md). Le présent rapport conserve les constats et limites de l’investigation initiale.
+
 ## 1. Priorité haute — annulation du choix de photo
 
 Tous les boutons photographier/choisir une image convergent vers `src/core/dom.js:158`. Le helper crée un input neuf dans le document, avec `capture="environment"` pour les prises de vue, et attend uniquement l’événement `change`. Il ignore `cancel` : la promesse ne finit pas et l’input reste dans le document.
