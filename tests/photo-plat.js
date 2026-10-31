@@ -700,7 +700,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
         const pZ1 = await monter('rc_z1');
         file.push('suspendre');
         const pz1 = auto('rc_z1');
-        await attendre(() => ligneWeb(pZ1)?.getAttribute('role') === 'status' && ligneWeb(pZ1)?.textContent === 'Récupération de la photo du plat…', '« Récupération… » pendant la descente');
+        await attendre(() => suspendus.length === 1 && ligneWeb(pZ1)?.getAttribute('role') === 'status' && ligneWeb(pZ1)?.textContent === 'Récupération de la photo du plat…', 'POST parti et « Récupération… » pendant la descente');
         suspendus.shift()(200, corps200()); garde(await pz1);
         await attendre(() => !!pZ1.querySelector('[data-role="photo-plat"] img') && !ligneWeb(pZ1), 'l’image en tête après la descente');
         eq(dits, [], 'zone montée : « Récupération… » pendant (fetch suspendu), puis l’image en tête ; aucun toast');
@@ -760,7 +760,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
         const pZ8 = await monter('rc_z8');
         file.push('suspendre');
         const pz8 = auto('rc_z8');
-        await attendre(() => ligneWeb(pZ8)?.getAttribute('role') === 'status', 'descente en cours (z8)');
+        await attendre(() => suspendus.length === 1 && ligneWeb(pZ8)?.getAttribute('role') === 'status', 'POST parti et descente en cours (z8)');
         bouton(zoneDe(pZ8), 'Choisir une image').click();
         await attendre(async () => (await db.get('recipes', 'rc_z8')).photo_origin === 'image', 'photo de la personne posée pendant la descente');
         // Revue finale (I-F6) : la descente vole encore, mais la zone dit l'état vrai — la photo choisie, sans « Récupération… » (elle finira fiche_changee).

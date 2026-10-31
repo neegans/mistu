@@ -104,7 +104,14 @@ export async function runAuditReponsesParcoursTests({ eq, ok }) {
     });
     await run(`${genre} quota direct et réessai`, async (repo, db) => {
       const f = await fixture(repo, genre), mutation = db.mutate.bind(db); let quota = true, ecritures = 0, appels = 0;
-      db.mutate = async args => { if (args.conditions?.sync_state?.some(c => c.key === PREFIXE + f.journal.id)) { ecritures++; if (quota) throw new DOMException('quota simulé', 'QuotaExceededError'); } return mutation(args); };
+      // La même clé peut seulement être vérifiée avant l'appel : le quota vise une écriture réelle du reçu.
+      db.mutate = args => mutation({ ...args, conditions: { ...args.conditions, ...(args.conditions?.sync_state ? {
+        sync_state: args.conditions.sync_state.map(c => c.key !== PREFIXE + f.journal.id ? c : { ...c, fusion: (...lectures) => {
+          const r = c.fusion(...lectures);
+          if (r != null) { ecritures++; if (quota) throw new DOMException('quota simulé', 'QuotaExceededError'); }
+          return r;
+        } }),
+      } : {}) } });
       try {
         const e = await erreurDe(() => f.proposer({ fetch: async () => { appels++; return new Response(f.octets); } }));
         eq(e?.code, 'conservation_en_attente', `${genre} : quota annonce une réponse non encore conservée`);
@@ -133,7 +140,13 @@ export async function runAuditReponsesParcoursTests({ eq, ok }) {
       const premier = await f.proposer({ reponsesRefusees: controle, fetch: async () => new Response(f.octets) });
       const ancien = await db.get('sync_state', PREFIXE + premier.id), mutation = db.mutate.bind(db);
       let quota = true;
-      db.mutate = async args => { if (quota && args.conditions?.sync_state?.some(c => c.key === PREFIXE + premier.id)) throw new DOMException('quota simulé', 'QuotaExceededError'); return mutation(args); };
+      db.mutate = args => mutation({ ...args, conditions: { ...args.conditions, ...(args.conditions?.sync_state ? {
+        sync_state: args.conditions.sync_state.map(c => c.key !== PREFIXE + premier.id ? c : { ...c, fusion: (...lectures) => {
+          const r = c.fusion(...lectures);
+          if (quota && r != null) throw new DOMException('quota simulé', 'QuotaExceededError');
+          return r;
+        } }),
+      } : {}) } });
       const nouveau = encoder.encode('{"reponse":"incomplète mais payée"');
       try {
         const e = await erreurDe(() => f.proposer({ reponsesRefusees: controle, fetch: async () => {

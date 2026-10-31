@@ -55,6 +55,13 @@ export function creerConservationReponseRefusee({repo,maintenant=nowIso}={}){
   const ref=j.reponse_refusee??null;if(ref&&!referenceValide(ref,j.kind))fail('reponse_changee');
   const capture=Object.freeze({});captures.set(capture,{g,journal:j,key,raw:copy(raw??null),ref:copy(ref)});return{issue:'ok',capture};
  }
+ async function preparerDepart({capture}){
+  const c=captures.get(capture);if(!c)fail('contexte_change');
+  await verifierPortee(c.g);
+  // Réutilise la portée d'avant l'attente ; ces gardes rejoignent la transition de départ.
+  return{issue:'ok',verifier(current){c.g.verifier();if(current!==undefined&&!egal(comparable(current),comparable(c.journal)))fail('journal_change');},
+   conditions:[...conditionsPortee(c.g),{key:c.key,fusion:r=>{c.g.verifier();if(!egal(r,c.raw))fail('reponse_changee');return null;}}]};
+ }
  async function preparer(p){
   if(p.local)return;
   const empreinte=await sha256Hex(p.octets);
@@ -126,5 +133,5 @@ export function creerConservationReponseRefusee({repo,maintenant=nowIso}={}){
   const journal=await repo.transitionner('imports',l.journal.id,{attendus:[l.journal.status],patch:current=>{l.g.verifier();if(!egal(current,l.journal))fail('reponse_changee');return{reponse_refusee:null};},deletes:{sync_state:[l.row.key]},autres:{sync_state:[...conditionsPortee(l.g),{key:l.row.key,fusion:r=>{l.g.verifier();if(!egal(r,l.row))fail('reponse_changee');return null;}}]}});
   await verifierPortee(l.g);lectures.delete(attendu);return{issue:'abandonne',journal};
  }
- return{capturer:encadrer(capturer),conserver:encadrer(conserver),lire:encadrer(lire),abandonner:encadrer(abandonner),reponseEnAttente:encadrer(reponseEnAttente),presenceEnAttente:({importId})=>pending.has(importId),reessayerConservation:({importId})=>enregistrer(importId)};
+ return{capturer:encadrer(capturer),preparerDepart:encadrer(preparerDepart),conserver:encadrer(conserver),lire:encadrer(lire),abandonner:encadrer(abandonner),reponseEnAttente:encadrer(reponseEnAttente),presenceEnAttente:({importId})=>pending.has(importId),reessayerConservation:({importId})=>enregistrer(importId)};
 }

@@ -2,7 +2,7 @@
 // Les refus complets restent sur cet appareil ; seule leur référence rejoint le journal. Les sources ne sont jamais réécrites.
 import { ligneImportNeuve, IMPORTS_OUVERTS } from './import-cible.js';
 import { appelerAssistant, echecDomaine, sessionValide } from './passerelle.js';
-import { construireContexteThermomix, empreinteThermomix, validerReponseThermomix, fabriquerVersionThermomix, lireThermomix } from './thermomix.js';
+import { construireContexteThermomix, empreinteThermomix, ingredientsContexteThermomix, validerReponseThermomix, fabriquerVersionThermomix, lireThermomix } from './thermomix.js';
 import { ignorerPropositionImport } from './reprise-import.js';
 import { extraireObjetJson } from './reponse-json.js';
 import { TransitionRefusee } from '../core/db.js';
@@ -188,11 +188,12 @@ export function construireDemandeThermomix(contexte, questions = []) {
     'Les opérations ajouter, reserver et repartir_varoma placent ou déplacent la quantité source entière vers leur contenant. Ne place jamais deux fois une référence au même endroit. Transvaser déplace tout le contenu du bol vers le contenant choisi (jamais bol), puis laisse le bol vide. Racler et verifier_texture ne changent pas les ingrédients présents.',
     'La liste ingredients de chaque réglage doit être exactement l’union des références effectivement présentes dans les contenants utilisés : bol seul pour couteau/fouet, bol et panier pour panier, bol et Varoma pour varoma, les trois pour panier_varoma. Un ingrédient au Varoma ou au panier ne rend pas le contenu du bol mixte : une chauffe manuelle exige du contenu non composé uniquement de graisses dans le bol.',
     'Après une étape source non adaptée située entre deux blocs du plan, le contenu des contenants devient inconnu. Demande de sélectionner cette étape intermédiaire ou décris un rétablissement complet avec les seules préparations structurées permises. Ne déclare pas simplement que le contenu est connu. Avant le premier bloc, la consigne de contenants vides est explicite ; elle ne signifie pas que des ingrédients déjà chauffés sont froids.',
-    'Les ingrédients sont référencés par leur position i1, i2, etc. dans source.ingredients ; garde les quantités source. Ne pas ajouter deux fois la quantité entière d’un ingrédient. Si un partage, une quantité ou un contexte nécessaire manque, pose une question ; si une étape non choisie doit changer, demande de l’ajouter à la sélection.',
+    'Chaque ingrédient de source.ingredients porte sa référence ref (i1, i2, etc.) ; utilise cette référence et garde les quantités source. Ne pas ajouter deux fois la quantité entière d’un ingrédient. Si un partage, une quantité ou un contexte nécessaire manque, pose une question ; si une étape non choisie doit changer, demande de l’ajouter à la sélection.',
     'Le montage du couvercle et des accessoires est imposé par le client. Ne demande jamais de contourner une sécurité. Les raisons expliquent seulement le changement ; elles ne contiennent pas d’instruction à exécuter.',
     contexte.langue === 'en' ? 'Write reasons and questions in English. Keep JSON field names and enumeration values as specified.' : 'Rédige les motifs et questions en français.',
   ].join('\n');
-  const user = JSON.stringify({ contexte, questions_precedentes: questions });
+  const projection = { ...contexte, source: { ...contexte.source, ingredients: ingredientsContexteThermomix(contexte) } };
+  const user = JSON.stringify({ contexte: projection, questions_precedentes: questions });
   const corps = { max_tokens: 16000, system, messages: [{ role: 'user', content: user }] };
   if (new TextEncoder().encode(JSON.stringify(corps)).length > 128 * 1024) throw erreur('hors_bornes');
   return { system, user };

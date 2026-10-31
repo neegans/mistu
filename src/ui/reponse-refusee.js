@@ -35,6 +35,7 @@ const MOTIFS = {
   structure_invalide: 'La réponse reçue n’a pas le format attendu.',
   reponse_illisible: 'La réponse reçue n’a pas pu être lue.',
   reponse_trop_grande: 'La réponse reçue dépasse la taille autorisée.',
+  etape_trop_longue: 'Une étape proposée est trop longue pour être ajoutée à la recette.',
   reponse_incomplete: 'La réponse reçue est incomplète.',
   max_tokens: 'La réponse reçue est incomplète.',
   interrompu: 'La réponse reçue est incomplète.',

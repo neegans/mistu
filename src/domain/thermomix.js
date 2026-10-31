@@ -361,6 +361,10 @@ function reponseDe(raw, c, securite = erreur) {
   }
   const anciens = anciensTous.filter(b => !c.selection.includes(b.source_step_id));
   verifierSequence([...anciens, ...ordered], c, securite);
+  // Mesurer l’étape qui sera conservée, avec sa langue et son éventuelle consigne initiale.
+  for (const bloc of ordered) {
+    if (codepoints(formaterBlocThermomix(bloc, c, { locale: c.langue })) > LIMITES_THERMOMIX.etape) erreur('etape_trop_longue');
+  }
   return { type: 'proposition', blocs: ordered };
 }
 export function validerReponseThermomix(raw, contexte) { return reponseDe(raw, relireContexte(contexte)); }

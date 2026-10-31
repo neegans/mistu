@@ -40,6 +40,7 @@ export const EN = {
   "Une durée proposée n’est pas valide.": "A proposed duration is invalid.",
   "Une durée présentée comme issue de la recette n’y a pas été retrouvée.": "A duration presented as coming from the recipe could not be found in it.",
   "Une estimation proposée n’est pas expliquée.": "A proposed estimate has no explanation.",
+  "Une étape proposée est trop longue pour être ajoutée à la recette.": "A proposed step is too long to be added to the recipe.",
   "Une plage de durée proposée n’est pas valide.": "A proposed time range is invalid.",
   "Une quantité nécessaire aux vérifications n’est pas connue.": "A quantity needed for the checks is unknown.",
   "Voir la réponse reçue": "View the received response",
