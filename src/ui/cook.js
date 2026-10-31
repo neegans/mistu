@@ -1,11 +1,12 @@
 import {preparerLectureRecette,projeterLectureRecette} from '../domain/lecture-recette.js';
 import {projectionCandidateTraduction} from '../domain/traductions-format.js';
-import {canoniqueSources} from '../domain/sources-format.js';
+import {canoniqueSources,identifiantSource} from '../domain/sources-format.js';
+import {CLE_EPOQUE_EDITEUR} from '../domain/brouillons-format.js';
 import {creerServiceCuisine} from '../domain/cuisine-persistance.js';
 import {avertissementsAvantCuisson} from '../domain/cuisine-avertissements.js';
 import {el} from '../core/dom.js';
 import {t} from '../core/i18n.js';
-import {navigate,refresh} from '../core/router.js';
+import {navigate,refresh,buildQuery} from '../core/router.js';
 import * as repo from '../model/repo.js';
 import {scaleVersion} from '../domain/scaling.js';
 import {describeDuration} from '../domain/timers.js';
@@ -27,7 +28,7 @@ import {creerPanneauComparaisonCuisine} from './comparaison-cuisine.js';
 // Les contrôleurs restent montés ; les seuls champs confirmés par le service deviennent la vue courante.
 export async function renderCook(params,query,ctx,deps={}){
  const depot=deps.repo??repo,base=depot.db,generation=getSyncGeneration();
- let dispose=false,lecture=null,affiche=null,projection=null,items=[],occupe=false,bilanOuvert=false,planOuvert=false,numeroLecture=0,lectureEnCours=null,relireEnsuite=false,vueConfirmee=null,selectionEnAttente=null;
+ let dispose=false,admise=false,lecture=null,affiche=null,projection=null,items=[],occupe=false,bilanOuvert=false,planOuvert=false,numeroLecture=0,lectureEnCours=null,relireEnsuite=false,vueConfirmee=null,selectionEnAttente=null;
  const root=el('div',{class:'mode-cuisine'}),estCourante=()=>!dispose&&getSyncGeneration()===generation&&(!base||depot.db===base);
  const service=deps.service??creerServiceCuisine({repo:depot,getGeneration:getSyncGeneration,maintenant:deps.maintenant??syncNow,newId:depot.newId});
  const ouvertures=new Map(),traductionsChoisies=new Map(),traductionsPerimees=new Map();
@@ -37,8 +38,8 @@ export async function renderCook(params,query,ctx,deps={}){
  root.dispose=()=>{if(dispose)return;dispose=true;numeroLecture++;nettoyer();permanents.splice(0).forEach(fn=>fn());panneau?.dispose?.();comparaisons?.dispose?.();commandeEcran?.dispose?.();ecran?.detruire();voix?.detruire();};
  root.actualiserCuisine=actualiser;
  const capture=await service.capturerPortee({owner_id:ctx.proprietaireDonnees??null,estCourante});
- if(capture.issue!=='ok'||!estCourante()){root.append(el('p',{class:'status warn'},t('La bibliothèque a changé. Rouvre la séance de cuisine.')));return root;}
- const portee=capture.portee;
+ if(capture.issue!=='ok'||!estCourante()){root.append(el('p',{class:'status warn'},t('La bibliothèque a changé. Rouvre la séance de cuisine.')));await sortiesErreur();return root;}
+ const portee=capture.portee,connexion=base?.idb;
  const titre=el('h1',null,t('Cuisine')),fiche=el('a',{class:'btn',dataset:{role:'fiche-cuisine'}},t('Fiche'));
  const etat=el('p',{class:'status warn',role:'status',hidden:true,dataset:{role:'etat-cuisine'}});
  const terminer=el('button',{class:'btn',type:'button',onClick:()=>finir([])},t('Terminer'));
@@ -60,11 +61,38 @@ export async function renderCook(params,query,ctx,deps={}){
  root.append(entete,onglets,outils,etat,avertissements,reprise,contenu,navigation,panneau,comparaisons,photoHote);
  const ctxF=await contexteFichiers(ctx),photos=photosPersonnellesParRecette(ctx.cook_history||[]);let fichiers=new Map();
  const initiale=await service.lireSession({portee,sessionId:params.id});
- if(initiale.issue!=='ok'||!estCourante()){signaler(initiale);terminer.disabled=true;fiche.hidden=true;return root;}
- await recevoir(initiale);await panneau.actualiser?.();
+ if(initiale.issue!=='ok'||!estCourante()){signaler(initiale);terminer.disabled=true;fiche.hidden=true;await sortiesErreur(portee,connexion);return root;}
+ admise=await recevoir(initiale);await panneau.actualiser?.();
  const revenir=()=>actualiser();for(const event of ['focus','pageshow']){window.addEventListener(event,revenir);permanents.push(()=>window.removeEventListener(event,revenir));}
  const visible=()=>{if(document.visibilityState==='visible')actualiser();};document.addEventListener('visibilitychange',visible);permanents.push(()=>document.removeEventListener('visibilitychange',visible));
  return root;
+
+ async function sortiesErreur(porteeErreur=null,connexionErreur=null){
+  // Une séance de repas peut viser une autre recette que son recipe_id historique.
+  const sessions=(ctx.cook_sessions||[]).filter(s=>s.id===params.id),s=sessions.length===1?sessions[0]:null,vid=s?.active_version_id;
+  const v=ctx.versionsById?.get(vid),r=ctx.recipesById?.get(v?.recipe_id),selection=s?.selected_version_ids;
+  const cible=identifiantSource(vid)&&Array.isArray(selection)&&selection.every(identifiantSource)&&new Set(selection).size===selection.length&&selection.includes(vid)
+   &&v?.id===vid&&identifiantSource(v.recipe_id)&&r?.id===v.recipe_id?{sessionId:s.id,versionId:vid,recipeId:r.id,selection:[...selection]}:null;
+  const vivante=()=>!dispose&&root.isConnected;
+  async function destination(){
+   try{
+    if(!cible||!porteeErreur)return null;
+    const courante=()=>estCourante()&&base?.idb===connexionErreur&&base?.name===porteeErreur.database_name;
+    const porteeValide=async()=>{if(!courante())return false;const [owner,epoque]=await base.getMany('sync_state',['user_id',CLE_EPOQUE_EDITEUR]);return courante()&&(owner?.value??null)===porteeErreur.owner_id&&epoque?.value===porteeErreur.library_epoch;};
+    if(!await porteeValide())return null;
+    const [session,version,recipe]=await Promise.all([base.get('cook_sessions',cible.sessionId),base.get('recipe_versions',cible.versionId),base.get('recipes',cible.recipeId)]);
+    if(!await porteeValide()||session?.id!==cible.sessionId||session.active_version_id!==cible.versionId||JSON.stringify(session.selected_version_ids)!==JSON.stringify(cible.selection)
+     ||version?.id!==cible.versionId||version.recipe_id!==cible.recipeId||recipe?.id!==cible.recipeId)return null;
+    return `/recipes/${encodeURIComponent(cible.recipeId)}?v=${encodeURIComponent(cible.versionId)}`;
+   }catch{return null;}
+  }
+  const retour=el('a',{class:'btn',href:'#/library',dataset:{role:'retour-erreur-cuisine'}},t('Bibliothèque'));
+  const afficher=href=>{retour.href='#'+(href||'/library');retour.textContent=href?t('Fiche'):t('Bibliothèque');};
+  afficher(await destination());
+  retour.addEventListener('click',async event=>{event.preventDefault();if(!vivante())return;const href=await destination();if(!vivante())return;afficher(href);(deps.navigate??navigate)(href||'/library');});
+  root.append(el('div',{class:'row',dataset:{role:'reprise-erreur-cuisine'}},
+   el('button',{type:'button',class:'btn',dataset:{role:'reouvrir-cuisine'},onClick:()=>{if(vivante())(deps.navigate??navigate)('/cook/'+encodeURIComponent(params.id)+buildQuery(query),{replace:true});}},t('Rouvrir la séance')),retour));
+ }
 
  async function reprendreOriginale(){
   if(repriseEnCours||!estCourante())return;
@@ -109,6 +137,7 @@ export async function renderCook(params,query,ctx,deps={}){
   voix.arreter();lecture=resultat.lecture;affiche=nouvelles;projection=proj;items=prochains;fichiers=lus;vueConfirmee=signature;dessiner();return true;
  }
  async function actualiser(){
+  if(!admise)return false;
   if(!estCourante()){voix?.arreter();if(lecture)signaler({});return false;}
   if(occupe||bilanOuvert){relireEnsuite=true;return false;}
   if(lectureEnCours){relireEnsuite=true;return lectureEnCours;}

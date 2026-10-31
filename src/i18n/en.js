@@ -2393,4 +2393,5 @@ export const EN = {
   "La disponibilité de cette action n’a pas pu être vérifiée. Rouvre cet écran pour réessayer.": "Availability for this action could not be checked. Reopen this screen to try again.",
   "Tu es hors ligne : impossible de vérifier pour l'instant.": "You are offline: availability cannot be checked right now.",
   "La disponibilité n’a pas pu être vérifiée. Réessaie.": "Availability could not be checked. Try again.",
+  "Rouvrir la séance": "Reopen session",
 };
