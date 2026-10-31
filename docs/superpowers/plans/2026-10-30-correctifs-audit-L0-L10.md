@@ -185,8 +185,8 @@
 - [x] **11.3 Cuisine en erreur** : `cook.js:56` offre « Rouvrir la séance » (`navigate` sur la même route) et « Fiche ».
 - [x] **11.4 Conflits lisibles** : test rouge → un conflit `donnees` sur `recipes` affiche une comparaison champ par champ (titre, portions, nombre de lignes, dernière modification) des deux copies, le JSON restant sous `details` « Détails techniques ».
 - [x] **11.5 Textes** : Synchronisation : noms de magasins → libellés (`t('Recettes')`, `t('Livres')`, … table `LIBELLES_MAGASINS`) ; « Données sur cet appareil » : « Base locale v6 · archives v7 » devient « Ta bibliothèque sur cet appareil » + compte par type ; Diagnostic : première ligne « À envoyer si Mistu se comporte mal : ce diagnostic ne contient aucune recette. » ; Ma cuisine > Appareils : onglet par défaut « Inventaire », première ligne « Tes appareils, pour adapter les recettes. », toutes les chaînes traduites, `kitchen.js` ajouté à `CHAINES_NEUVES_AILLEURS` ; onglet « Ma semaine » → « Repas » ; marque « Mistu » partout (`coquille.js:31`, `settings.js:105`).
-- [ ] **11.6 `/import` nu** : redirige vers `/add` (test de navigation).
-- [ ] **Suite verte, commits par sous-tâche** (`feat(accueil): …`, `fix(ui): …`).
+- [x] **11.6 `/import` nu** : redirige vers `/add` (test de navigation).
+- [x] **Suite verte, commits par sous-tâche** (`feat(accueil): …`, `fix(ui): …`).
 
 ### Tâche 12 : Tests, preuves et méthode
 

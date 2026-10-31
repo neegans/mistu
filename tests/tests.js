@@ -25,6 +25,7 @@ import {runAuditConflitsLisiblesTests} from './audit-conflits-lisibles.js';
 import {runAuditCuisineTextesTests} from './audit-cuisine-textes.js';
 import {runAuditReglagesTextesTests} from './audit-reglages-textes.js';
 import {runAuditMarqueNavigationTests} from './audit-marque-navigation.js';
+import {runAuditImportRouteTests} from './audit-import-route.js';
 import {runAuditArchiveRetraitTests} from './audit-archive-retrait.js';
 import {runAuditArchiveFichesInvalidesTests} from './audit-archive-fiches-invalides.js';
 import {runAuditArchiveExclusionsUITests} from './audit-archive-exclusions-ui.js';
@@ -763,7 +764,9 @@ try { await runAuditMarqueNavigationTests({eq,ok}); } catch (e) { ok(false, 'run
 try { await runAuditReponsesRefuseesTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesRefuseesTests : ' + (e.stack || e)); }
 try { await runAuditReponsesParcoursTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesParcoursTests : ' + (e.stack || e)); }
 try { await runAuditReponsesEcranTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesEcranTests : ' + (e.stack || e)); }
-eq(results.length, 14462,'compte d’assertions : une assertion qui disparait est un rouge');
+try { await runAuditImportRouteTests({eq,ok}); } catch (e) { ok(false, 'runAuditImportRouteTests : ' + (e.stack || e)); }
+
+eq(results.length, 14514,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

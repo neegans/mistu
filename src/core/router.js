@@ -126,18 +126,24 @@ export function resolve(hash = location.hash) {
   return { handler: notFound, params: {}, query, path, pattern: null };
 }
 
-export function start(onRoute, { fenetre = window, avantRoute = avantNavigation } = {}) {
+export function start(onRoute, { fenetre = window, avantRoute = avantNavigation, normaliserAdresse = href => href } = {}) {
   let derniere = null, dernierEtat = null, observee = null, compensation = null, demandeId = 0, arretee = false;
   const run = (event) => {
-    const href = fenetre.location.hash || '#/';
+    const hrefBrut = fenetre.location.hash || '#/';
+    const href = normaliserAdresse(hrefBrut);
     const state = fenetre.history.state && typeof fenetre.history.state === 'object' ? fenetre.history.state : {};
     let entree = state[CLE_ENTREE_NAV];
-    const reconnue = entree && typeof entree.cle === 'string' && entree.href === href && Number.isSafeInteger(entree.position) && typeof entree.chaine === 'string';
+    // Une entrée neuve peut hériter du state précédent : la reconnaître AVANT
+    // normalisation empêche de légitimer cette ancienne clé pour sa nouvelle URL.
+    const reconnue = entree && typeof entree.cle === 'string' && entree.href === hrefBrut && Number.isSafeInteger(entree.position) && typeof entree.chaine === 'string';
     let type = event?.type === 'cuisineos:refresh' ? 'refresh' : event?.type === 'cuisineos:replace' ? 'replace' : derniere ? 'navigation' : 'initial';
     if (!reconnue) {
       entree = { cle: nouvelleCle(), href, position: (observee?.position ?? derniere?.position ?? -1) + 1, chaine: observee?.chaine || derniere?.chaine || nouvelleCle() };
-      fenetre.history.replaceState({ ...state, [CLE_ENTREE_NAV]: entree }, '', href);
-    } else if (derniere && entree.cle !== derniere.cle) type = 'retour';
+    } else if (href !== hrefBrut) entree = { ...entree, href };
+    // Remplacement de la même entrée, sans événement supplémentaire ni second
+    // passage de la garde de sortie. resolve et ses métadonnées partagent l'URL.
+    if (!reconnue || href !== hrefBrut) fenetre.history.replaceState({ ...state, [CLE_ENTREE_NAV]: entree }, '', href);
+    if (reconnue && derniere && entree.cle !== derniere.cle) type = 'retour';
     const indexNavigateur = fenetre.navigation?.currentEntry?.index;
     entree = { ...entree, indexNavigateur: Number.isSafeInteger(indexNavigateur) ? indexNavigateur : null };
     if (compensation?.cle === entree.cle && compensation.href === href) { compensation = null; observee = { ...entree }; return; }

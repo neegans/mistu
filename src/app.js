@@ -367,7 +367,10 @@ async function boot() {
     registerRoutes();
     installerRetours();
     window.addEventListener('pagehide', () => capturerVue(current?.main));
-    start(onRoute);
+    start(onRoute, { normaliserAdresse: hash => {
+      const { path, query } = parseHash(hash);
+      return path === '/import' && !query.session ? '#/add' : hash;
+    } });
     let surveillance=null;
     const surveiller=()=>{surveillance?.dispose();surveillance=surveillerMisesAJour({livraison:obtenirControleLivraison()});};
     surveiller();
