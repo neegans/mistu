@@ -46,4 +46,19 @@ Aucun iPhone physique, clavier iOS, caméra native, installation standalone ou V
 
 ## Livraison
 
-APP_VERSION0.32.12, livraison **0.32.12-3**, DB6/archive7 inchangés. Manifeste217 ressources/3808036 octets, SHA256 `8704ec34ccc86ff12efd0b641533e57a2bbd165c08a7b75aeb1072d3df4fa944`. Aucun SQL ou déploiement assistant. Promotion et réception publique à compléter après validation finale.
+APP_VERSION0.32.12, livraison **0.32.12-3**, DB6/archive7 inchangés. Manifeste217 ressources/3808036 octets, SHA256 `8704ec34ccc86ff12efd0b641533e57a2bbd165c08a7b75aeb1072d3df4fa944`. Aucun SQL ou déploiement assistant. Code `d0c3fdab81ca560450c1f7038fbafa20bfd9ba70` promu par avance rapide et poussé sur main. [GitHub Pages](https://github.com/neegans/mistu/actions/runs/41240309214) confirmé réussi à20:45:00UTC (16h45HAE).
+
+
+### Réception publique
+
+**479/479 fichiers identiques** (217 ressources de livraison,237 fichiers de tests, rapport et20PNG inclus), octets/SHA256/MIME conformes, deux alias et quatre relectures conformes. Comparaison20:45:51–20:45:55UTC ; reçu `publication/fichiers-41U2gb/publication-fichiers.json`. Identité exécutée0.32.12-3/manifeste8704ec34… confirmée séparément dans les navigateurs contrôlés.
+
+**42/42 contrôles de parcours**,22 nouvelles captures publiques ouvertes :
+
+- WebKit375×667 : livre/photo/Actions/bilan **15/15**, quatre captures ; commandes tactiles, ouverture au titre, restitution du focus natif exact et instantané métier/outbox inchangé. Reçu `agent1/public-0.32.12-3/reception.md`.
+- WebKit375×667 : bibliothèque/repas/courses/inventaire/réglages **19/19**,16 captures ; tri/sélection sans écritures, « Rester » unique avec même DOM/saisie/adresse/origine/historique, sauvegarde puis rechargement. Premier titre524–550px au-dessus de la barre597px ; premier plat364px. Reçu `agent3/reception-publique.md`.
+- Chromium844×390 : marges latérales réellement émulées **8/8**, deux captures ; titre, marque, première et dernière destinations dans les limites44px sur Accueil/Ajouter. Aucun débordement. Reçu `root/public-zones/controles.json`.
+
+Aucune exception JavaScript, POST ni requête extérieure ; les parcours WebKit contrôlent aussi console et HTTP. Navigateurs fermés, données synthétiques et aucun compte privé. Aucun mode hors ligne public supplémentaire ou matériel iPhone revendiqué.
+
+La [CI du commit publié](https://github.com/neegans/mistu/actions/runs/41240309829) est **verte** :281/281 outils Node,29/29 outils CI et **15085/15085 navigateur**, manifeste0.32.12-3/217 fichiers/3808036 octets/SHA8704ec34… conforme. Bilan navigateur20:49:31UTC, job terminé20:49:36UTC, run confirmé20:49:37UTC. Reçu navigateur CI `passage-LLWth6`. Ce passage valide le commit exact avec la dernière attente de fixture L6, sans ajout à la liste des consoles admises.
