@@ -196,6 +196,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     moteur: etatMoteur,
     quarantaine,
     conflits,
+    versionsById: ctx.versionsById,
     fichiersErreurs,
     qualite: s.upload_quality,
     snapshot: snapshotFichiers,
@@ -1021,7 +1022,7 @@ export function syncSectionL3(model, gestes = {}) {
             : el('p', {class:'muted'}, c.editionId?t('Restaure le livre si nécessaire, puis reprends les modifications voulues depuis sa fiche. Cette copie reste disponible ici.'):t('Restaure la recette si nécessaire, puis reprends les modifications voulues depuis sa fiche. Cette copie reste disponible ici.'))));
         continue;
       }
-      noeuds.push(el('div', { class: 'status warn', dataset: { conflit: String(c.id) } },
+      noeuds.push(el('div', { class: 'status warn', dataset: { conflit: String(c.id), ...(c.comparaisonRecette?{role:'carte-conflit-recette'}:{}) }, ...(c.comparaisonRecette?{style:{display:'block',maxWidth:'100%',overflowWrap:'anywhere'}}:{}) },
         // R-L3-29 : un conflit DÉJÀ RENVOYÉ n'est pas une question — la version d'ici est repartie et le serveur
         // l'acceptera (elle est plus récente). « Garder celle d'ici » la réhorodaterait et la renverrait encore ;
         // « Garder celle d'ailleurs » écraserait ce qu'on vient d'envoyer par la version qui a perdu. Le seul geste
@@ -1039,15 +1040,42 @@ export function syncSectionL3(model, gestes = {}) {
         el('p', null, c.renvoye && c.suppressionAilleurs
           ? t('Supprimée ailleurs ; la version d’ici est en cours de renvoi au serveur.')
           : (c.renvoye ? t('Version d’ici en cours de renvoi au serveur.') : phraseConflit(c.kind))),
-        el('p', null, t('{l} — version d’ici du {a}, version d’ailleurs du {b}', { l: c.libelle, a: c.dateIci, b: c.dateAilleurs })),
+        c.comparaisonRecette ? rendreComparaisonRecette(c) : el('p', null, t('{l} — version d’ici du {a}, version d’ailleurs du {b}', { l: c.libelle, a: c.dateIci, b: c.dateAilleurs })),
         c.renvoye && c.suppressionAilleurs
           ? rangee(bouton('garderAilleurs', t('Supprimer ici aussi'), c.id, 'btn danger'), bouton('ignorerConflit', t('Ignorer'), c.id))
           : (c.renvoye
             ? rangee(bouton('ignorerConflit', t('Ignorer'), c.id))
-            : rangee(bouton('garderIci', t('Garder celle d’ici ({d})', { d: c.dateIci }), c.id), bouton('garderAilleurs', t('Garder celle d’ailleurs'), c.id)))));
+            : rangee(bouton('garderIci', c.comparaisonRecette&&!c.comparaisonRecette.ici.modification?t('Garder celle d’ici'):t('Garder celle d’ici ({d})', { d: c.dateIci }), c.id), bouton('garderAilleurs', t('Garder celle d’ailleurs'), c.id)))));
     }
   }
   return noeuds;
+}
+
+function rendreComparaisonRecette(conflit) {
+  const champs=[['titre','Titre'],['portions','Portions'],['ingredients','Ingrédients (lignes)'],['etapes','Étapes'],['modification','Dernière modification']];
+  return el('div',{class:'stack'},
+    el('table',{class:'compare',dataset:{role:'comparaison-conflit-recette'},style:{tableLayout:'fixed',overflowWrap:'anywhere'}},
+      el('thead',null,el('tr',null,...['Champ','Sur cet appareil','Reçue du serveur'].map(texte=>el('th',{scope:'col'},t(texte))))),
+      el('tbody',null,...champs.map(([champ,libelle])=>el('tr',null,el('th',{scope:'row'},t(libelle)),
+        ...['ici','ailleurs'].map(cote=>el('td',{dataset:{cote,champ,label:cote==='ici'?t('Sur cet appareil'):t('Reçue du serveur')}},String(conflit.comparaisonRecette[cote][champ]??t('Inconnu')))))))),
+    el('details',{dataset:{role:'details-conflit-recette'}},el('summary',null,t('Détails techniques')),
+      el('pre',{style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'22rem',overflow:'auto'}},conflit.copiesTechniques)));
+}
+
+// Chaque copie décrit son propre pointeur ; une version manquante n'emprunte
+// jamais les portions ou les lignes de l'autre copie ou de la recette courante.
+function comparerCopiesRecette(conflit,versionsById) {
+  const resumer=(copie,date)=>{
+    const identifiee=copie&&typeof copie==='object'&&!Array.isArray(copie)&&copie.id===conflit.record_id;
+    const candidate=identifiee&&typeof copie.current_version_id==='string'?versionsById?.get(copie.current_version_id):null;
+    const version=candidate?.id===copie?.current_version_id&&candidate?.recipe_id===copie?.id?candidate:null;
+    const titre=identifiee?[copie.display_title,copie.original_title].find(s=>typeof s==='string'&&s.trim()):null;
+    return {titre:copie==null?t('Copie absente'):titre??null,
+      portions:typeof version?.servings==='number'&&Number.isFinite(version.servings)&&version.servings>0?version.servings:null,
+      ingredients:Array.isArray(version?.ingredients)?version.ingredients.length:null,etapes:Array.isArray(version?.steps)?version.steps.length:null,
+      modification:typeof date==='string'?(formatDate(date,{withTime:true})||null):null};
+  };
+  return {ici:resumer(conflit.local,conflit.local?.updated_at),ailleurs:resumer(conflit.server?.data,conflit.server?.updated_at)};
 }
 
 // Ce que dit un conflit selon sa nature (spec § 5.5). Un `kind` inattendu reçoit la phrase la plus générale :
@@ -1188,7 +1216,7 @@ async function changeAccount(auth) {
 // conflits. Rien de L3 n'apparaît hors de l'état « connectée + garde ok » — avant lui le compte n'est pas établi —
 // et SANS moteur le modèle est exactement celui de L2, pas même une clé de plus : la section de L2 reste intacte
 // tant que le moteur n'est pas branché.
-export function syncSectionModel({ available = false, reason = null, user = null, pending = 0, guard = null, retour = null, enAttente = false, moteur = null, quarantaine: enQuarantaine = [], conflits: aTrancher = [], fichiersErreurs = [], qualite = 'reduite', snapshot = null } = {}) {
+export function syncSectionModel({ available = false, reason = null, user = null, pending = 0, guard = null, retour = null, enAttente = false, moteur = null, quarantaine: enQuarantaine = [], conflits: aTrancher = [], fichiersErreurs = [], qualite = 'reduite', snapshot = null, versionsById = null } = {}) {
   const lines = [];
   const buttons = [];
   let connectee = false;
@@ -1266,11 +1294,13 @@ export function syncSectionModel({ available = false, reason = null, user = null
     })),
     conflits: aTrancher.map((c) => {
       const nom = c.local?.title || c.local?.name || null;
+      const comparaisonRecette=c.kind==='donnees'&&c.store==='recipes'&&!['refus_http','abandon_envoi'].includes(c.origine)?comparerCopiesRecette(c,versionsById):null;
       return {
         id: c.id,
         libelle: c.store === 'files' && snapshot ? tronquer(nomFichier(c.record_id, snapshot), NOM_MAX) : `${c.store} · ${nom ? tronquer(nom, NOM_MAX) : tronquer(c.record_id, CLE_MAX)}`,
-        dateIci: formatDate(c.local?.updated_at || c.at, { withTime: true }),
-        dateAilleurs: formatDate(c.server?.updated_at || c.at, { withTime: true }),
+        dateIci: comparaisonRecette?comparaisonRecette.ici.modification??t('Inconnu'):formatDate(c.local?.updated_at || c.at, { withTime: true }),
+        dateAilleurs: comparaisonRecette?comparaisonRecette.ailleurs.modification??t('Inconnu'):formatDate(c.server?.updated_at || c.at, { withTime: true }),
+        ...(comparaisonRecette?{comparaisonRecette,copiesTechniques:JSON.stringify({ici:c.local??null,ailleurs:c.server??null},null,2)}:{}),
         kind: c.kind,
         ...(['refus_http','abandon_envoi'].includes(c.origine)?{documentaire:true,resolue:!!c.resolution,abandonnee:c.resolution?.choix==='abandon'}:{}),
         ...(c.kind==='inventory'?{resolue:!!c.resolution}:{}),

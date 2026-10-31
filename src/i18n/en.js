@@ -2394,4 +2394,11 @@ export const EN = {
   "Tu es hors ligne : impossible de vérifier pour l'instant.": "You are offline: availability cannot be checked right now.",
   "La disponibilité n’a pas pu être vérifiée. Réessaie.": "Availability could not be checked. Try again.",
   "Rouvrir la séance": "Reopen session",
+  "Champ": "Field",
+  "Sur cet appareil": "On this device",
+  "Reçue du serveur": "Received from server",
+  "Ingrédients (lignes)": "Ingredient lines",
+  "Détails techniques": "Technical details",
+  "Copie absente": "Copy unavailable",
+  "Garder celle d’ici": "Keep the one from here",
 };

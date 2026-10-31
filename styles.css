@@ -418,6 +418,25 @@ iframe.pdf { width: 100%; height: 70vh; border: 1px solid var(--line); border-ra
 table.compare { width: 100%; border-collapse: collapse; font-size: .9rem; }
 table.compare th, table.compare td { border-bottom: 1px solid var(--line); padding: .45rem .4rem; vertical-align: top; text-align: left; }
 table.compare th { color: var(--green); background: var(--cream-2); }
+/* Conflits de recettes : chaque champ garde ses deux côtés lisibles au toucher
+   et sous texte agrandi, sans réduire la police ni masquer les en-têtes aux aides. */
+@media (max-width: 40rem) {
+  .status[data-role="carte-conflit-recette"] { padding: 8px; }
+  [data-role="comparaison-conflit-recette"],
+  [data-role="comparaison-conflit-recette"] tbody,
+  [data-role="comparaison-conflit-recette"] tbody tr,
+  [data-role="comparaison-conflit-recette"] tbody th,
+  [data-role="comparaison-conflit-recette"] td { display: block; width: 100%; }
+  [data-role="comparaison-conflit-recette"] thead {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  [data-role="comparaison-conflit-recette"] tbody tr + tr { margin-top: .8rem; }
+  [data-role="comparaison-conflit-recette"] tbody th,
+  [data-role="comparaison-conflit-recette"] td { padding: .35rem 0; }
+  [data-role="comparaison-conflit-recette"] td::before { content: attr(data-label); display: block; font-weight: 600; }
+  [data-role="carte-conflit-recette"] .row > .btn { max-width: 100%; padding-inline: .5rem; white-space: normal; }
+}
 
 .two-col { display: grid; gap: 1rem; grid-template-columns: 1fr; }
 .two-col > * { min-width: 0; }
