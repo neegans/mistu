@@ -1,3 +1,5 @@
+import { creerConservationReponseRefusee } from '../domain/reponses-refusees.js';
+import { creerAffichageReponseRefusee, texteMotifReponseRefusee } from './reponse-refusee.js';
 import { retourConnu, porteeNavigation } from './navigation-contexte.js';
 import { destinationApresRecette } from './actions-contenu.js';
 import { panneauAbandonProposition, texteConfirmationAbandon, texteErreurReprise } from './reprise-import.js';
@@ -51,6 +53,7 @@ function brouillonReparation(resolution) {
 
 export function texteErreurThermomix(erreur) {
   const code = erreur?.code || erreur?.raison || erreur?.message;
+  const connu = code === 'interrompu' || code === 'refus' ? null : texteMotifReponseRefusee(code); if (connu) return connu;
   const refus = texteRefusAssistant({ ...erreur?.extra, ...erreur, raison: code }); if (refus) return refus;
   if (['cycle_change','compte_change','lecture_changee','recette_retiree'].includes(code)) return t('La recette a changé. Rouvre sa fiche avant d’enregistrer.');
   if (['reprise_modifiee','reprise_absente'].includes(code)) return texteErreurReprise(erreur);
@@ -79,6 +82,9 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
   const propreRecette = await repo.get('recipes', params.id);
   if (!propreRecette) return el('p', { class: 'status warn' }, t('Recette introuvable.'));
   if (!recetteActiveDansContexte(propreRecette, ctx)) return mentionCycleRecette(propreRecette, ctx?.editionsById?.get(propreRecette.edition_id));
+  const reponsesRefusees = deps.reponsesRefusees || creerConservationReponseRefusee({ repo, maintenant: deps.maintenant });
+  const installerReponse = creerAffichageReponseRefusee({ repo, conservation: reponsesRefusees, recipeId: propreRecette.id, kind: 'thermomix', deps });
+  const documenter = node => installerReponse(node.tagName === 'P' ? el('div', { class: 'stack' }, node) : node, { getImportId: () => query.import });
   const contexteRecette = await capturerRecette(repo, propreRecette, {ctx});
   let row = null;
   if (typeof query.import === 'string' && query.import) {
@@ -86,12 +92,12 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
     catch {
       const brute = await repo.get('imports', query.import);
       const retour = el('div', {class:'stack'}, el('p', {class:'status warn'}, t('Ce brouillon Thermomix ne peut pas être repris. Repars de la recette source.')));
-      if (brute?.kind === 'thermomix' && brute.recipe_id === propreRecette.id) {
+      if (brute?.kind === 'thermomix' && brute.recipe_id === propreRecette.id && !reponsesRefusees.presenceEnAttente({ importId: query.import })) {
         const abandon = panneauAbandonProposition(brute, {repo,ctx,contexteRecette,confirmer:deps.confirmer,role:'ignorer-tm7'});
         retour.append(abandon); retour.attendreEcritures=abandon.attendreEcritures;
       }
       retour.append(el('a',{class:'btn',href:'#/recipes/'+encodeURIComponent(propreRecette.id)},t('Revoir la recette source')));
-      return retour;
+      return documenter(retour);
     }
     if (row?.recipe_id !== propreRecette.id) return el('p', { class: 'status warn' }, t('Ce brouillon appartient à une autre recette.'));
   }
@@ -100,8 +106,8 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
   const rid = encodeURIComponent(propreRecette.id), lien = `/recipes/${rid}`;
   const lecturePlan = lireThermomix(version);
   if (lecturePlan?.ok === false && lecturePlan.etat !== 'a_revoir' && version?.provenance?.thermomix_invalide !== true) {
-    return el('div', { class: 'stack' }, el('p', { class: 'status warn' }, t('La version source a changé ou n’est plus disponible. Repars de sa fiche.')),
-      el('a', { class: 'btn', href: `#${lien}` }, t('Revoir la recette source')));
+    return documenter(el('div', { class: 'stack' }, el('p', { class: 'status warn' }, t('La version source a changé ou n’est plus disponible. Repars de sa fiche.')),
+      el('a', { class: 'btn', href: `#${lien}` }, t('Revoir la recette source'))));
   }
   if (!row && lecturePlan?.etat === 'a_revoir') {
     try {
@@ -110,17 +116,17 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
       reparation = { ...brouillonReparation(resolution), ancetres: resolution.ancetres };
       version = resolution.version;
     } catch {
-      return el('div', { class: 'stack' }, el('p', { class: 'status warn' }, t('La version source a changé ou n’est plus disponible. Repars de sa fiche.')),
-        el('a', { class: 'btn', href: `#${lien}` }, t('Revoir la recette source')));
+      return documenter(el('div', { class: 'stack' }, el('p', { class: 'status warn' }, t('La version source a changé ou n’est plus disponible. Repars de sa fiche.')),
+        el('a', { class: 'btn', href: `#${lien}` }, t('Revoir la recette source'))));
     }
   }
   if (!version || version.recipe_id !== propreRecette.id || !Array.isArray(version.steps) || !version.steps.length || propreRecette.availability === 'reference_only') {
-    return el('div', { class: 'stack' }, el('p', { class: 'status warn' }, t('Importe d’abord les étapes de cette recette pour les adapter au Thermomix.')),
-      el('a', { class: 'btn', href: `#${lien}` }, t('Revoir la recette source')));
+    return documenter(el('div', { class: 'stack' }, el('p', { class: 'status warn' }, t('Importe d’abord les étapes de cette recette pour les adapter au Thermomix.')),
+      el('a', { class: 'btn', href: `#${lien}` }, t('Revoir la recette source'))));
   }
   if (version.steps.length > 40 || (version.ingredients || []).length > 60 || version.steps.some(s => typeof s?.text !== 'string' || s.text.length > 2000)) {
-    return el('div', { class: 'stack' }, el('p', { class: 'status warn' }, t('Cette recette dépasse les limites du chef Thermomix. Son contexte ne sera pas tronqué.')),
-      el('a', { class: 'btn', href: `#${lien}` }, t('Revoir la recette source')));
+    return documenter(el('div', { class: 'stack' }, el('p', { class: 'status warn' }, t('Cette recette dépasse les limites du chef Thermomix. Son contexte ne sera pas tronqué.')),
+      el('a', { class: 'btn', href: `#${lien}` }, t('Revoir la recette source'))));
   }
   let draft = { selection: [], demande: '', precisions: { eau_vapeur_g: null, volume_bol_l: null, volume_panier_l: null, froid_confirme: [], reponses: [] }, langue: getUiLocale() };
   if (reparation) draft = copier(reparation.draft);
@@ -147,7 +153,8 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
   const terminal = () => !!row && TERMINE.includes(row.status);
   const vivant = () => !closed && (!connectedOnce || root.isConnected);
   const controls = [], steps = new Map(), cold = new Map(), invalidNumbers = new Set();
-  const patchDeps = (extra = {}) => ({ ...deps, repo, enLigne, contexteRecette, documentId: DOCUMENT_ID, ...extra });
+  const conservationEnAttente = () => !!importId && reponsesRefusees.presenceEnAttente({ importId });
+  const patchDeps = (extra = {}) => ({ ...deps, repo, reponsesRefusees, enLigne, contexteRecette, documentId: DOCUMENT_ID, ...extra });
   const message = (texte) => { if (vivant()) status.textContent = texte; };
   const lancerGeste = (fn) => {
     const operation = Promise.resolve().then(fn).catch(e => { message(texteErreurThermomix(e)); });
@@ -157,12 +164,12 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
   const action = (texte, role, fn, primary = false) => el('button', { type: 'button', class: primary ? 'btn primary' : 'btn', dataset: { role }, onClick: () => lancerGeste(fn) }, texte);
   let unsubscribe, retirerReseau = () => {};
   function dispose() {
-    if (closed) return; closed = true; generation++; controller?.abort();
+    if (closed) return; root.disposerReponseRefusee?.(); closed = true; generation++; controller?.abort();
     if (tenue && importId) P.annulerThermomix(importId, patchDeps()).catch(() => {});
-    clearInterval(heartbeat); observer.disconnect(); unsubscribe?.(); proteger(); retirerReseau(); window.removeEventListener('hashchange', dispose);
+    clearInterval(heartbeat); observer.disconnect(); unsubscribe?.(); proteger(); retirerReseau();
   }
   const observer = new MutationObserver(() => { if (root.isConnected) connectedOnce = true; else if (connectedOnce) dispose(); });
-  observer.observe(document.body, { childList: true, subtree: true }); window.addEventListener('hashchange', dispose);
+  observer.observe(document.body, { childList: true, subtree: true });
   unsubscribe = ctx.sync?.auth?.onChange?.(state => { if ((state?.user?.id ?? null) !== compteInitial) dispose(); });
   root.dispose = dispose;
   root.etatRoute = () => ({ importId, busy, saving, lectureSeule: readonly(), brouillon: copier(draft) });
@@ -249,7 +256,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
     message(t('Appel interrompu. Ton brouillon est conservé ; aucune relance automatique.')); synchroniser();
   });
   const ignorer = action(t('Abandonner ce brouillon'), 'ignorer-tm7', async () => {
-    if (!importId || saving || terminal()) return;
+    if (conservationEnAttente() || !importId || saving || terminal()) return;
     await queue;
     const attendu = row;
     if (!(await (deps.confirmer || confirmDialog)(texteConfirmationAbandon(), {okLabel:t('Abandonner ce brouillon')}))) return;
@@ -258,7 +265,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
     renderQuestions(); synchroniser(); renderResultat(); message(t('Brouillon terminé.'));
   });
   const actualiser = action(t('Actualiser'), 'actualiser-tm7', async () => {
-    if (!importId || busy) return;
+    if (conservationEnAttente() || !importId || busy) return;
     await queue;
     await repo.marquerInterrompus?.(); row = await P.lireBrouillonThermomix(importId, { repo });
     draft = { selection: [...row.contexte.selection], demande: row.contexte.demande, precisions: copier(row.contexte.precisions), langue: row.contexte.langue };
@@ -269,7 +276,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
       const node = root.querySelector(`[name=${key}]`); node.value = draft.precisions[key] ?? ''; node.removeAttribute('aria-invalid');
     }
     invalidNumbers.clear();
-    resultat = row.resultat; questions = row.questions || []; renderQuestions(); renderResultat(); synchroniser();
+    resultat = row.resultat; questions = row.questions || []; renderQuestions(); renderResultat(); await root.actualiserReponseRefusee?.(); synchroniser();
   });
   const revoir = action(t('Relire le résultat conservé'), 'revoir-lecture-cycle', async () => {
     if (busy || saving || readonly() || !cycleDivergent()) return;
@@ -300,7 +307,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
 
   function synchroniser() {
     if (!vivant()) return;
-    const verrou = busy || saving || readonly() || terminal() || row?.status === 'en_cours' || perime() || (!!row?.proposition_precedente && row?.resultat?.type === 'proposition');
+    const verrou = conservationEnAttente() || busy || saving || readonly() || terminal() || row?.status === 'en_cours' || perime() || (!!row?.proposition_precedente && row?.resultat?.type === 'proposition');
     avisCycle.hidden = !(cycleDivergent() && row?.status === 'a_verifier' && row?.resultat);
     revoir.disabled = busy || saving || readonly();
     controls.forEach(n => { n.disabled = verrou; });
@@ -310,12 +317,12 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
     }
     proposer.disabled = verrou || !!row?.proposition_precedente?.tentative_suivante_id || !sessionDisponible || !enLigne() || !quantitesAcceptees || !draft.selection.length || !!invalidNumbers.size;
     proposer.textContent = row?.status === 'echec' ? t('Réessayer — 1 appel') : t('Proposer l’adaptation — 1 appel');
-    annuler.hidden = !busy; annuler.disabled = !busy; ignorer.disabled = !importId || saving || terminal();
+    annuler.hidden = !busy; annuler.disabled = !busy; ignorer.disabled = conservationEnAttente() || !importId || saving || terminal();
     precedentZone.querySelectorAll('button').forEach(b=>{b.disabled=busy||saving||readonly()||terminal()||row?.status==='en_cours';});
-    actualiser.hidden = !importId; actualiser.disabled = busy || saving;
+    actualiser.hidden = !importId; actualiser.disabled = conservationEnAttente() || busy || saving;
     copieBrouillon.hidden = !terminal(); copieBrouillon.disabled = busy || saving;
     if (readonly() && !terminal()) message(t('Ce brouillon vient d’un autre appareil. Tu peux consulter son résultat ou l’abandonner explicitement pour débloquer la recette.'));
-    else if (row?.status === 'en_cours' && !busy) message(t('Un appel est en cours sur un autre écran. Actualise pour retrouver son résultat, ou abandonne explicitement ce brouillon.'));
+    else if (row?.status === 'en_cours' && !busy && !conservationEnAttente()) message(t('Un appel est en cours sur un autre écran. Actualise pour retrouver son résultat, ou abandonne explicitement ce brouillon.'));
   }
   function renderQuestions() {
     questionsZone.replaceChildren();
@@ -397,7 +404,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
       el('label', { class: 'row top' }, monte, el('span', null, t('Je vérifierai le couvercle, le montage des accessoires et les repères de remplissage avant de cuisiner.'))), garder);
   }
   async function proposerAdaptation() {
-    if (busy || saving || readonly() || perime() || terminal() || !quantitesAcceptees || !draft.selection.length || invalidNumbers.size) return;
+    if (conservationEnAttente() || busy || saving || readonly() || perime() || terminal() || !quantitesAcceptees || !draft.selection.length || invalidNumbers.size) return;
     if (!enLigne()) { message(t('Tu es hors ligne. Ton brouillon est conservé.')); return; }
     controller = new AbortController(); const courante = { importId, controller, repo };
     if (!prendreVol(courante)) { message(t('Un appel à l’assistant est déjà en cours. Attends sa fin.')); return; }
@@ -422,13 +429,13 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
     } finally {
       clearInterval(heartbeat); heartbeat = null;
       if (courante.importId) await repo.oublierBattement?.(courante.importId).catch(() => {});
-      libererVol(courante); if (tenue === courante) tenue = null; controller = null; busy = false; synchroniser();
+      libererVol(courante); if (tenue === courante) tenue = null; controller = null; busy = false; await root.actualiserReponseRefusee?.(); synchroniser();
     }
   }
   const online = () => synchroniser(); window.addEventListener('online', online); window.addEventListener('offline', online);
   retirerReseau = () => { window.removeEventListener('online', online); window.removeEventListener('offline', online); };
-  if (row?.status === 'en_cours') { await repo.marquerInterrompus?.(); row = await P.lireBrouillonThermomix(importId, { repo }); resultat = row.resultat; }
+  if (row?.status === 'en_cours' && !conservationEnAttente()) { await repo.marquerInterrompus?.(); row = await P.lireBrouillonThermomix(importId, { repo }); resultat = row.resultat; }
   if (row?.status === 'echec') message(texteErreurThermomix(row.erreur));
   renderQuestions(); renderResultat(); synchroniser();
-  return root;
+  return installerReponse(root, { getImportId: () => importId, estCourante: vivant, onEtat: synchroniser, onJournal: r => { row = r; resultat = r.resultat || null; questions = r.questions || []; renderQuestions(); renderResultat(); } });
 }

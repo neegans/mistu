@@ -1,5 +1,5 @@
 // I3 : journal durable, appel explicite à la passerelle et conservation atomique d'une adaptation.
-// Aucun secret ni réponse brute du modèle ne sont persistés. Les sources ne sont jamais réécrites.
+// Les refus complets restent sur cet appareil ; seule leur référence rejoint le journal. Les sources ne sont jamais réécrites.
 import { ligneImportNeuve, IMPORTS_OUVERTS } from './import-cible.js';
 import { appelerAssistant, echecDomaine, sessionValide } from './passerelle.js';
 import { construireContexteThermomix, empreinteThermomix, validerReponseThermomix, fabriquerVersionThermomix, lireThermomix } from './thermomix.js';
@@ -7,6 +7,7 @@ import { ignorerPropositionImport } from './reprise-import.js';
 import { extraireObjetJson } from './reponse-json.js';
 import { TransitionRefusee } from '../core/db.js';
 import { gardesAscendanceThermomix } from './thermomix-reprise.js';
+import { creerConservationReponseRefusee } from './reponses-refusees.js';
 import { contexteRecetteImport, memoireCycleImport, verifierCycleImport, verifierCaptureImport } from './contexte-import.js';
 
 const TERMINES = ['enregistre', 'ignore'];
@@ -210,11 +211,19 @@ function verifierTentative(current, attendu, repo, session, deps) {
 }
 async function ecrireEchec(row, code, extra, session, deps) {
   if (!compteIdentique(session, deps)) throw erreur('compte_change');
-  try { return await deps.repo.transitionner('imports', row.id, { attendus: ['en_cours'], patch: current => {
+  const transition = { attendus: ['en_cours'], patch: current => {
     verifierTentative(current, row, deps.repo, session, deps);
     return { status: 'echec', phase: 'selection', erreur: { raison: code, extra: extra || {} }, resultat: null, reponse_brute: null,
       document_id_vol: null, finished_at: (deps.maintenant ?? maintenantParDefaut)() };
-  }, recettes: deps.contexteRecette ? [{...deps.contexteRecette,historique:true}] : [] }); }
+  }, recettes: deps.contexteRecette ? [{...deps.contexteRecette,historique:true}] : [] };
+  if (deps.octetsRefuses instanceof Uint8Array) {
+    const r = await deps.reponsesRefusees.conserver({ capture: deps.captureRefus, journal: row, octets: deps.octetsRefuses, motif: code, transition });
+    if (r.issue === 'conserve') return r.journal;
+    const e = erreur('conservation_en_attente', { raison: r.raison, reessayable: r.reessayable === true });
+    Object.defineProperty(e, 'conservationReponseRefusee', { value: deps.reponsesRefusees });
+    throw e;
+  }
+  try { return await deps.repo.transitionner('imports', row.id, transition); }
   catch (e) {
     if (e instanceof TransitionRefusee || ['brouillon_modifie', 'tentative_perimee'].includes(e.code)) return await deps.repo.get('imports', row.id);
     throw e;
@@ -223,6 +232,12 @@ async function ecrireEchec(row, code, extra, session, deps) {
 
 export async function proposerThermomix({ importId, session, documentId } = {}, deps = {}) {
   const repo = deps.repo;
+  const reponsesRefusees = deps.reponsesRefusees ?? creerConservationReponseRefusee({ repo, maintenant: deps.maintenant });
+  if (reponsesRefusees.presenceEnAttente({ importId })) {
+    const e = erreur('conservation_en_attente');
+    Object.defineProperty(e, 'conservationReponseRefusee', { value: reponsesRefusees });
+    throw e;
+  }
   let contexteRecette = deps.contexteRecette || null;
   let row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo); verifierCaptureImport(row, contexteRecette);
   if (row.status === 'en_cours') throw erreur('appel_en_cours');
@@ -240,6 +255,9 @@ export async function proposerThermomix({ importId, session, documentId } = {}, 
   if (!compteIdentique(session, deps)) throw erreur('compte_change');
   if (contexte.precisions.reponses.some(x => x.trim()) && row.reponses_questions_id !== tourQuestions(row)) throw erreur('questions_modifiees');
   const demande = construireDemandeThermomix(contexte, questionsLues(row));
+  const capture = await reponsesRefusees.capturer({ journal: row, estCourante: () => compteIdentique(session, deps) && (!contexteRecette?.contexteValide || contexteRecette.contexteValide()) });
+  if (capture.issue !== 'ok') throw erreur(capture.raison);
+  deps = { ...deps, reponsesRefusees, captureRefus: capture.capture };
   const tentativeId = repo.newId('tm7'), quand = (deps.maintenant ?? maintenantParDefaut)();
   try {
     row = await repo.transitionner('imports', importId, { attendus: ['a_lancer', 'echec'], patch: current => {
@@ -254,7 +272,8 @@ export async function proposerThermomix({ importId, session, documentId } = {}, 
   try {
     deps.surDepart?.(structuredClone(row));
     const r = await appelerAssistant('creation', { max_tokens: 16000, system: demande.system, messages: [{ role: 'user', content: demande.user }] },
-      { fetch: deps.fetch, session, config: deps.config, signal: deps.signal, tentativeMs: deps.tentativeMs ?? 135000, corpsMax: 1024 * 1024 });
+      { fetch: deps.fetch, session, config: deps.config, signal: deps.signal, tentativeMs: deps.tentativeMs ?? 135000, corpsMax: 1024 * 1024, captureReponse: true });
+    deps = { ...deps, octetsRefuses: r.reponseBrute };
     if (!compteIdentique(session, deps)) throw erreur('compte_change');
     if (r.raison) { const e = echecDomaine(r); return ecrireEchec(row, e.raison, e.extra, session, deps); }
     const json = r.corps;
@@ -274,7 +293,7 @@ export async function proposerThermomix({ importId, session, documentId } = {}, 
     }, recettes: [await contexteRecetteImport(repo, recipe, row, { historique: true, contexte:contexteRecette })], conditions: conditionsSource(row, source, recipe) }); }
     catch (e) { if (e instanceof TransitionRefusee || ['brouillon_modifie', 'tentative_perimee'].includes(e.code)) return await repo.get('imports', importId); throw e; }
   } catch (e) {
-    if (e.code === 'compte_change') throw e;
+    if (e.code === 'compte_change' || e.conservationReponseRefusee) throw e;
     return ecrireEchec(row, convertir(e).code, {}, session, deps);
   }
 }

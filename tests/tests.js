@@ -1,3 +1,6 @@
+import {runAuditReponsesRefuseesTests} from './audit-reponses-refusees.js';
+import {runAuditReponsesParcoursTests} from './audit-reponses-parcours.js';
+import {runAuditReponsesEcranTests} from './audit-reponses-ecran.js';
 import {runAuditCommandesProtegeesTests} from './audit-commandes-protegees.js';
 import {runAuditFichesCycleTests} from './audit-fiches-cycle.js';
 import {runAuditVersionBaseTests} from './audit-version-base.js';
@@ -727,7 +730,10 @@ try { await runAuditThermomixHistoriqueTests({eq,ok}); } catch (e) { ok(false, '
 try { await runAuditThermomixUsagesTests({eq,ok}); } catch (e) { ok(false, 'runAuditThermomixUsagesTests : ' + (e.stack || e)); }
 try { await runAuditThermomixReparationTests({eq,ok}); } catch (e) { ok(false, 'runAuditThermomixReparationTests : ' + (e.stack || e)); }
 try { await runAuditThermomixSeancesTests({eq,ok}); } catch (e) { ok(false, 'runAuditThermomixSeancesTests : ' + (e.stack || e)); }
-eq(results.length, 13078,'compte d’assertions : une assertion qui disparait est un rouge');
+try { await runAuditReponsesRefuseesTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesRefuseesTests : ' + (e.stack || e)); }
+try { await runAuditReponsesParcoursTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesParcoursTests : ' + (e.stack || e)); }
+try { await runAuditReponsesEcranTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesEcranTests : ' + (e.stack || e)); }
+eq(results.length, 13504,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

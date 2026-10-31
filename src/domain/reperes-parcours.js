@@ -7,6 +7,7 @@ import { TransitionRefusee } from '../core/db.js';
 import { contexteRecetteImport, memoireCycleImport, verifierCycleImport, verifierCaptureImport } from './contexte-import.js';
 import { extraireObjetJson } from './reponse-json.js';
 import { ignorerPropositionImport } from './reprise-import.js';
+import { creerConservationReponseRefusee } from './reponses-refusees.js';
 const TERMINES = ['enregistre', 'ignore'], MODIFIABLES = ['a_lancer', 'a_verifier', 'echec'];
 const CHAMPS = ['description_fr', 'difficulte', 'temps'];
 const SAISIE = ['description_fr', 'niveau', 'raison', 'total_min', 'total_max', 'actif_min', 'actif_max', 'cuisson_min', 'cuisson_max', 'attentes_min', 'attentes_max', 'attentes_incluses', 'complet', 'explication'];
@@ -17,7 +18,7 @@ const canon = x => JSON.stringify(x, (_k, v) => objet(v) ? Object.fromEntries(Ob
 export class ErreurReperesParcours extends Error {
   constructor(code, extra = {}) { super(code); this.name = 'ErreurReperesParcours'; this.code = code; this.raison = code; this.extra = extra; }
 }
-const erreur = code => new ErreurReperesParcours(code);
+const erreur = (code, extra) => new ErreurReperesParcours(code, extra);
 const convertir = e => e instanceof ErreurReperesParcours ? e : erreur(typeof (e?.raison || e?.code) === 'string' && /^[a-z0-9_:-]{1,100}$/u.test(e.raison || e.code) ? (e.raison || e.code) : 'illisible');
 const device = repo => { const id = repo.deviceId(); if (!propreId(id)) throw erreur('appareil_absent'); return id; };
 const proprietaire = (row, repo) => { if (row.device_id !== device(repo)) throw erreur('autre_appareil'); };
@@ -132,13 +133,28 @@ function verifierTentative(current, row, repo, session, deps) {
 }
 async function ecrireEchec(row, code, extra, session, deps) {
   if (!compteIdentique(session, deps)) throw erreur('compte_change');
-  try { return await deps.repo.transitionner('imports', row.id, { attendus: ['en_cours'], patch: current => {
+  const transition = { attendus: ['en_cours'], patch: current => {
     verifierTentative(current, row, deps.repo, session, deps);
     return { status: 'echec', phase: 'saisie', erreur: { raison: code, extra: extra || {} }, resultat: null, reponse_brute: null, document_id_vol: null, finished_at: (deps.maintenant ?? maintenantParDefaut)() };
-  } }); } catch (e) { if (e instanceof TransitionRefusee || ['brouillon_modifie', 'tentative_perimee'].includes(e.code)) return deps.repo.get('imports', row.id); throw e; }
+  } };
+  if (deps.octetsRefuses instanceof Uint8Array) {
+    const r = await deps.reponsesRefusees.conserver({ capture: deps.captureRefus, journal: row, octets: deps.octetsRefuses, motif: code, transition });
+    if (r.issue === 'conserve') return r.journal;
+    const e = erreur('conservation_en_attente', { raison: r.raison, reessayable: r.reessayable === true });
+    Object.defineProperty(e, 'conservationReponseRefusee', { value: deps.reponsesRefusees });
+    throw e;
+  }
+  try { return await deps.repo.transitionner('imports', row.id, transition); } catch (e) { if (e instanceof TransitionRefusee || ['brouillon_modifie', 'tentative_perimee'].includes(e.code)) return deps.repo.get('imports', row.id); throw e; }
 }
 export async function proposerReperes({ importId, session, documentId } = {}, deps = {}) {
-  const { repo, contexteRecette = null } = deps; let row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo); verifierCaptureImport(row, contexteRecette);
+  const { repo, contexteRecette = null } = deps;
+  const reponsesRefusees = deps.reponsesRefusees ?? creerConservationReponseRefusee({ repo, maintenant: deps.maintenant });
+  if (reponsesRefusees.presenceEnAttente({ importId })) {
+    const e = erreur('conservation_en_attente');
+    Object.defineProperty(e, 'conservationReponseRefusee', { value: reponsesRefusees });
+    throw e;
+  }
+  let row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo); verifierCaptureImport(row, contexteRecette);
   if (row.status === 'en_cours') throw erreur('appel_en_cours');
   if (!MODIFIABLES.includes(row.status)) throw erreur('brouillon_ferme');
   const precedente = conserverProposition(row);
@@ -150,6 +166,9 @@ export async function proposerReperes({ importId, session, documentId } = {}, de
   if (!propreId(documentId)) throw erreur('document_absent');
   if (!compteIdentique(session, deps)) throw erreur('compte_change');
   const demande = construireDemandeReperes(contexte), quand = (deps.maintenant ?? maintenantParDefaut)();
+  const capture = await reponsesRefusees.capturer({ journal: row, estCourante: () => compteIdentique(session, deps) && (!contexteRecette?.contexteValide || contexteRecette.contexteValide()) });
+  if (capture.issue !== 'ok') throw erreur(capture.raison);
+  deps = { ...deps, reponsesRefusees, captureRefus: capture.capture };
   try { row = await repo.transitionner('imports', importId, { attendus: MODIFIABLES, patch: current => {
     memeBrouillon(current, row, repo); if (!compteIdentique(session, deps)) throw erreur('compte_change');
     const tentative_id = repo.newId('rep');
@@ -157,7 +176,8 @@ export async function proposerReperes({ importId, session, documentId } = {}, de
       document_id_vol: documentId, started_at: quand, battement_at: quand, finished_at: null, resultat: null, reponse_brute: null, erreur: null, model: null };
   }, recettes: [await contexteRecetteImport(repo, recipe, row, {contexte:contexteRecette})], conditions: conditionsSource(row, recipe, source) }); } catch (e) { if (e instanceof TransitionRefusee) throw erreur('appel_en_cours'); throw convertir(e); }
   try {
-    const r = await appelerAssistant('creation', { max_tokens: 4000, system: demande.system, messages: [{ role: 'user', content: demande.user }] }, { fetch: deps.fetch, session, config: deps.config, signal: deps.signal, tentativeMs: deps.tentativeMs ?? 135000, corpsMax: 128 * 1024 });
+    const r = await appelerAssistant('creation', { max_tokens: 4000, system: demande.system, messages: [{ role: 'user', content: demande.user }] }, { fetch: deps.fetch, session, config: deps.config, signal: deps.signal, tentativeMs: deps.tentativeMs ?? 135000, corpsMax: 128 * 1024, captureReponse: true });
+    deps = { ...deps, octetsRefuses: r.reponseBrute };
     if (!compteIdentique(session, deps)) throw erreur('compte_change');
     if (r.raison) { const e = echecDomaine(r); return ecrireEchec(row, e.raison, e.extra, session, deps); }
     const json = r.corps;
@@ -170,7 +190,7 @@ export async function proposerReperes({ importId, session, documentId } = {}, de
       return { status: 'a_verifier', phase: 'relecture', resultat, model, reponse_brute: null, erreur: null, document_id_vol: null, finished_at: (deps.maintenant ?? maintenantParDefaut)() };
     }, recettes: [await contexteRecetteImport(repo, recipe, row, { historique: true, contexte:contexteRecette })], conditions: conditionsSource(row, recipe, source) }); }
     catch (e) { if (e instanceof TransitionRefusee || ['brouillon_modifie', 'tentative_perimee'].includes(e.code)) return repo.get('imports', importId); throw e; }
-  } catch (e) { if (e.code === 'compte_change') throw e; return ecrireEchec(row, convertir(e).code, {}, session, deps); }
+  } catch (e) { if (e.code === 'compte_change' || e.conservationReponseRefusee) throw e; return ecrireEchec(row, convertir(e).code, {}, session, deps); }
 }
 export async function annulerReperes(importId, { repo, documentId, maintenant = maintenantParDefaut } = {}) {
   const row = verifierLigne(await repo.get('imports', importId)); proprietaire(row, repo);

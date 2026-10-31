@@ -1,3 +1,5 @@
+import { creerConservationReponseRefusee } from '../domain/reponses-refusees.js';
+import { creerAffichageReponseRefusee, texteMotifReponseRefusee } from './reponse-refusee.js';
 import { retourConnu, porteeNavigation } from './navigation-contexte.js';
 import { destinationApresRecette } from './actions-contenu.js';
 import { revoirLectureImport, memeCaptureImport } from '../domain/contexte-import.js';
@@ -21,6 +23,7 @@ const niveaux = () => ({ facile: t('Facile'), intermediaire: t('Intermédiaire')
 const origines = () => ({ source: t('Source'), estimation_ia: t('Estimation IA'), manuel: t('Saisi par moi') });
 export function texteErreurReperes(e) {
   const code = e?.code || e?.raison || e?.message, refus = texteRefusAssistant({ ...e, raison: code }); if (refus) return refus;
+  const connu = code === 'interrompu' || code === 'refus' ? null : texteMotifReponseRefusee(code); if (connu) return connu;
   if (['cycle_change','lecture_changee','recette_retiree'].includes(code)) return t('La recette a changé. Rouvre sa fiche avant d’enregistrer.');
   if (code === 'hors_ligne') return t('Tu es hors ligne. Ton brouillon est conservé.');
   if (code === 'non_connecte') return t('Connecte-toi pour utiliser l’assistant.');
@@ -82,18 +85,21 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   let recipe = await repo.get('recipes', params.id);
   if (!recipe) return el('p', { class: 'status warn' }, t('Recette introuvable.'));
   if (!recetteActiveDansContexte(recipe, ctx)) return mentionCycleRecette(recipe, ctx?.editionsById?.get(recipe.edition_id));
+  const reponsesRefusees = deps.reponsesRefusees || creerConservationReponseRefusee({ repo, maintenant: deps.maintenant });
+  const installerReponse = creerAffichageReponseRefusee({ repo, conservation: reponsesRefusees, recipeId: recipe.id, kind: 'reperes', deps });
+  const documenter = node => installerReponse(node.tagName === 'P' ? el('div', { class: 'stack' }, node) : node, { getImportId: () => query.import });
   const contexteRecette = await capturerRecette(repo, recipe, { ctx });
   let row = null;
   if (query.import) {
     try { row = await P.lireBrouillonReperes(query.import, { repo }); }
-    catch { return el('p', { class: 'status warn' }, t('Ce brouillon de repères ne peut pas être repris. Repars de la recette.')); }
+    catch { return documenter(el('p', { class: 'status warn' }, t('Ce brouillon de repères ne peut pas être repris. Repars de la recette.'))); }
     if (row.recipe_id !== recipe.id) return el('p', { class: 'status warn' }, t('Ce brouillon appartient à une autre recette.'));
   }
   const versionId = row ? row.source_version_id : (typeof query.v === 'string' ? query.v : recipe.current_version_id || null);
   const version = versionId ? await repo.get('recipe_versions', versionId) : null;
   let contexte;
   try { if (versionId && !version || version && version.recipe_id !== recipe.id || !version && recipe.availability !== 'reference_only') throw Error('source_absente'); contexte = construireContexteReperes({ recipe, version }); }
-  catch { return el('p', { class: 'status warn' }, t('Ces informations ne sont pas disponibles pour cette version.')); }
+  catch { return documenter(el('p', { class: 'status warn' }, t('Ces informations ne sont pas disponibles pour cette version.'))); }
   const lu = lireReperes(recipe, version), initial = Object.fromEntries(CHAMPS.map(k => [k, lu.champs[k].valeur]));
   let saisie = { ...saisieDe(initial), ...row?.saisie }, modifies = new Set(row?.champs_modifies || []), modifiesTemps = new Set(row?.champs_temps_modifies || []);
   let importId = row?.id || null, opening = null, queue = Promise.resolve(), busy = false, saving = false, closed = false, accountChanged = false, mounted = false, conflitBrouillon = false;
@@ -109,19 +115,20 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   const readonly = () => !!row && row.device_id !== repo.deviceId(), terminal = () => !!row && TERMINES.includes(row.status);
   const cycleDivergent = () => !!row && !memeCaptureImport(row, contexteRecette);
   const perime = () => conflitBrouillon || !!row?.validation_erreur || cycleDivergent(), vivant = () => !closed && (!mounted || root.isConnected);
-  const d = extra => ({ ...deps, repo, enLigne, contexteRecette, documentId: DOCUMENT_ID, ...extra });
+  const conservationEnAttente = () => !!importId && reponsesRefusees.presenceEnAttente({ importId });
+  const d = extra => ({ ...deps, repo, reponsesRefusees, enLigne, contexteRecette, documentId: DOCUMENT_ID, ...extra });
   const message = texte => { if (vivant()) status.textContent = texte; };
   function erreurGeste(e) { if (e?.code === 'brouillon_modifie') { conflitBrouillon = true; synchroniser(); } message(texteErreurReperes(e)); }
   function geste(fn) { if (!vivant()) return Promise.resolve(); let p; try { p = Promise.resolve(fn()); } catch (e) { p = Promise.reject(e); } p = p.catch(erreurGeste); operations.add(p); p.then(() => operations.delete(p)); return p; }
   const action = (texte, role, fn, primary = false) => el('button', { type: 'button', class: primary ? 'btn primary' : 'btn', dataset: { role }, onClick: () => geste(fn) }, texte);
   let unsubscribe;
   function dispose() {
-    if (closed) return; closed = true; sessionLive = null; controller?.abort();
+    if (closed) return; root.disposerReponseRefusee?.(); closed = true; sessionLive = null; controller?.abort();
     if (tenue && importId && !accountChanged) P.annulerReperes(importId, d()).catch(() => {});
-    clearInterval(heartbeat); observer.disconnect(); unsubscribe?.(); proteger(); window.removeEventListener('hashchange', dispose); window.removeEventListener('online', synchroniser); window.removeEventListener('offline', synchroniser);
+    clearInterval(heartbeat); observer.disconnect(); unsubscribe?.(); proteger(); window.removeEventListener('online', synchroniser); window.removeEventListener('offline', synchroniser);
   }
   const observer = new MutationObserver(() => { if (root.isConnected) mounted = true; else if (mounted) dispose(); }); observer.observe(document.body, { childList: true, subtree: true });
-  window.addEventListener('hashchange', dispose); window.addEventListener('online', synchroniser); window.addEventListener('offline', synchroniser);
+  window.addEventListener('online', synchroniser); window.addEventListener('offline', synchroniser);
   unsubscribe = ctx.sync?.auth?.onChange?.(state => { if ((state?.user?.id ?? null) !== compteInitial) { accountChanged = true; dispose(); } });
   root.dispose = dispose; root.etatRoute = () => ({ importId, busy, saving, lectureSeule: readonly(), saisie: clone(saisie) });
   root.attendreEcritures = async () => { await queue.catch(() => {}); while (operations.size) await Promise.all([...operations]); await queue.catch(() => {}); };
@@ -188,7 +195,7 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
       if (!vivant()) return;
       if (row.status === 'a_verifier') { remplirProposition(); message(t('Proposition reçue. Relis-la avant de la garder.')); }
       else if (row.erreur) message(texteErreurReperes(row.erreur));
-    } finally { clearInterval(heartbeat); if (importId) await repo.oublierBattement(importId).catch(() => {}); libererVol(vol); if (tenue === vol) tenue = null; busy = false; synchroniser(); }
+    } finally { clearInterval(heartbeat); if (importId) await repo.oublierBattement(importId).catch(() => {}); libererVol(vol); if (tenue === vol) tenue = null; busy = false; await root.actualiserReponseRefusee?.(); synchroniser(); }
   }, true);
   const garder = action(t('Garder ces informations'), 'garder-reperes', async () => {
     if (busy || saving || !relecture || readonly() || terminal()) return;
@@ -200,7 +207,7 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   }, true);
   const annuler = action(t('Annuler l’appel'), 'annuler-reperes', async () => { if (!tenue) return; controller?.abort(); if (importId) row = await P.annulerReperes(importId, d()); synchroniser(); });
   const ignorer = action(t('Ignorer ce brouillon'), 'ignorer-reperes', async () => {
-    if (busy || saving || terminal()) return;
+    if (conservationEnAttente() || busy || saving || terminal()) return;
     await queue;
     if (!importId) { if (vivant()) nav(retour); return; }
     const attendu = row;
@@ -223,7 +230,7 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
     try { row = await P.ignorerPropositionPrecedenteReperes(importId, d({ attendu })); }
     finally { saving = false; synchroniser(); }
   });
-  const actualiser = action(t('Actualiser le brouillon'), 'actualiser-reperes', async () => { if (!importId || busy || saving) return; row = await P.lireBrouillonReperes(importId, d()); conflitBrouillon = false; relecture = false; relu.checked = false; if (row.resultat) remplirProposition(); else afficherComparaison(); synchroniser(); });
+  const actualiser = action(t('Actualiser le brouillon'), 'actualiser-reperes', async () => { if (conservationEnAttente() || !importId || busy || saving) return; row = await P.lireBrouillonReperes(importId, d()); conflitBrouillon = false; relecture = false; relu.checked = false; if (row.resultat) remplirProposition(); else afficherComparaison(); await root.actualiserReponseRefusee?.(); synchroniser(); });
   const revoir = action(t('Relire le résultat conservé'), 'revoir-lecture-cycle', async () => {
     if (busy || saving || readonly() || !cycleDivergent()) return;
     saving = true; synchroniser();
@@ -257,7 +264,7 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
     if (closed) return;
     avisCycle.hidden = !(cycleDivergent() && row?.status === 'a_verifier' && row?.resultat);
     revoir.disabled = busy || saving || readonly();
-    const verrou = busy || saving || readonly() || terminal() || row?.status === 'en_cours' || perime();
+    const verrou = conservationEnAttente() || busy || saving || readonly() || terminal() || row?.status === 'en_cours' || perime();
     for (const { node, champ } of controls) node.disabled = verrou || (!version && champ !== 'description_fr');
     for (const b of confirmations) b.disabled = verrou;
     proposer.disabled = verrou || !sessionLive || !enLigne() || !!volEnCours() || !!row?.proposition_precedente?.tentative_suivante_id;
@@ -268,7 +275,8 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
     manuel.disabled = verrou || !modifies.size || (!!row?.resultat && !relecture); garder.disabled = verrou || row?.status !== 'a_verifier' || !row?.resultat || !relecture;
     garder.hidden = validation.hidden = !row?.resultat; relu.disabled = verrou;
     annuler.hidden = !tenue; annuler.disabled = !busy || !tenue;
-    ignorer.disabled = busy || saving || terminal();
+    ignorer.disabled = conservationEnAttente() || busy || saving || terminal();
+    actualiser.disabled = conservationEnAttente() || busy || saving;
     actualiser.hidden = !row || (!conflitBrouillon && !readonly() && row.status !== 'en_cours'); copier.hidden = !row || !terminal();
     resultatPrecedent.replaceChildren();
     const precedent = row?.proposition_precedente;
@@ -291,5 +299,5 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   if (readonly()) message(t('Ce brouillon se modifie sur l’appareil qui l’a créé.'));
   else if (row?.validation_erreur) message(texteErreurReperes({ code: row.validation_erreur }));
   else if (row?.erreur) message(texteErreurReperes(row.erreur));
-  synchroniser(); return root;
+  synchroniser(); return installerReponse(root, { getImportId: () => importId, estCourante: vivant, onEtat: synchroniser, onJournal: r => { row = r; if (r.resultat) remplirProposition(); else afficherComparaison(); } });
 }
