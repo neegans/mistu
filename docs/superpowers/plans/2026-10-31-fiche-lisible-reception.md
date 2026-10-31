@@ -1,6 +1,14 @@
 # Fiche recette lisible — réception du 31 octobre 2026
 
-[Contrat de présentation](../specs/2026-10-31-fiche-lisible-design.md). Branche `correctif-fiche-lisible`, base publiée `f15665c` / 0.32.7-1. Livraison préparée **0.32.8-2**, APP_VERSION 0.32.8, DB6 et archive7 inchangés.
+[Contrat de présentation](../specs/2026-10-31-fiche-lisible-design.md). Branche `correctif-fiche-lisible`, base publiée `f15665c` / 0.32.7-1. Livraison **0.32.8-2 publiée et reçue**, APP_VERSION 0.32.8, DB6 et archive7 inchangés.
+
+## Publication
+
+Code `fa30c1b5d90402012c9c704d2701d9b2544023cf`, promu par avance rapide puis poussé sur main. [GitHub Pages](https://github.com/neegans/mistu/actions/runs/41217819477) terminé le 31 octobre à **16:04:14 UTC (12 h 04 HAE)**. **446/446 fichiers publics conformes** au commit figé, octets/SHA/MIME exacts : 216 ressources de livraison, 226 fichiers de tests et fixtures, alias et relectures finales. 452 réponses HTTP 200, aucun écart ni nouvel essai.
+
+**29/29 contrôles publics** : les 21 contrôles de présentation ci-dessous, puis traduction manuelle de démonstration saisie et enregistrée par la vraie interface sur 25 segments. Le français reste affiché après rechargement réellement hors ligne ; source anglaise strictement conservée, aucune écriture de minuterie et aucun appel assistant. Captures enregistrées et relues ; le témoin mobile hors ligne est stable, le témoin ordinateur porte encore le toast d’enregistrement. Zéro erreur JavaScript, requête extérieure ou POST. Navigateurs fermés.
+
+[CI du code publié](https://github.com/neegans/mistu/actions/runs/41217819693) **verte**, job terminé à **16:10:00 UTC** : logs reçus confirmant **281/281 outils Node**, **29/29 outils CI**, **14625/14625 navigateur** (bilan à16:09:57.924 UTC), Node24.22.2. Scan des secrets :30 mentions examinées, aucune valeur interdite. Métadonnées et extraits de logs conservés, aucun téléchargement d’artefact supplémentaire. Preuves de publication dans `.superpowers/sdd/2026-10-31-fiche-lisible/publication/` (`fichiers-f1Wmeo/`, `parcours/`, `ci/`). Aucune migration SQL ni modification de la fonction assistant.
 
 ## Écrans et parcours observés
 
