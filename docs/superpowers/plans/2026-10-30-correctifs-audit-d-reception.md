@@ -2,7 +2,7 @@
 
 Référence : [plan fourni et autorisé par Neegan](2026-10-30-correctifs-audit-L0-L10.md), tâche 9 ; lentille [synchronisation](../../audits/2026-10-30-audit-codex-L0-L10/lentilles/synchro.md). Branche `correctifs-audit-d`, base `fd84739`, après publication C / 0.32.3-1 et application reçue de 0014.
 
-Le « deploy et enchaine ensuite le reste » autorise la construction des lots restants. Le lot D est en construction locale : APP_VERSION **0.32.4**, DB6/archive7 inchangés. Les tâches 9.1 à 9.7 sont exécutées dans l’ordre, avec rouge causal, réception et commit séparés. Aucune nouvelle migration SQL prévue.
+Le « deploy et enchaine ensuite le reste » autorise la construction des lots restants. Le lot D est reçu localement : APP_VERSION **0.32.4**, livraison **0.32.4-7**, DB6/archive7 inchangés. Les tâches9.1 à9.7 ont été exécutées dans l’ordre, avec rouge causal, réception et commit séparés. **12770/12770** navigateur, Node **281/281**, générateurs conformes. Aucune nouvelle migration SQL. D non publié ; C0.32.3-1 reste en ligne. Construction E–G poursuivie, publication à autoriser conformément au plan lot par lot.
 
 ## 9.1 — Envois bloqués
 
@@ -124,3 +124,18 @@ Correctif ciblé sur quatre modules : défaut `syncNow` transmis directement par
 
 
 Réception finale9.6 : **12678/12678**, épingle12677 (+55), zéro exception JavaScript/requête extérieure ; **350/350** régressions ciblées, Node **281/281** exécuté seul, générateurs/syntaxe/diff conformes. Aucune attente historique modifiée. Livraison **0.32.4-6**,213 fichiers /3 691 637 octets, manifeste SHA256 `aae02197c6481777a695c4f19902651fd4069526e7c498483a53753e18e69218`. APP_VERSION0.32.4, DB6/archive7 inchangés. Preuves `9.6-suite-globale.log`, `9.6-node.log`, `9.6-regressions.json`. **9.1–9.6 reçues localement, 9.7 restante**, D non publié ; aucun SQL, compte privé, appel payé ni essai physique iPhone/Safari.
+
+## 9.7 — Dépendances exactes des morceaux d’envoi initial
+
+Rouge suivi avant code : **48/92**,44 rouges causaux, zéro exception JavaScript/requête extérieure (`9.7-rouge.json`). Un morceau de500 versions vers deux recettes porte3503 conditions lorsqu’existent3000 recettes étrangères. Une modification étrangère empêche son envoi. Les parents absents ajoutés pendant la capture, les pages source traversées et les nouvelles éditions d’un livre ne sont pas gardés ; un parent du même magasin peut changer avant le premier morceau et n’être détecté qu’après son envoi. Les contrôles des parents déjà présents, du compte, des intentions antérieures et de la reprise501 lignes étaient déjà verts.
+
+Le correctif doit tracer les lectures du parcours existant, y compris les absences et les dépendances réutilisées depuis un contexte en cache. Les éditions d’un livre demandent en plus une garde d’appartenance par l’index `book_id`, même si l’ensemble initial est vide. Les conditions sont dédupliquées avec celles du morceau, sans supprimer un parent au motif qu’il appartient au même magasin. Les préparations L5–L8 et le rattrapage des anciennes intentions restent hors du changement. Implémentation et réception encore attendues.
+
+Correctif gelé sur deux modules : dépendances locales associées à la capture par WeakMap, sans métadonnée dans les contextes sérialisés ; conditions des seules lectures utiles au morceau, gardes d’index pour l’appartenance au livre. **92/92** suivis verts après les44 rouges, sans retouche des attentes. Le cas500 versions vers deux parents porte503 conditions, indépendamment des3000 recettes étrangères. Les insertions de parents auparavant absents, les pages traversées, le parent du même magasin et l’ajout d’édition sont maintenant refusés dès le morceau concerné.
+
+Contre-revue indépendante **64/64**, zéro exception JavaScript/requête extérieure, après **33/63** avant code. Le témoin de modification étrangère atteint maintenant son deuxième morceau et sa vérification supplémentaire, expliquant63→64 sans retrait. Cache des parents et absences au second morceau, appartenance connue/vide/rattachement, propriétaire durable/connexion et marqueur final couverts. Mesures supplémentaires : une ligne+deux parents+un compte =4 conditions ; morceau vide =1 garde de compte. Diff relu sans autre anomalie. Preuves `revue-9-7-initial.json`, `revue-9-7-final.json`, `revue-9-7-conclusion.md`.
+
+Livraison gelée **0.32.4-7**,213 fichiers /3 693 423 octets, manifeste SHA256 `6b2e254ff6ccc92f0f19620d985444d6ec9a431d739b9cedb731d2d3463af052`. Node **281/281** exécuté seul, générateurs/syntaxe/diff conformes. Épingle12769, bilan attendu12770 (+92). Réception globale en cours ; APP_VERSION0.32.4, DB6/archive7 inchangés.
+
+
+Réception complète9.7 : **12770/12770**, épingle12769 (+92), zéro exception JavaScript/requête extérieure. Le premier passage global du correctif est reçu ; livraison0.32.4-7 identique au gel, générateur et diff conformes. Preuves `9.7-suite-globale.log`, `9.7-node.log`, `9.7-vert.json`. **Lot D entièrement reçu localement (9.1–9.7), +707 assertions depuis C**, dont les deux témoins ajoutés pour la fixture L10 ; les détails des anciens rouges restent ci-dessus. D non publié, E–G à construire ; aucun SQL ni appel assistant réel.

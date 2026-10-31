@@ -4,11 +4,21 @@ import { STORES, SYNC_STORES } from '../model/schema.js';
 import { lireCycleRecette } from '../domain/cycle-recette.js';
 import { lireCycleEdition } from '../domain/cycle-edition.js';
 
+// Lectures locales de la capture, jamais ajoutées aux contextes envoyés ou archivés.
+const lecturesCaptures = new WeakMap();
+const cle = (store, id) => store + ':' + id;
+
 export function capturerContextesInitiaux(snapshot, { owner_id = null } = {}) {
   const index = Object.fromEntries(Object.entries(snapshot).filter(([store, rows]) => STORES[store] && Array.isArray(rows))
     .map(([store, rows]) => [store, new Map(rows.map(row => [row[STORES[store].keyPath], row]))]));
-  const recette = new Map(), edition = new Map();
-  const ligne = (store, id) => index[store]?.get(id);
+  const recette = new Map(), edition = new Map(), dependances = new Map();
+  let lectures;
+  const ligne = (store, id) => {
+    const row = index[store]?.get(id);
+    // Une absence lue fait aussi partie du contexte : une insertion doit invalider la capture.
+    lectures.lignes.set(cle(store, id), { store, id, row });
+    return row;
+  };
   const ajouter = (map, id, record, creer) => {
     if (typeof id !== 'string' || !id) return;
     if (!map.has(id)) map.set(id, { ...creer(id), records: [] });
@@ -23,12 +33,20 @@ export function capturerContextesInitiaux(snapshot, { owner_id = null } = {}) {
   const contexteEdition = id => ({ edition_id: id, expected_cycle_id: lireCycleEdition(ligne('book_editions', id)).id, owner_id, archive_import: true });
   for (const store of SYNC_STORES) for (const row of snapshot[store] || []) {
     const record = { store, id: row[STORES[store].keyPath] }, rids = new Set(), eids = new Set(), vus = new Set();
+    lectures = { lignes: new Map(), livres: new Map() };
+    dependances.set(cle(store, record.id), lectures);
     const explorer = (s, r) => {
       if (!r) return;
       const cle = s + ':' + r[STORES[s].keyPath]; if (vus.has(cle)) return; vus.add(cle);
       if (s === 'recipes') { rids.add(r.id); if (r.edition_id) eids.add(r.edition_id); return; }
       if (s === 'book_editions') { eids.add(r.id); return; }
-      if (s === 'books') { for (const ed of index.book_editions?.values() || []) if (ed.book_id === r.id) eids.add(ed.id); return; }
+      if (s === 'books') {
+        const ids = [];
+        for (const ed of index.book_editions?.values() || []) if (ed.book_id === r.id) { eids.add(ed.id); ids.push(ed.id); }
+        // Des gardes de fiches seules ne détectent pas une nouvelle édition rattachée au livre.
+        lectures.livres.set(r.id, { book_id: r.id, ids: ids.sort() });
+        return;
+      }
       if (r.edition_id) eids.add(r.edition_id);
       for (const id of [r.recipe_id, r.source_recipe_id, ...(r.recipe_ids || []), ...(r.items || []).map(x => x.recipe_id)].filter(Boolean)) rids.add(id);
       for (const id of [r.recipe_version_id, r.source_recipe_version_id, r.active_version_id, ...(r.selected_version_ids || []), ...(r.version_ids || []), ...(r.items || []).map(x => x.recipe_version_id)].filter(Boolean)) {
@@ -47,9 +65,20 @@ export function capturerContextesInitiaux(snapshot, { owner_id = null } = {}) {
       ajouter(recette, id, record, contexteRecette);
       const eid = ligne('recipes', id)?.edition_id; if (eid) eids.add(eid);
     }
-    for (const id of eids) ajouter(edition, id, record, contexteEdition);
+    for (const id of eids) {
+      // ajouter réutilise les contextes en cache ; chaque record conserve néanmoins cette lecture.
+      ligne('book_editions', id);
+      ajouter(edition, id, record, contexteEdition);
+    }
   }
-  return { recettes: [...recette.values()], editions: [...edition.values()] };
+  const capture = { recettes: [...recette.values()], editions: [...edition.values()] };
+  lecturesCaptures.set(capture, dependances);
+  return capture;
+}
+
+export function dependancesInitialesPour(capture, store, id) {
+  const lectures = lecturesCaptures.get(capture)?.get(cle(store, id));
+  return { lignes: [...(lectures?.lignes.values() || [])], livres: [...(lectures?.livres.values() || [])] };
 }
 
 export function contexteInitialPour(capture, store, id) {

@@ -161,8 +161,8 @@
 - [x] **9.4 Fiches à cycle** : test rouge dans `tests/sync-l3.js` → une fiche `recipes` qui porte un cycle et dont `updated_at` est égal mais `data` différente fait un conflit `kind:'donnees'` (pas de tranchage muet) ; implémenter dans `pull.js:206-224` en rappelant `decider` quand `resultat.conflit` est faux et que les cycles sont égaux.
 - [x] **9.5 VersionError** : test rouge → `Database.open()` qui reçoit `VersionError` émet `versionchange_bloquee` et `src/app.js` affiche le bandeau « Une version plus récente est ouverte dans un autre onglet. Recharge cette page. » (`data-role="bandeau-version"`).
 - [x] **9.6 Horloges** : `cook.js:30` et `cuisine-persistance.js:55-57` passent par `syncNow()` ; test : horloge locale avancée de 1 h → `created_at` suit `syncNow`.
-- [ ] **9.7 Envoi initial** : test rouge → pour un morceau de 500 lignes de `recipe_versions`, les conditions ne portent que sur les parents RÉFÉRENCÉS par le morceau (`recipe_id` des lignes), pas sur tout `recipes` ; mesure : nombre de conditions ≤ lignes + parents référencés + 1.
-- [ ] **Chaque sous-tâche : suite verte, commit séparé** (`fix(sync): …`).
+- [x] **9.7 Envoi initial** : test rouge → pour un morceau de 500 lignes de `recipe_versions`, les conditions ne portent que sur les parents RÉFÉRENCÉS par le morceau (`recipe_id` des lignes), pas sur tout `recipes` ; mesure : nombre de conditions ≤ lignes + parents référencés + 1.
+- [x] **Chaque sous-tâche : suite verte, commit séparé** (`fix(sync): …`).
 
 ### Tâche 10 : Thermomix — réparer les anciens plans, garder le travail payé, fermer TMX/VIS restants
 

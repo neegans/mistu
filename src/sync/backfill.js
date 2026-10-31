@@ -17,7 +17,7 @@ import {estCommandeSources,ciblesCommandeSources,CLE_SOURCE_CONFIRMEE} from './c
 import { SYNC_STORES } from '../model/schema.js';
 import { keyOf, remoteDeCeCompte } from './tables.js';
 import { gardeCompteCycle } from './cycle.js';
-import { capturerContextesInitiaux, contexteInitialPour } from './contexte-initial.js';
+import { capturerContextesInitiaux, contexteInitialPour, dependancesInitialesPour } from './contexte-initial.js';
 import { estDeCeCompte } from './outbox.js';
 
 const MARQUEUR = (table) => `backfill:${table}`;
@@ -194,11 +194,24 @@ export async function envoiInitial({ db, getUserId, isActivitySynced = () => fal
       }) };
       if (!puts.outbox.length) delete puts.outbox;
       if (dernier) puts.sync_state = [{ key: MARQUEUR(table), value: 'fait' }];
-      const conditions = { sync_state: [gardeCompteCycle(user_id, getUserId)],
-        [table]: morceau.map(r => ({ key: keyOf(table, r), fusion: garde(r) })) };
-      for (const parent of ['recipes', 'book_editions', 'recipe_versions', 'source_documents', 'scan_sessions', 'meals', 'cook_sessions']) {
-        if (parent === table) continue;
-        conditions[parent] = (snapshot[parent] || []).map(r => ({ key: keyOf(parent, r), fusion: garde(r) }));
+      const conditions = { sync_state: [gardeCompteCycle(user_id, getUserId)] }, vues = new Set(), livres = new Map();
+      const proteger = (store, id, row) => {
+        const cle = store + ':' + id;
+        if (vues.has(cle)) return;
+        vues.add(cle);
+        (conditions[store] ??= []).push({ key: id, fusion: garde(row) });
+      };
+      for (const row of morceau) {
+        const id = keyOf(table, row);
+        proteger(table, id, row);
+        const deps = dependancesInitialesPour(capture, table, id);
+        for (const parent of deps.lignes) proteger(parent.store, parent.id, parent.row);
+        for (const livre of deps.livres) livres.set(livre.book_id, livre.ids);
+      }
+      for (const [book_id, ids] of livres) {
+        (conditions.book_editions ??= []).push({ index: 'book_id', valeur: book_id, verifier: rows => {
+          if (!identique(rows.map(r => r.id).sort(), ids)) throw new Error('Données initiales modifiées pendant la capture');
+        } });
       }
       await db.mutate({ puts, conditions, origin: 'device' });
       mises += morceau.length;
