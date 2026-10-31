@@ -1,4 +1,4 @@
-import { capturerRecette, capturerEdition } from './recette-garde.js';
+import { capturerRecette, capturerEdition, capturerProprietaire } from './recette-garde.js';
 // Corbeille individuelle : le contenu reste en base ; seule une commande explicite change son cycle de vie.
 import { ouvrirDialogue, el, formatDate } from '../core/dom.js';
 import { t } from '../core/i18n.js';
@@ -18,6 +18,39 @@ const livresAnnulables = new Map(), restaurationsLivres = new Map();
 export const TEXTE_RECETTE_RETIREE = 'Cette recette est dans la corbeille';
 export const TEXTE_CYCLE_INVALIDE = 'L’état de cette recette est à vérifier. Son contenu est conservé.';
 export const TEXTE_NOUVEL_USAGE_REFUSE = 'Restaure les recettes dans la corbeille avant de les utiliser dans une nouvelle préparation.';
+
+function boutonVerificationDisponibilite({ root, ctx, repo, message, disponible, confirmer }) {
+  const compte = capturerProprietaire(repo, ctx), base = repo.db, connexion = base?.idb;
+  let enCours = false;
+  const verifierPortee = async p => {
+    const courante = () => root.isConnected && p.contexteValide() && repo.db === base && base?.idb === connexion;
+    if (!courante()) throw Error('contexte_change');
+    const owner = (await repo.get('sync_state', 'user_id'))?.value ?? null;
+    if (!courante() || owner !== p.owner_id) throw Error('compte_change');
+  };
+  const verifier = el('button', { type: 'button', class: 'btn', onClick: async () => {
+    if (enCours) return;
+    enCours = true; verifier.disabled = true;
+    try {
+      if (navigator.onLine === false) {
+        message.textContent = t("Tu es hors ligne : impossible de vérifier pour l'instant.");
+        return;
+      }
+      const p = await compte; await verifierPortee(p);
+      await ctx.sync.moteur.envoyerMaintenant();
+      await verifierPortee(p);
+      const connue = await disponible();
+      await verifierPortee(p);
+      if (!connue) throw Error('capacite_absente');
+      confirmer(); verifier.remove(); message.textContent = '';
+    } catch {
+      if (root.isConnected) message.textContent = navigator.onLine === false
+        ? t("Tu es hors ligne : impossible de vérifier pour l'instant.")
+        : t('La disponibilité n’a pas pu être vérifiée. Réessaie.');
+    } finally { enCours = false; verifier.disabled = false; }
+  } }, t('Vérifier la disponibilité'));
+  return verifier;
+}
 
 export function mentionCycleRecette(recipe, edition = null) {
   const cycle = lireEtatRecette(recipe, edition);
@@ -55,17 +88,9 @@ export async function panneauCycleRecette(recipe, ctx, deps = {}) {
   bouton.disabled = !autorise; if (retour) retour.disabled = !autorise;
   if (!autorise) message.textContent = t('La corbeille n’est pas encore disponible pour ce compte. Connecte-toi avec une application à jour pour vérifier sa disponibilité.');
   if (!autorise && ctx.sync?.moteur?.envoyerMaintenant) {
-    const verifier = el('button', {type:'button', class:'btn', onClick:async () => {
-      verifier.disabled = true;
-      try {
-        await ctx.sync.moteur.envoyerMaintenant();
-        autorise = await disponible();
-        bouton.disabled = !autorise; if (retour) retour.disabled = !autorise;
-        if (autorise) { verifier.remove(); message.textContent = ''; bouton.focus(); }
-      } catch { /* Le motif de disponibilité reste affiché et aucun geste n'est autorisé. */ }
-      finally { verifier.disabled = false; }
-    }}, t('Vérifier la disponibilité'));
-    root.append(verifier);
+    root.append(boutonVerificationDisponibilite({ root, ctx, repo: R, message, disponible, confirmer: () => {
+      autorise = true; bouton.disabled = false; if (retour) retour.disabled = false; bouton.focus();
+    } }));
   }
   bouton.addEventListener('click', agir);
   async function agir() {
@@ -113,9 +138,9 @@ export async function panneauCycleLivre(edition, ctx, deps = {}) {
   try {autorise=await disponible();}catch{}verrouiller();
   if (!autorise) {
     message.textContent=t('La corbeille des livres n’est pas encore disponible pour ce compte. Connecte-toi avec une application à jour pour vérifier sa disponibilité.');
-    if(ctx.sync?.moteur?.envoyerMaintenant)root.append(el('button',{type:'button',class:'btn',onClick:async e=>{
-      e.currentTarget.disabled=true;try{await ctx.sync.moteur.envoyerMaintenant();autorise=await disponible();verrouiller();if(autorise){e.target.remove();message.textContent='';bouton.focus();}}catch{}finally{e.target.disabled=false;}
-    }},t('Vérifier la disponibilité')));
+    if(ctx.sync?.moteur?.envoyerMaintenant)root.append(boutonVerificationDisponibilite({root,ctx,repo:R,message,disponible,confirmer:()=>{
+      autorise=true;verrouiller();bouton.focus();
+    }}));
   }
   async function terminer(resultat) {
     root.resultat={issue:'succes',id:edition.id,...resultat};

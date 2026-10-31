@@ -105,10 +105,14 @@ export async function runL1CorbeilleUiTests({eq,ok}) {
       const inconnu=await panneauCycleRecette(r,{...ctx,proprietaireDonnees:'compte-inconnu',sync:{user:{id:'compte-inconnu'}}});
       ok(bouton(inconnu,'Mettre à la corbeille').disabled&&inconnu.textContent.includes('pas encore disponible'),'L1 capacité : compte inconnu ne promet pas une corbeille synchronisable');
       let connue=false,passes=0;
+      await db.mutate({origin:'device',puts:{sync_state:[{key:'user_id',value:'compte-inconnu'}]}});
       const verifiable=await panneauCycleRecette(r,{...ctx,proprietaireDonnees:'compte-inconnu',sync:{user:{id:'compte-inconnu'},moteur:{envoyerMaintenant:async()=>{passes++;connue=true;}}}},{capacite:async()=>connue});
+      const finVerification=monter(verifiable);
       const verifier=bouton(verifiable,'Vérifier la disponibilité');
-      ok(verifier,'L1 capacité : vérification explicite proposée sans recharger la fiche');
-      if(verifier){verifier.click();await attendre(()=>!bouton(verifiable,'Mettre à la corbeille').disabled);eq(passes,1,'L1 capacité : bouton activé après confirmation du serveur');}
+      try {
+        ok(verifier,'L1 capacité : vérification explicite proposée sans recharger la fiche');
+        if(verifier){verifier.click();await attendre(()=>!bouton(verifiable,'Mettre à la corbeille').disabled);eq(passes,1,'L1 capacité : bouton activé après confirmation du serveur');}
+      } finally {finVerification();await db.mutate({origin:'device',puts:{sync_state:[{key:'user_id',value:null}]}});}
 
       const casse=await panneauCycleRecette(r,ctx,{repo:{...repo,commanderCycleRecette:async()=>{throw Error('disque');}},refresh:()=>{throw Error('succès fictif');}});
       bouton(casse,'Mettre à la corbeille').click();await attendre(()=>!bouton(casse,'Mettre à la corbeille').disabled);

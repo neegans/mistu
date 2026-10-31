@@ -164,12 +164,21 @@ export function actionsLivre({edition,ctx,origine}={},deps={}){
   return actions;
 }
 
+let prochainMotifAction=0;
 function boutonAction(a,{onResultat=()=>refresh(),fermer=()=>{},message}={}){
-  let occupe=false,pret=!a.pret;
+  let occupe=false,pret=!a.pret,verificationEchouee=false;
   const attributes={class:`btn${a.id.startsWith('retirer')?' danger':''}`,dataset:{action:a.id},'aria-label':a.nomAccessible};
   const node=a.href?el('a',{...attributes,href:a.href},a.libelle):el('button',{...attributes,type:'button'},a.libelle);
-  const etat=()=>{if(node.tagName==='BUTTON')node.disabled=occupe||!pret||!a.eligible;else node.setAttribute('aria-disabled',String(!pret||!a.eligible));if(a.motif)node.title=a.motif;};
-  if(a.pret){etat();a.pret.then(()=>{pret=true;etat();}).catch(()=>{pret=true;a.eligible=false;etat();});}else etat();
+  const explication=el('small',{id:`motif-action-${++prochainMotifAction}`,class:'muted',dataset:{role:'motif-action'},hidden:true,style:{overflowWrap:'anywhere'}});
+  const etat=()=>{
+    if(node.tagName==='BUTTON')node.disabled=occupe||!pret||!a.eligible;else node.setAttribute('aria-disabled',String(!pret||!a.eligible));
+    const texte=!pret?t('Vérification de la disponibilité…'):!a.eligible
+      ?verificationEchouee?t('La disponibilité de cette action n’a pas pu être vérifiée. Rouvre cet écran pour réessayer.'):(a.motif||t('Cette action n’est pas disponible pour le moment.')):'';
+    explication.textContent=texte;explication.hidden=!texte;
+    if(texte){node.title=texte;node.setAttribute('aria-describedby',explication.id);}
+    else{node.removeAttribute('title');node.removeAttribute('aria-describedby');}
+  };
+  if(a.pret){etat();a.pret.then(()=>{pret=true;etat();}).catch(()=>{pret=true;verificationEchouee=true;a.eligible=false;etat();});}else etat();
   node.addEventListener('click',async e=>{
     if(a.href&&(e.ctrlKey||e.metaKey||e.shiftKey||e.altKey||e.button>0))return;
     e.preventDefault();if(occupe||!pret||!a.eligible)return;occupe=true;etat();
@@ -181,7 +190,9 @@ function boutonAction(a,{onResultat=()=>refresh(),fermer=()=>{},message}={}){
     }catch(e){if(message)message.textContent=texteErreurAction(e?.code,a.libelle,a);}
     finally{occupe=false;etat();if(node.isConnected&&node.closest('dialog[open]'))node.focus();}
   });
-  return node;
+  // Le bouton reste enfant d'une .stack : sa largeur dans le menu et sa cible
+  // tactile sont conservées ; le motif demeure extérieur au contrôle.
+  return el('div',{class:'stack',style:{display:'flex',flexDirection:'column',alignItems:'flex-start',maxWidth:'100%',minWidth:'0'}},node,explication);
 }
 
 export function boutonsActions(actions,ids,{onResultat}={}){
