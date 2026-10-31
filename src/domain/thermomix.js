@@ -287,6 +287,8 @@ function verifierSequence(blocs, c, securite = erreur) {
       }
       const vitesse = a.vitesse === 'mijotage' ? 0 : a.vitesse;
       const chauffe = a.mode === 'vapeur' || a.temperature !== null;
+      // Le contenu du panier reste présent même si le réglage ne cite que le bol.
+      if (['couteau', 'fouet'].includes(a.accessoire) && (contenu.panier.size || eau.panier > 0)) securite('capacite');
       const recipients = a.accessoire === 'panier_varoma' ? ['bol', 'panier', 'varoma'] :
         a.accessoire === 'panier' ? ['bol', 'panier'] : a.accessoire === 'varoma' ? ['bol', 'varoma'] : ['bol'];
       if (recipients.some(n => !connu[n])) erreur('contenu_non_etabli');

@@ -34,6 +34,13 @@ export async function runCorrectifsThermomixSecuriteTests({ eq, ok }) {
   eq(valide(deplace, contexte(source)), null, 'Sécurité : le liquide réservé ne reste pas compté dans le bol');
   const c = contexte(sourceThermomix(), { eau_vapeur_g: 500, froid_confirme: ['s1', 's2'] }, ['s1', 's2']);
   const vapeur = reglage({ mode: 'vapeur', temperature: null, accessoire: 'varoma', secondes: 900 });
+  const vapeurUnique = vitesse => resultat([bloc('s1', [prep(['i1', 'i2'], 'varoma'), { ...vapeur, vitesse }])]);
+  const cVapeur = contexte(sourceThermomix(), { eau_vapeur_g: 600, froid_confirme: ['s1'] });
+  eq(valide(vapeurUnique(3), cVapeur), 'vitesse', 'Sécurité : vapeur à vitesse 3 atteint la garde de vitesse');
+  eq(valide(vapeurUnique(2), cVapeur), null, 'Sécurité : vapeur à vitesse 2, voisin accepté');
+  const varomaManuel = vapeurUnique(1); varomaManuel.blocs[0].actions[1].mode = 'manuel';
+  eq(valide(varomaManuel, cVapeur), 'accessoire', 'Sécurité : Varoma hors vapeur atteint la garde accessoire');
+  eq(valide(vapeurUnique(1), cVapeur), null, 'Sécurité : même Varoma en vapeur, voisin accepté');
   const deux = resultat([bloc('s1', [prep(['i1', 'i2'], 'varoma'), vapeur]), bloc('s2', [vapeur])]);
   eq(valide(deux, c), null, 'Sécurité : 30 min de vapeur, contenu établi, témoin accepté');
   const trop = clone(deux); trop.blocs[1].actions[0].secondes = 901;
@@ -46,13 +53,35 @@ export async function runCorrectifsThermomixSecuriteTests({ eq, ok }) {
   eq(valide(vapeurBol, contexte(limite, { eau_vapeur_g: 500 })), 'capacite', 'Sécurité : eau vapeur comprise dans le total du bol');
   const faible = clone(limite); faible.ingredients[0] = liquide('a', 'bouillon', .2);
   const suiteEau = resultat([bloc('s1', [prep(['i1', 'i2']), vapeur, vapeur])]);
-  eq(valide(suiteEau, contexte(faible, { eau_vapeur_g: 500 })), null, 'Sécurité : la même eau vapeur ne se cumule pas à chaque réglage');
+  eq(valide(suiteEau, contexte(faible, { eau_vapeur_g: 600 })), null, 'Sécurité : 1200 ml + même eau vapeur de 600 g répétée = 1800, jamais 2400');
+  const apports = { ...sourceThermomix(), ingredients: [liquide('a', 'bouillon', 1200, 'ml'), liquide('b', 'lait', 600, 'ml')] };
+  eq(valide(vapeurBol, contexte(apports, { eau_vapeur_g: 600 })), 'capacite', 'Sécurité : 1200 + 600 ml distincts + 600 g d’eau de service atteint capacité 2400');
+  const apportsLimite = clone(apports); apportsLimite.ingredients[0] = liquide('a', 'bouillon', 1000, 'ml');
+  eq(valide(vapeurBol, contexte(apportsLimite, { eau_vapeur_g: 600 })), null, 'Sécurité : apports distincts et eau au total 2200, voisin accepté');
   const transfereEau = resultat([bloc('s1', [prep(['i1', 'i2']), vapeur, prep([], 'panier', 'transvaser')])]);
   eq(valide(transfereEau, contexte(faible, { eau_vapeur_g: 500 })), 'capacite', 'Sécurité : l’eau vapeur suit le transvasement vers le panier');
   const videPuisVapeur = resultat([bloc('s1', [prep(['i1', 'i2'], 'varoma'), vapeur, prep([], 'recipient', 'transvaser'), vapeur])]);
   eq(valide(videPuisVapeur, contexte(sourceThermomix(), { eau_vapeur_g: 500 })), 'eau_vapeur', 'Sécurité : aucune eau inventée après vidange du bol entre deux vapeurs');
   const sansEau = contexte(sourceThermomix(), {}, ['s1', 's2']);
   eq(valide(deux, sansEau), 'eau_vapeur', 'Sécurité : manque eau atteint la garde dédiée avec ingrédients établis');
+  const panierCharge = { ...sourceThermomix(), ingredients: [liquide('a', 'bouillon', 300, 'ml'), liquide('b', 'lait', 400, 'ml')] };
+  const cPanier = contexte(panierCharge, { froid_confirme: ['s1'] });
+  for (const [accessoire, vitesse] of [['couteau', 10], ['fouet', 4]]) {
+    const action = reglage({ accessoire, vitesse, temperature: null, ingredients: ['i2'] });
+    const charge = resultat([bloc('s1', [prep(['i1'], 'panier'), prep(['i2']), action])]);
+    eq(valide(charge, cPanier), 'capacite', `Sécurité : ${accessoire} avec panier chargé atteint capacité sans dépassement de volume`);
+    const vide = clone(charge); vide.blocs[0].actions.splice(2, 0, prep(['i1'], 'recipient', 'reserver'));
+    eq(valide(vide, cPanier), null, `Sécurité : ${accessoire} après retrait explicite du contenu du panier, voisin accepté`);
+    const eauTransferee = cible => resultat([bloc('s1', [prep(['i1', 'i2'], 'varoma'), vapeur,
+      prep([], cible, 'transvaser'), prep(['i1', 'i2']), reglage({ accessoire, vitesse: 1, temperature: null })])]);
+    eq(valide(eauTransferee('panier'), cVapeur), 'capacite', `Sécurité : ${accessoire} avec eau seule transférée dans le panier atteint capacité`);
+    eq(valide(eauTransferee('recipient'), cVapeur), null, `Sécurité : ${accessoire} avec même eau transférée hors du panier, voisin accepté`);
+  }
+  const { fixturePanierThermomixHistorique } = await import('./fixtures/thermomix-0.23.1-panier.js');
+  const historiquePanier = T.lireThermomix(fixturePanierThermomixHistorique().version);
+  eq(historiquePanier.ok, false, 'Sécurité : ancien plan panier chargé ne prétend plus être validé');
+  eq(historiquePanier.etat, 'a_revoir', 'Sécurité : ancien plan panier chargé reste réparable');
+  eq(historiquePanier.motifs, ['capacite'], 'Sécurité : ancien plan panier chargé porte le motif capacité exact');
   const oil = { ...sourceThermomix(), ingredients: [{ id: 'huile', name_text: 'huile', quantity: { value: 20 }, unit_id: 'ml' }] };
   const huileSeule = resultat([bloc('s1', [prep(['i1']), reglage({ ingredients: ['i1'] })])]);
   eq(valide(huileSeule, contexte(oil)), 'huile_seule', 'Sécurité : huile seule atteint effectivement la garde huile');

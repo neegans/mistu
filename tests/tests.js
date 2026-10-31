@@ -733,7 +733,7 @@ try { await runAuditThermomixSeancesTests({eq,ok}); } catch (e) { ok(false, 'run
 try { await runAuditReponsesRefuseesTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesRefuseesTests : ' + (e.stack || e)); }
 try { await runAuditReponsesParcoursTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesParcoursTests : ' + (e.stack || e)); }
 try { await runAuditReponsesEcranTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesEcranTests : ' + (e.stack || e)); }
-eq(results.length, 13504,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 13521,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);
