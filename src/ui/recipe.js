@@ -277,10 +277,13 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   if (!lectureSeule) etat.insertBefore(el('div', { class: 'stack fiche-gestes', dataset: { role: 'fiche-gestes' } },
     reperes ? el('div', { class: 'reperes muted', dataset: { role: 'reperes' } }, reperes) : null,
     lienOrigine(lienFiche),
-    el('div', { class: 'geste-principal', dataset: { role: 'geste-principal' } },
+    el('div', { class: 'geste-principal lecture-actions', dataset: { role: 'geste-principal' } },
       el('button', { class: 'btn primary big block', onClick: startCooking }, t('Commencer à cuisiner')),
+      el('button', { type: 'button', class: 'btn', dataset: { role: 'lire-recette' }, onClick: () => {
+        body.focus({ preventScroll: true }); body.scrollIntoView({ block: 'start', behavior: 'instant' });
+      } }, t('Lire la recette')),
       modifierTete,menuActions(actionsCommunes,{titre:titreRecetteAffichee(),onResultat:()=> (deps.refresh??refresh)()})),
-    el('button', { type: 'button', class: 'btn', dataset: { role: 'jai-cuisine' }, onClick: async () => {
+    el('button', { type: 'button', class: 'btn link', dataset: { role: 'jai-cuisine' }, onClick: async () => {
       if (cuissonOuverte) return;
       cuissonOuverte = true;
       try { if (await ouvrirCuissonsAvecRestes([{ recipe, version, servings: state.servings }], { ...deps, ctx, repo: gestesLecture.repo, toast: dire })) (deps.refresh ?? refresh)(); }
@@ -345,7 +348,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
         dish ? el('a', { class: 'btn', href: `#/dishes/${dish.id}` }, t('Autres recettes de ce plat')) : el('button', { class: 'btn', onClick: () => modifier(attachDish) }, t('Rattacher à un plat')))));
   root.append(autresGestes);
 
-  const body = el('div', { class: 'recipe-body' }); // C-7 : overflow-wrap (styles.css)
+  const body = el('div', { class: 'recipe-body', tabindex: '-1', role: 'region', 'aria-label': t('Contenu de la recette') }); // C-7 : overflow-wrap (styles.css)
   root.append(body);
   drawBody();
   if (!lectureSeule) root.append(el('details', { class: 'photo-source-details' }, el('summary', null, t('Image de la recette')), photo.zone)); // lot F (D-F2, D-F8) : seulement quand la fiche a une version

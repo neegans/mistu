@@ -60,6 +60,7 @@ h3 { font-size: 1.15rem; }
 header.stack h1 + p.muted { font-family: var(--serif); font-size: 1.25rem; }
 /* Sur une fiche, le sous-titre est la provenance (site, livre, page) : petit, sans empattement, comme la maquette. */
 header.stack h1.titre-fiche + p.muted { font-family: var(--sans); font-size: .95rem; }
+.retour-page { display: inline-flex; align-items: center; min-height: 44px; padding-block: .4rem; }
 .btn.discret { background: transparent; border-color: transparent; padding-left: .2rem; padding-right: .2rem; color: var(--muted); min-width: 44px; justify-content: center; }
 /* Sur une fiche, l'en-tête vit dans la colonne de gauche : pas de marge propre (la pile de la colonne espace). */
 .fiche-etat > header.stack { margin-bottom: 0 !important; gap: .35rem; }
@@ -127,6 +128,7 @@ nav.tabs {
   display: flex; flex-wrap: wrap; justify-content: space-around; align-items: stretch;
   background: var(--card); border-top: 1px solid var(--line);
   padding-bottom: var(--safe-b); height: auto;
+  -webkit-tap-highlight-color: var(--tap);
 }
 nav.tabs a {
   flex: 1 1 auto; min-width: max-content; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -198,6 +200,10 @@ aside.sidenav { display: none; }
 .card.carte p { margin: 0; font-size: .9rem; }
 /* Lot UI-1 « Carnet » (D-UI-9) : l'icône au trait d'une carte d'action — un svg 24 × 24 en currentColor (icones.js), agrandi à la taille de l'émoji d'avant. */
 .card.carte .carte-ico svg { width: 2rem; height: 2rem; }
+.ajouter-choix .carte { display: grid; grid-template-columns: 2rem minmax(0, 1fr); column-gap: .85rem; row-gap: .25rem; align-content: center; margin-bottom: 0; box-shadow: none; }
+.ajouter-choix .carte-ico { grid-row: 1 / span 2; color: var(--action); align-self: start; }
+.ajouter-choix .carte h3 { margin: 0; font-size: 1.2rem; }
+.ajouter-choix .carte p { grid-column: 2; line-height: 1.45; }
 .card h2, .card h3 { margin-top: 0; }
 /* § 3.2 : les sections (section.card et section.plain) sont espacées de 1,6 rem ; la règle .card elle-même ne change pas (R-VIS-14 : un div.card garde ses .9 rem). */
 section.card { margin-bottom: 1.6rem; }
@@ -307,6 +313,8 @@ label.check { display: inline-flex; gap: .45rem; align-items: center; font-size:
 /* Lot UI-1 « Carnet » (§ 4.4) : la barre d'Aujourd'hui vit sur le papier, sous le pageHeader, ses puces d'exemple dessous (espacement de section, § 3.2) ;
    une cuisson = sa carte-plat puis, HORS du lien, la date et « Refaire comme la dernière fois » (H-16) ; la carte s'étire pour aligner les rangées. */
 .recherche-accueil { margin-bottom: 1.6rem; }
+.recherche-accueil .search-bar { flex-wrap: wrap; }
+.recherche-accueil .search-bar input { flex: 1 1 12rem; min-width: min(100%, 12rem); max-width: 100%; }
 .cellule-cuisson { display: flex; flex-direction: column; gap: .4rem; }
 .cellule-cuisson > .carte-plat { flex: 1; }
 .cellule-cuisson .cuisson-date { font-size: .85rem; }
@@ -463,6 +471,15 @@ table.compare th { color: var(--green); background: var(--cream-2); }
 .geste-principal { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .6rem; }
 .geste-principal > .btn.block { width: auto; }
 .geste-principal > .btn.block:only-child { grid-column: 1 / -1; }
+.geste-principal.lecture-actions { display: flex; flex-wrap: wrap; align-items: stretch; }
+.lecture-actions > * { flex: 1 1 5rem; }
+.lecture-actions > .btn.primary { flex-basis: 100%; justify-content: center; }
+.lecture-actions > .btn, .lecture-actions > .actions-directes > .stack > .btn { min-width: 0; width: 100%; justify-content: center; text-align: center; padding-inline: .5rem; }
+.lecture-actions > .actions-directes { display: flex; align-items: stretch; gap: 0; }
+.lecture-actions > .actions-directes > .stack { width: 100%; }
+.lecture-actions > .actions-directes > p { margin: 0; }
+.lecture-actions > .actions-directes > p:not(:empty) { margin-top: .4rem; }
+.recipe-body { scroll-margin-top: calc(var(--topbar-h) + .75rem); }
 /* D-UI-10 : la flèche de « Voir la page d’origine » vit dans la feuille, hors du texte du lien. */
 a[data-role="ouvrir-lien"]::after { content: " ↗"; }
 details[data-role="autres-gestes"] { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: .3rem 0; margin-bottom: 1.6rem; }
@@ -599,6 +616,9 @@ details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
 .fiche-photo .photo-visible, .fiche-photo .photo-plat img { width: min(100%, 380px); aspect-ratio: 1; object-fit: cover; }
 .photo-source-details { margin: 1rem 0; }
 .mode-cuisine .cook { display: block; max-width: 850px; margin: auto; }
+.cuisine-options { border-block: 1px solid var(--line); margin-block: .75rem; }
+.cuisine-options > summary { min-height: 44px; padding-block: .6rem; color: var(--action); cursor: pointer; }
+.cuisine-options[open] { padding-bottom: .75rem; }
 .mode-cuisine .step-big { min-height: 170px; font-size: clamp(1.25rem, 4vw, 1.6rem); line-height: 1.5; }
 .ingredients-cuisine, .photo-cuisine { border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem 1rem; background: var(--card); }
 .ingredients-cuisine > summary, .photo-cuisine > summary { min-height: 44px; align-content: center; }
@@ -647,7 +667,14 @@ details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
   .bibliotheque-resultats .grille-plats { grid-template-columns: minmax(0, 1fr); }
   .bibliotheque-commandes { align-items: stretch; }
   .bibliotheque-commandes > label { flex: 1 1 10rem; }
-  .bibliotheque-resultats .carte-plat h3, .bibliotheque-liste .recette-ligne-texte > .titre { font-size: 1.6rem; }
+  .bibliotheque-resultats .carte-plat { display: flex; flex-direction: row; flex-wrap: wrap; gap: .85rem; padding-block: .8rem; border-top: 1px solid var(--line); }
+  .bibliotheque-resultats .carte-plat .carte-photo { width: 88px; height: 88px; flex: 0 0 88px; aspect-ratio: 1; border-radius: var(--radius-btn); }
+  .bibliotheque-resultats .carte-plat .carte-photo:has(> small) { width: 100%; height: auto; flex-basis: 100%; aspect-ratio: auto; }
+  .bibliotheque-resultats .carte-plat-corps { flex: 1 1 10rem; }
+  .bibliotheque-resultats .carte-plat.sans-photo .carte-plat-corps { min-height: 0; padding: .75rem; }
+  .bibliotheque-resultats .carte-plat h3, .bibliotheque-liste .recette-ligne-texte > .titre { font-size: 1.25rem; line-height: 1.3; }
+  .bibliotheque-resultats .carte-plat-actions { padding-top: .25rem; }
+  .bibliotheque-resultats .carte-plat-source { font-size: .85rem; }
 }
 .filtres-livre { gap: .35rem; }
 .filtres-livre .btn { border: 0; background: transparent; border-radius: 99px; font-weight: 400; padding-inline: .5rem; }
@@ -669,7 +696,20 @@ details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
   .fiche-photo .photo-visible, .fiche-photo .photo-plat img { width: min(100%, 260px); }
   .fiche-photo { justify-self: center; text-align: center; }
   .fiche-etat .resume-reperes .description-recette { font-size: 1rem; }
+  .accueil-page > header h1 { font-size: clamp(1.65rem, 7vw, 2rem); line-height: 1.15; text-wrap: balance; }
+  header.stack h1 + p.muted { font-family: var(--sans); font-size: 1rem; line-height: 1.5; }
+  .mode-cuisine > .row h1, .mode-cuisine h1 { font-size: 1.75rem; line-height: 1.2; }
+  .mode-cuisine .cuisine-entete { gap: .5rem; }
+  .mode-cuisine .cuisine-entete h1 { margin-bottom: .25rem; }
+  .mode-cuisine [data-role="avant-de-commencer"] { padding: .65rem .85rem; }
+  .mode-cuisine [data-role="avant-de-commencer"] > ul { margin-block: .35rem; padding-left: 1.25rem; }
+  .mode-cuisine .ingredients-cuisine { padding: .4rem .8rem; }
+  .mode-cuisine .cuisine-contenu { gap: .75rem; margin-block: .75rem; }
+  .ajouter-choix { gap: .65rem; }
+  .ajouter-choix .carte { padding: .85rem; }
+  .recherche-accueil button.chip { min-height: 44px; text-align: left; }
 }
+.livre-ajout input[name="title"] { scroll-margin-top: calc(var(--topbar-h) + 2.5rem); }
 @media (min-width: 760px) { .reperes-comparaison { grid-template-columns: 1fr 1fr; } }
 @media (min-width: 900px) { .navigation-cuisine { bottom: 0; } }
 .progress { height: 6px; background: var(--cream-2); border-radius: 3px; overflow: hidden; }

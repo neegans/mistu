@@ -70,7 +70,7 @@ async function resumeBrouillons(ctx, depot, estCourante) {
 // module sert. T5 ronde 1 : Redécouvrir écrit par ce MÊME sac (rediscoverCard), jamais par le module en dehors de lui.
 const heureLocale = () => Date.now();
 export async function renderHome(params, query, ctx, { repo: depot = repo, service: serviceInjecte, maintenant = heureLocale } = {}) {
-  const root = el('div', null);
+  const root = el('div', { class: 'accueil-page' });
   let dispose = false; const generation = getSyncGeneration(), base = depot.db;
   const estCourante = () => !dispose && getSyncGeneration() === generation && depot.db === base;
   root.dispose = () => { dispose = true; };
@@ -81,7 +81,7 @@ export async function renderHome(params, query, ctx, { repo: depot = repo, servi
     el('div', { class: 'recherche-accueil stack' },
       el('div', { class: 'search-bar' }, input, el('button', { class: 'btn primary', onClick: go }, t('Chercher'))),
       el('div', { class: 'chips' },
-        ...['saumon fenouil', 'salade concombre sans gluten 15 minutes', 'soupe rapide', 'puttanesca'].map((ex) => el('span', { class: 'chip clickable', onClick: () => { input.value = ex; go(); } }, ex)))));
+        ...['saumon fenouil', 'salade concombre sans gluten 15 minutes', 'soupe rapide', 'puttanesca'].map((ex) => el('button', { type: 'button', class: 'chip clickable', onClick: () => { input.value = ex; go(); } }, ex)))));
 
   // Reprendre ma recette
   const active = ctx.cook_sessions.filter((s) => s.status === 'active').sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));

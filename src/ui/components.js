@@ -28,7 +28,7 @@ import { lienAvecOrigine } from './navigation-contexte.js';
 // titre de PAGE. `back` reste un objet { href, label } (H-1). Rien d'autre ne change.
 export function pageHeader(title, { subtitle = null, actions = [], back = null, classeTitre = null } = {}) {
   return el('header', { class: 'stack', style: { marginBottom: '1rem' } },
-    back ? el('a', { href: `#${back.href}`, class: 'muted', style: { textDecoration: 'none', fontSize: '.9rem' } }, `← ${back.label}`) : null,
+    back ? el('a', { href: `#${back.href}`, class: 'muted retour-page', style: { textDecoration: 'none', fontSize: '.9rem' } }, `← ${back.label}`) : null,
     el('div', { class: 'row between top' },
       el('div', null, el('h1', { class: classeTitre }, title), subtitle ? el('p', { class: 'muted' }, subtitle) : null),
       actions.length ? el('div', { class: 'row' }, ...actions) : null));

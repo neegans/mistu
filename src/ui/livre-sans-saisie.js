@@ -161,7 +161,11 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
   const start = el('section', { class: 'card stack' }, field(t('ISBN'), isbnInput), isbnProvenance,
     el('p', { class: 'muted' }, t('Si le catalogue ne trouve pas l’édition, la recherche Internet utilise 1 appel de ton quota.')),
     el('div', { class: 'row' }, action(t('Identifier'), 'identifier-livre', () => identifier(), true), action(t('Scanner le code-barres'), 'scanner-livre', () => scanner()),
-      action(t('Saisir à la main'), 'saisir-livre', async () => { fieldsZone.hidden = false; await persist(); })),
+      action(t('Saisir à la main'), 'saisir-livre', async () => {
+        fieldsZone.hidden = false;
+        const titre = inputs.get('title'); titre.focus({ preventScroll: true }); titre.scrollIntoView({ block: 'start' });
+        await persist();
+      })),
     el('p', { class: 'muted' }, t('Couverture, quatrième de couverture ou page de titre : jusqu’à 2 appels de ton quota.')),
     el('div', { class: 'row' }, action(t('Photographier la couverture'), 'photo-livre', () => choisirPhoto('environment', true)), action(t('Choisir une image'), 'image-livre', () => choisirPhoto(null, true))));
   const cancel = action(t('Annuler'), 'annuler-livre', () => { generation++; controller?.abort(); message(t('Recherche annulée. Ton brouillon est conservé.')); });

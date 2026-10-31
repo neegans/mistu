@@ -48,7 +48,7 @@ export function grilleModel() {
 // Une carte sans geste câblé n'est pas rendue (même garde que la porte d'entrée). Un nom d'icône inconnu LÈVE (icone) : jamais une carte sans pictogramme
 // en silence.
 export function renderGrille(model, gestes = {}) {
-  return el('div', { class: 'grid wide' },
+  return el('div', { class: 'grid wide ajouter-choix' },
     ...model.cartes.filter((c) => typeof gestes[c.action] === 'function').map((c) => carte(icone(c.ico), c.titre, c.sousTitre, () => gestes[c.action]())));
 }
 

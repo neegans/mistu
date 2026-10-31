@@ -1,3 +1,6 @@
+import {runConfortLectureTests} from './confort-lecture.js';
+import {runConfortEntreesTests} from './confort-entrees.js';
+import {runConfortCuisineTests} from './confort-cuisine.js';
 import {runAuditReponsesRefuseesTests} from './audit-reponses-refusees.js';
 import {runAuditReponsesParcoursTests} from './audit-reponses-parcours.js';
 import {runAuditReponsesEcranTests} from './audit-reponses-ecran.js';
@@ -498,6 +501,12 @@ try { await runL6LectureRecetteTests({ eq, ok }); }
 catch (e) { ok(false, 'L6 lecture-recette : ' + (e.stack || e)); }
 try { await runCorrectifLangueRecetteTests({ eq, ok }); }
 catch (e) { ok(false, 'Correctif langue recette : ' + (e.stack || e)); }
+try { await runConfortLectureTests({ eq, ok }); }
+catch (e) { ok(false, 'Confort lecture : ' + (e.stack || e)); }
+try { await runConfortEntreesTests({ eq, ok }); }
+catch (e) { ok(false, 'Confort entrées : ' + (e.stack || e)); }
+try { await runConfortCuisineTests({ eq, ok }); }
+catch (e) { ok(false, 'Confort cuisine : ' + (e.stack || e)); }
 try { await runFicheLisibleTests({ eq, ok }); }
 catch (e) { ok(false, 'Fiche lisible : ' + (e.stack || e)); }
 try { await runFicheLisibleComposantsTests({ eq, ok }); }
@@ -787,7 +796,7 @@ try { await runAuditImportRouteTests({eq,ok}); } catch (e) { ok(false, 'runAudit
 
 try { await runAuditRepoAbsenceTests({eq,ok}); } catch (e) { ok(false, 'runAuditRepoAbsenceTests : ' + (e.stack || e)); }
 
-eq(results.length, 14876,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 14962,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

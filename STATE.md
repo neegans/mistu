@@ -1,4 +1,10 @@
-# STATE.md — Mistu — 31 octobre 2026 — CORRECTIFS PHOTO ; PUBLIC 0.32.10-1
+# STATE.md — Mistu — 31 octobre 2026 — CONFORT MOBILE ; PUBLIC 0.32.10-1
+
+**Confort de lecture mobile — réception locale terminée, publication en préparation.** Captures réelles avant/après de huit écrans, puis ajustements : bibliothèque compacte, six choix d’ajout visibles, exemples de recherche au clavier, focus de saisie manuelle, accès direct à la lecture et options de cuisson repliées. Identité crème/olive conservée. [Comparatif avec17 captures](docs/audits/2026-10-31-confort-mobile.md) · [Réception](docs/superpowers/plans/2026-10-31-confort-lecture-mobile-reception.md).
+
+**14963/14963** navigateur local (+86), **281/281** outils Node et **29/29** outils CI. Suite complète sous0.32.11-3 ; dernière retouche CSS sous0.32.11-4 contrôlée par lecture20/20, thème81/81 et parcours11/11. Captures320/390/1280, FR/EN, texte200%, clavier ; aucun compte privé ou appel payé. APP_VERSION0.32.11, livraison0.32.11-4, DB6/archive7 inchangés. Aucun essai physique iPhone/PWA ou VoiceOver revendiqué. Réception publique et CI du commit final à compléter.
+
+## Livraison précédente : photos mobiles
 
 **Photos mobiles — correctif0.32.10-1 publié et reçu.** Code`bae0c5b`, Pages confirmé à19:01:44UTC (15h01HAE). **451/451 fichiers publics conformes** ; **35/35 contrôles publics**, sept JPEG conservés puis relus après vraie recharge hors ligne. CI du code publié verte :281/281 outils Node,29/29 outils CI et14877/14877 navigateur ; job terminé à19:06:15UTC. Annuler puis reprendre une photo libère les boutons du livre, de la séance de pages et du bilan. La première couverture est conservée avec son brouillon dans une transaction ; après une panne d’écriture, elle reste disponible sur l’écran avec un réessai explicite. Une deuxième sélection annulée n’efface pas cette photo en attente. L’aide du choix des pages est séparée de ses libellés.
 

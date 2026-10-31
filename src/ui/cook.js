@@ -53,12 +53,13 @@ export async function renderCook(params,query,ctx,deps={}){
  const entete=el('div',{class:'cuisine-entete'},titre,el('div',{class:'row'},terminer,fiche));
  const avertissements=el('div',{class:'stack',dataset:{role:'avertissements-cuisine'}}),onglets=el('div',{class:'row cuisine-recettes',role:'group','aria-label':t('Recette active')});
  const outils=el('div',{class:'row cuisine-outils'},langueChoix),contenu=el('div',{class:'cuisine-contenu'}),navigation=el('div',{class:'controls cuisine-navigation navigation-cuisine'}),photoHote=el('div');
+ const options=el('details',{class:'cuisine-options',dataset:{role:'options-cuisson'}},el('summary',null,t('Options de cuisson')),onglets,outils);
  panneau=(deps.creerPanneauMinuteurs??creerPanneauMinuteurs)({sessionId:params.id,ctx,service,portee,estCourante});panneau.classList.add('cuisine-minuteurs');
  comparaisons=creerPanneauComparaisonCuisine({sessionId:params.id,ctx,repo:depot,getGeneration:getSyncGeneration,estCourante,onConserve:actualiser});
  ecran=(deps.creerControleurEcran??creerControleurEcran)({document:deps.document??document,wakeLock:deps.wakeLock??globalThis.navigator?.wakeLock,estCourante});
  commandeEcran=(deps.creerCommandeEcranAllume??creerCommandeEcranAllume)({controleur:ecran});outils.append(commandeEcran);
  voix=(deps.creerControleurVoix??creerControleurVoix)({speechSynthesis:deps.speechSynthesis??globalThis.speechSynthesis,SpeechSynthesisUtterance:deps.SpeechSynthesisUtterance??globalThis.SpeechSynthesisUtterance,estCourante});
- root.append(entete,onglets,outils,etat,avertissements,reprise,contenu,navigation,panneau,comparaisons,photoHote);
+ root.append(entete,options,etat,avertissements,reprise,contenu,navigation,panneau,comparaisons,photoHote);
  const ctxF=await contexteFichiers(ctx),photos=photosPersonnellesParRecette(ctx.cook_history||[]);let fichiers=new Map();
  const initiale=await service.lireSession({portee,sessionId:params.id});
  if(initiale.issue!=='ok'||!estCourante()){signaler(initiale);terminer.disabled=true;fiche.hidden=true;await sortiesErreur(portee,connexion);return root;}
@@ -147,6 +148,7 @@ export async function renderCook(params,query,ctx,deps={}){
  async function geste(type,valeurs,{focus=false}={}){
   if(type==='selection'&&occupe&&!bilanOuvert&&estCourante()){selectionEnAttente={...valeurs};return;}
   if(occupe||bilanOuvert||!estCourante()||projection?.etat!=='active')return;
+  const controleInitial=document.activeElement,focusOption=type==='langue'&&langueChoix.contains(controleInitial)||type==='selection'&&onglets.contains(controleInitial);
   const avant=lecture,versionCapturee=projection.active_version_id;occupe=true;etat.hidden=true;verrouiller();voix.arreter();
   try{
    const methode=type==='selection'?'preparerSelection':type==='langue'?'preparerLangue':'preparerProgression';
@@ -159,7 +161,12 @@ export async function renderCook(params,query,ctx,deps={}){
    await recevoir(resultat);
    if(focus&&(type==='selection'||projection.active_version_id===versionCapturee))contenu.querySelector('[data-role=titre-etape]')?.focus({preventScroll:true});
   }catch{if(estCourante())signaler({},type);}
-  finally{occupe=false;if(estCourante()){verrouiller();if(selectionEnAttente){const suivante=selectionEnAttente;selectionEnAttente=null;geste('selection',suivante,{focus:true});}else if(relireEnsuite){relireEnsuite=false;actualiser();}}}
+  finally{occupe=false;if(estCourante()){verrouiller();
+   if(focusOption&&root.isConnected&&options.open&&(document.activeElement===document.body||document.activeElement===controleInitial)){
+    const cible=type==='langue'?controleInitial:[...onglets.querySelectorAll('button[data-version-id]')].find(b=>b.dataset.versionId===controleInitial.dataset.versionId);
+    if(cible?.isConnected&&!cible.disabled)cible.focus({preventScroll:true});
+   }
+   if(selectionEnAttente){const suivante=selectionEnAttente;selectionEnAttente=null;geste('selection',suivante,{focus:true});}else if(relireEnsuite){relireEnsuite=false;actualiser();}}}
  }
  function verrouiller(){const ferme=bilanOuvert||!estCourante()||projection?.etat!=='active',bloque=occupe||ferme;for(const b of root.querySelectorAll('[data-mutation-cuisine]'))b.disabled=(b.dataset.actionCuisine==='selection'?ferme:bloque)||b.dataset.interdit==='true';terminer.disabled=bloque||items.some(it=>!it.version||!it.recipe||!it.projection?.execution_autorisee);for(const b of langueChoix.querySelectorAll('button'))b.disabled=bloque;}
  // Clé d’affichage seulement : les valeurs héritées undefined ne sont jamais réécrites.
