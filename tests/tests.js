@@ -17,6 +17,7 @@ import {runAuditReperesDemandeTests} from './audit-reperes-demande.js';
 import {runAuditReperesSaisieTests} from './audit-reperes-saisie.js';
 import {runAuditReperesValidationTests} from './audit-reperes-validation.js';
 import {runAuditPhotosRemplacementTests} from './audit-photos-remplacement.js';
+import {runAuditAccueilTests} from './audit-accueil.js';
 import {runAuditArchiveRetraitTests} from './audit-archive-retrait.js';
 import {runAuditArchiveFichesInvalidesTests} from './audit-archive-fiches-invalides.js';
 import {runAuditArchiveExclusionsUITests} from './audit-archive-exclusions-ui.js';
@@ -744,10 +745,11 @@ try { await runAuditReperesDemandeTests({eq,ok}); } catch (e) { ok(false, 'runAu
 try { await runAuditReperesSaisieTests({eq,ok}); } catch (e) { ok(false, 'runAuditReperesSaisieTests : ' + (e.stack || e)); }
 try { await runAuditReperesValidationTests({eq,ok}); } catch (e) { ok(false, 'runAuditReperesValidationTests : ' + (e.stack || e)); }
 try { await runAuditPhotosRemplacementTests({eq,ok}); } catch (e) { ok(false, 'runAuditPhotosRemplacementTests : ' + (e.stack || e)); }
+try { await runAuditAccueilTests({eq,ok}); } catch (e) { ok(false, 'runAuditAccueilTests : ' + (e.stack || e)); }
 try { await runAuditReponsesRefuseesTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesRefuseesTests : ' + (e.stack || e)); }
 try { await runAuditReponsesParcoursTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesParcoursTests : ' + (e.stack || e)); }
 try { await runAuditReponsesEcranTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesEcranTests : ' + (e.stack || e)); }
-eq(results.length, 14032,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 14073,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

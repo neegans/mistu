@@ -2379,4 +2379,13 @@ export const EN = {
   "Recherche de mise à jour…": "Checking for an update…",
   "Recherche terminée.": "Check complete.",
   "Impossible de rechercher une mise à jour pour le moment. Réessaie.": "Could not check for an update right now. Try again.",
+  "Prochain repas": "Next meal",
+  "Repas sans titre": "Untitled meal",
+  "Heure non précisée": "Time not specified",
+  "Courses du jour": "Groceries for today",
+  "Brouillons sur cet appareil": "Drafts on this device",
+  "1 brouillon": "1 draft",
+  "{n} brouillons": "{n} drafts",
+  "Voir les brouillons": "View drafts",
+  "Import interrompu": "Interrupted import",
 };

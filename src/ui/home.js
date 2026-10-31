@@ -23,6 +23,48 @@ import { getClockOffset } from '../sync/clock.js';
 import { getSyncGeneration } from './state.js';
 import { projeterLotInventaire } from '../domain/inventaire-persistance.js';
 import { quantiteInventaire, dateLotInventaire } from './inventaire-texte.js';
+import { jourRepas } from '../domain/repas-courses.js';
+import { lignesImports } from '../domain/import-cible.js';
+import { creerServiceBrouillons } from '../domain/brouillons-editeur.js';
+import { creerDepotTraductions } from '../domain/depot-traductions.js';
+
+const titreRepas = repas => repas.title || t('Repas sans titre');
+const comparerTitres = (a, b) => (a.title || '').localeCompare(b.title || '') || a.id.localeCompare(b.id);
+const comparerRepas = (a, b) => a.jour.localeCompare(b.jour)
+  || (a.instant === null ? 0 : 1) - (b.instant === null ? 0 : 1)
+  || (a.instant ?? 0) - (b.instant ?? 0) || comparerTitres(a.repas, b.repas);
+function sectionAccueil(role, titre, ...contenu) {
+  const section = sectionPlain(titre, ...contenu); section.dataset.role = role; return section;
+}
+const autreContexte = r => ['contexte_change', 'compte_change', 'bibliotheque_remplacee'].includes(r?.raison);
+const avertissementBrouillons = () => el('p', { role: 'status', class: 'status warn' }, t('La liste des brouillons n’a pas pu être lue. Recharge cette page pour réessayer.'));
+async function resumeBrouillons(ctx, depot, estCourante) {
+  // Comme Ajouter, lire les deux dépôts sous leur portée ; aucun comptage de clés brutes.
+  if (typeof depot.muterEditeur !== 'function') return null;
+  try {
+    const owner_id = Object.hasOwn(ctx, 'proprietaireDonnees') ? ctx.proprietaireDonnees : (await depot.get('sync_state', 'user_id'))?.value ?? null;
+    const service = creerServiceBrouillons({ repo: depot, getGeneration: getSyncGeneration });
+    const services = [service];
+    if (typeof depot.muterTraductions === 'function') services.push(creerDepotTraductions({ repo: depot, getGeneration: getSyncGeneration }));
+    const captures = await Promise.all(services.map(s => s.capturerPortee({ owner_id, estCourante })));
+    if (!estCourante() || captures.some(autreContexte)) return null;
+    const lectures = await Promise.all(services.map((s, i) => captures[i].issue === 'ok'
+      ? s.listerBrouillons({ portee: captures[i].portee, inclureDetaches: true }) : captures[i]));
+    if (!estCourante() || lectures.some(autreContexte)) return null;
+    // Relire la portée après les résumés : base/génération seules ne voient pas un
+    // remplacement durable du compte ou de la bibliothèque dans le même onglet.
+    const finale = await service.capturerPortee({ owner_id, estCourante });
+    if (!estCourante() || autreContexte(finale)) return null;
+    if (finale.issue !== 'ok') return avertissementBrouillons();
+    if (captures.some(c => c.issue === 'ok' && (c.portee.database_name !== finale.portee.database_name || c.portee.library_epoch !== finale.portee.library_epoch))) return null;
+    const incomplet = lectures.some(r => r.issue !== 'ok');
+    const nombre = lectures.reduce((n, r) => n + (r.issue === 'ok' ? r.brouillons.length : 0), 0);
+    if (!nombre) return incomplet ? avertissementBrouillons() : null;
+    return sectionAccueil('brouillons-accueil', t('Brouillons sur cet appareil'),
+      incomplet ? avertissementBrouillons() : el('p', null, nombre === 1 ? t('1 brouillon') : t('{n} brouillons', { n: nombre })),
+      el('a', { class: 'btn small', href: '#/add?section=brouillons' }, t('Voir les brouillons')));
+  } catch { return estCourante() ? avertissementBrouillons() : null; }
+}
 
 // `deps.repo` : le sac injecté des routes (la suite y compte la passe getFiles) ; l'app ne passe rien (route('/', renderHome) : trois arguments) et le
 // module sert. T5 ronde 1 : Redécouvrir écrit par ce MÊME sac (rediscoverCard), jamais par le module en dehors de lui.
@@ -67,6 +109,24 @@ export async function renderHome(params, query, ctx, { repo: depot = repo, servi
     if (estCourante()) root.append(sectionPlain(t('Reprendre ma recette'), ...cartes));
   }
   if (lectureSuivisImpossible && estCourante()) root.append(el('p', { class: 'status warn' }, t('Les suivis de durée n’ont pas pu être relus. Ouvre ta séance pour réessayer.')));
+
+  // Les repas et les courses suivent le jour civil local, sans inventer d'heure.
+  const instantAccueil = maintenant(), jourAccueil = jourRepas({ serve_at: new Date(instantAccueil).toISOString() });
+  const repasDates = (ctx.meals || []).filter(m => !m.archived_at).map(repas => ({ repas, jour: jourRepas(repas), instant: repas.serve_at ? Date.parse(repas.serve_at) : null })).filter(m => m.jour);
+  const prochain = repasDates.filter(m => m.jour >= jourAccueil && (m.instant === null || m.instant >= instantAccueil)).sort(comparerRepas)[0];
+  if (prochain && estCourante()) root.append(sectionAccueil('prochain-repas', t('Prochain repas'),
+    el('a', { class: 'item-link card flat', href: `#/meals/${encodeURIComponent(prochain.repas.id)}` },
+      el('strong', null, titreRepas(prochain.repas)), el('p', { class: 'muted' }, prochain.instant === null
+        ? `${formatDate(prochain.jour)} · ${t('Heure non précisée')}` : formatDate(prochain.repas.serve_at, { withTime: true })))));
+  const repasDuJour = new Map(repasDates.filter(m => m.jour === jourAccueil).map(m => [m.repas.id, m]));
+  const listesDuJour = (ctx.shopping_lists || []).filter(l => repasDuJour.has(l.meal_id)).sort((a, b) => comparerRepas(repasDuJour.get(a.meal_id), repasDuJour.get(b.meal_id)) || comparerTitres(a, b));
+  if (listesDuJour.length && estCourante()) root.append(sectionAccueil('courses-du-jour', t('Courses du jour'),
+    ...listesDuJour.map(l => el('a', { class: 'item-link card flat', href: `#/lists/${encodeURIComponent(l.id)}` },
+      el('strong', null, l.title || t('Courses')), el('p', { class: 'muted' }, titreRepas(repasDuJour.get(l.meal_id).repas))))));
+  const brouillons = await resumeBrouillons(ctx, depot, estCourante);
+  if (brouillons && estCourante()) root.append(brouillons);
+  if (estCourante() && lignesImports(ctx).some(l => l.etat === 'echec' && l.raison === 'interrompu')) root.append(sectionAccueil('import-interrompu', t('Import interrompu'),
+    el('a', { class: 'btn small', href: '#/add?section=imports' }, t('Voir les imports'))));
 
   // Redécouvrir
   if (ctx.settings.rediscover_enabled) root.append(await rediscoverCard(ctx, query, depot));

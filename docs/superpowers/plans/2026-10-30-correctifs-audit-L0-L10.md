@@ -180,7 +180,7 @@
 
 **Fichiers :** `src/ui/home.js`, `src/ui/actions-contenu.js:171`, `src/ui/corbeille.js:57-67`, `src/ui/cook.js:56`, `src/ui/settings.js:93,224,290-291,914-940,1138-1193`, `src/ui/kitchen.js:12,22`, `src/ui/coquille.js:14`, `src/app.js` (`/import` nu), `src/i18n/en.js`, `tests/ajouter.js` ; tests `tests/l3-navigation.js`, `tests/l9-*.js`, `tests/i2-*.js`. Lentille : `docs/audits/…/lentilles/produit.md`.
 
-- [ ] **11.1 Accueil** : test rouge → `renderHome` montre, quand ils existent, « Prochain repas » (le premier `meals` à venir, lien `/meals/:id`), « Courses » (liste du jour, lien `/lists/:id`), « Brouillons sur cet appareil » (lien vers `/add` section), « Import interrompu » (lien `/add`) ; rien de tout cela sans donnée (aucune section vide).
+- [x] **11.1 Accueil** : test rouge → `renderHome` montre, quand ils existent, « Prochain repas » (le premier `meals` à venir, lien `/meals/:id`), « Courses » (liste du jour, lien `/lists/:id`), « Brouillons sur cet appareil » (lien vers `/add` section), « Import interrompu » (lien `/add`) ; rien de tout cela sans donnée (aucune section vide).
 - [ ] **11.2 Motifs visibles** : test rouge → une action désactivée rend le motif dans un `small` sous le bouton (`data-role="motif-action"`), pas seulement en `title` ; « Vérifier la disponibilité » hors ligne affiche « Tu es hors ligne : impossible de vérifier pour l'instant. ».
 - [ ] **11.3 Cuisine en erreur** : `cook.js:56` offre « Rouvrir la séance » (`navigate` sur la même route) et « Fiche ».
 - [ ] **11.4 Conflits lisibles** : test rouge → un conflit `donnees` sur `recipes` affiche une comparaison champ par champ (titre, portions, nombre de lignes, dernière modification) des deux copies, le JSON restant sous `details` « Détails techniques ».
