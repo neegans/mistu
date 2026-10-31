@@ -190,14 +190,16 @@
 
 ### Tâche 12 : Tests, preuves et méthode
 
+Réception terminée : [reçu du lot G](2026-10-30-correctifs-audit-g-reception.md). Pour 12.3, un port libre excluant 55439/55449 protège les clusters historiques existants. Pour 12.5, les 22 « scénarios » du relevé sont précisément 22 anciens libellés de suppression, et les 54 changements sont des paires de lignes à libellé conservé ; portée expliquée dans STATE et le reçu.
+
 **Fichiers :** `tests/l1-corbeille-domaine.js:9`, `tests/l2-corbeille-domaine.js`, `tests/l5-archives.js:9`, `tests/correctifs-reperes.js:8` (≈ 109 sites), `tests/l5-index-stockage.js`, `tools/prouver.sh` (nouveau), `supabase/README.md`, `.github/workflows/ci.yml` (nouveau), `STATE.md`. Lentille : `docs/audits/…/lentilles/tests.md`.
 
 - [x] **12.1 Refus exacts** : remplacer chaque `ok(await refuse(fn))` par `eq(await motif(fn), '<code>')` avec le code réel lu dans le `throw` du code testé (`e.raison ?? e.code ?? e.message`) ; aucun total en baisse.
 - [x] **12.2 Bornes jamais atteintes** : tests rouges → 65 fragments → `too_large` ; résultat > 4 Mio → `too_large` ; `absente:true` isolée au niveau dépôt (retirer la branche de `lireCondition`, `repo.js:434`, rougit).
 - [x] **12.3 PostgreSQL jetable scripté** : `tools/prouver.sh` crée une base locale (port 55439, `L1_PROOF_LOCAL=1`), applique 0001→0014, lance tous les `tools/prover-*.mjs` et imprime un bilan ; `supabase/README.md` § « Rejouer les preuves » ; `node --test` ne change pas.
 - [x] **12.4 CI** : `.github/workflows/ci.yml` sur `pull_request` et `push` vers `main` : `node --test --test-concurrency=1 tools/*.test.mjs`, `node tools/generer-migrations.mjs --check`, `node tools/generer-livraison.mjs --check`, suite navigateur en Chromium sans tête (serveur statique + Playwright, lecture de `#out h2`, échec si ≠ « ✅ N/N »), scan `git grep -nE 'sk-ant-|sbp_|eyJ[A-Za-z0-9_-]{30,}\.'` (hors sentinelles de test). Aucun secret dans le workflow.
-- [ ] **12.5 STATE.md** : remplacer « aucun scénario retiré » par le relevé exact (127 libellés disparus, 22 scénarios `supprimerLivreVide` devenus `corbeille_requise`, 54 attentes changées) ; en tête : « Correctifs de l'audit du 30 oct. : lot A/B/… livré ».
-- [ ] **Commits** `test: …`, `ci: …`, `docs(state): …`.
+- [x] **12.5 STATE.md** : remplacer « aucun scénario retiré » par le relevé exact (127 libellés disparus, 22 scénarios `supprimerLivreVide` devenus `corbeille_requise`, 54 attentes changées) ; en tête : « Correctifs de l'audit du 30 oct. : lot A/B/… livré ».
+- [x] **Commits** `test: …`, `ci: …`, `docs(state): …`.
 
 ---
 

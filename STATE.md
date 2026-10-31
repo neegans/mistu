@@ -1,6 +1,8 @@
-# STATE.md — Mistu — 31 octobre 2026 — C EN LIGNE, D À F REÇUS, G EN COURS
+# STATE.md — Mistu — 31 octobre 2026 — A–C EN LIGNE, D–G REÇUS
 
-**Correctifs de l’audit — lot G en cours, 12.1–12.4 reçues localement.** Branche `correctifs-audit-g`, base F `dd3a9d0`. Refus précis, gardes auparavant masquées, bornes de stockage et lanceur PostgreSQL reçus. CI ajoutée : dépendances de développement isolées, scan complet, tests Node, générateurs et Chromium à versions fixes. **14561/14561 tests** (+46 depuis F), Node **281/281**, outils CI **29/29** ; PostgreSQL **30/30** et48/48 contre-contrôles. Aucun incident console inattendu, JavaScript, HTTP ou requête extérieure dans la globale finale. [Reçu G](docs/superpowers/plans/2026-10-30-correctifs-audit-g-reception.md). Livraison locale **0.32.7-1**, DB6/archive7 inchangés. **12.5 reste à terminer.** Public C0.32.3-1 ; D à G non publiés. Réception CI locale sur Mac, pas d’exécution GitHub/Ubuntu revendiquée. Aucun SQL distant, appel assistant réel ni essai physique iPhone/Safari.
+**Correctifs de l’audit du 30 octobre : lots A–C publiés ; lots D–G terminés et reçus localement.** Le plan fourni est terminé, y compris les cinq sous-tâches du lot G. Branche finale `correctifs-audit-g`, dernier code `fa2d12e`. Livraison locale **0.32.7-1**, DB 6 / archive 7 inchangés. **14561/14561 tests navigateur**, **281/281 outils Node**, **29/29 outils CI**, **30/30 prouveurs PostgreSQL** ; générateurs conformes, refus et gardes éprouvés par contre-exemples. La globale finale ne contient aucune erreur console inattendue, JavaScript, HTTP ou requête extérieure. Les dix anciennes affirmations de conservation des tests sont précisées avec la portée réelle des décomptes 127/22/54. [Reçu G complet](docs/superpowers/plans/2026-10-30-correctifs-audit-g-reception.md).
+
+**En ligne : 0.32.3-1, lot C**, main `fd84739`, manifeste public revérifié le 31 octobre. **D, E, F et G ne sont pas encore publiés.** Les paragraphes suivants conservent l’état à la date de chaque reçu. Hors du plan terminé restent notamment VIS-4 « Rapide », les points mineurs pull/cycle, les autres clés de traduction dynamiques et livraison M1–M6. La CI a été reçue localement sur Mac avec ses versions Node/Chromium fixées ; aucune exécution GitHub/Ubuntu, aucun essai physique iPhone/Safari/TM7 ni appel assistant payé n’est revendiqué. Aucun SQL distant supplémentaire depuis le lot C.
 
 **Correctifs de l’audit — lot F reçu localement, 11.1–11.6 terminées.** Branche `correctifs-audit-f`, base E `7a2156e`. Accueil enrichi, motifs visibles, reprise de cuisine, comparaison lisible des conflits, textes compréhensibles, Inventaire par défaut et marque Mistu. Les liens d’import sans séance ouvrent Ajouter avec une seule garde de sortie, sans perdre la saisie ni ajouter un retour intermédiaire. **14515/14515 tests** (+52 depuis11.5, +482 depuis E), Node **281/281**, générateurs/syntaxe conformes. Contre-parcours11.6 **44/44** ; captures FR/EN relues. Le premier échec global sur le plafond d’historique Chrome est qualifié au [reçu F](docs/superpowers/plans/2026-10-30-correctifs-audit-f-reception.md), puis corrigé dans le test avec nombre conservé. Livraison locale **0.32.6-6**, DB6/archive7 inchangés. **Le lot G reste à construire.** Public C0.32.3-1 ; D, E et F non publiés. Les autres clés dynamiques et anciennes aides EN hors périmètre restent distinctes. Aucun SQL, appel assistant réel ni essai physique iPhone/Safari.
 
@@ -23,8 +25,22 @@ APP_VERSION0.32.0, DB6/archive7 inchangés, aucun SQL. Manifeste208 fichiers /3 
 **11590/11590** tests locaux (+51), Node271/271, générateurs/syntaxe propres. **63 contrôles réels de transition** plus15 témoins : anciennes livraisons3/5 vers6, recherche Réglages et retour réseau, deux fenêtres, saisie/brouillon conservés puis reprise hors ligne. Captures relues, aucune erreur JavaScript/requête extérieure ; parcours langue24 contrôles conservé. Le premier timeout du harnais180s n’est pas compté comme réussite ; suite complète rejouée600s.
 Livraison **0.32.0-6**, APP_VERSION0.32.0/DB6/archive7 inchangés, aucun SQL. Manifeste208 fichiers /3 617 247 octets, SHA256 `3e3eae2f3622326fdb791171231160d483c0425d57638adf800f80954254be93`. Public encore0.32.0-5 à ce reçu. [Rapport](docs/superpowers/plans/2026-10-30-correctif-detection-mise-a-jour.md). Une fenêtre ancienne doit être fermée après conservation des saisies, puis l’application rouverte, pour recevoir une première fois ce détecteur.
 
+<a id="audit-tests-2026-10-30"></a>
+
+## Précision historique sur les tests audités le 30 octobre 2026
+
+Cette annotation concerne uniquement la plage `cd8c7f2..247b2e5` du [rapport d’audit](docs/audits/2026-10-30-audit-codex-L0-L10/rapport-audit.md). Les dates et totaux des reçus ci-dessous sont conservés. Une hausse nette du total ne prouve pas la conservation de chaque ancien test.
+
+Le diff `git diff cd8c7f2 247b2e5 -- tests` et l’analyse statique originale ont été reproduits lors de la préparation de G12.5. Les chiffres de la [lentille tests](docs/audits/2026-10-30-audit-codex-L0-L10/lentilles/tests.md#7-le-total-épinglé-et-les-fichiers-anciens-i) se lisent ainsi :
+
+- **127 libellés** extraits par expression régulière de lignes d’assertion supprimées ne sont pas retrouvés parmi les lignes ajoutées du même fichier. Ce relevé ne recherche ni les déplacements entre fichiers, ni les lignes inchangées, ni les équivalences de comportement.
+- **22 anciens libellés** viennent des deux blocs de suppression directe `supprimerLivreVide` dans `tests/couverture.js`. Le commit `9ec738c` remplace ce contrat par le refus `corbeille_requise` et des contrôles de conservation. Ce nombre ne désigne pas 22 scénarios indépendants exécutés.
+- **54 paires de lignes** avant/après gardent le même libellé mais changent de texte. Le changement peut porter sur la valeur attendue, le sélecteur ou le côté obtenu ; ce ne sont pas nécessairement 54 valeurs attendues modifiées, ni 54 affaiblissements démontrés.
+
+Ces décomptes portent sur le diff global, pas sur chaque lot séparément ni sur les correctifs A–G ultérieurs. Ils ne constituent pas un nouveau reçu de suite historique navigateur ou une analyse sémantique exhaustive. La revue complémentaire de STATE a relevé dix formulations à qualifier, dont deux « sans retrait » dans L3/L4 absentes du premier relevé. La version 0.21.1 de base et les trois reçus antérieurs restent hors de cette correction. Méthode et réception détaillées dans le [reçu G](docs/superpowers/plans/2026-10-30-correctifs-audit-g-reception.md).
+
 **Correctif des boutons de langue publié et reçu — livraison0.32.0-5.** Code **fbbb76c**, main promue par avance rapide ; GitHub Pages construit le30octobre à **12:17:36 UTC (08 h17 HAE)**. Français/Anglais affichent leur état et les accès traduction juste sous le sélecteur, y compris en Préparation mobile. Langue et candidate survivent aux actualisations ; changer de version enlève la candidate précédente. Préparation/coût de l’assistant avant les champs, commandes de vol selon leur état réel.
-**235 fichiers publics identiques**, empreintes/MIME conformes ; **11539/11539 tests locaux et publics**, zéro erreur JavaScript/requête extérieure ; +35 assertions sans suppression. Node271/271, générateurs/syntaxe propres. Parcours Chrome local et public **24 contrôles** chacun, ordinateur/mobile et rechargement hors ligne, captures relues ; aucun compte privé ni appel payé.
+**235 fichiers publics identiques**, empreintes/MIME conformes ; **11539/11539 tests locaux et publics**, zéro erreur JavaScript/requête extérieure ; +35 au total des assertions ([précision historique](#audit-tests-2026-10-30)). Node271/271, générateurs/syntaxe propres. Parcours Chrome local et public **24 contrôles** chacun, ordinateur/mobile et rechargement hors ligne, captures relues ; aucun compte privé ni appel payé.
 APP_VERSION0.32.0, DB6/archive7 inchangés, aucun SQL. Manifeste208 fichiers /3 608 736 octets, SHA256 `48b6b6b1cebfcc672d4ba04c6d91c676fe311679f824ac61e94f3b37e87d93b2`. [Rapport](docs/superpowers/plans/2026-10-30-correctif-langue-recette.md). Les reçus ci-dessous sont historiques.
 
 **L10 publié et reçu — version 0.32.0 en ligne.** Code final **`6532c43`**, poussé par avance rapide dans main ; GitHub Pages construit le30octobre à **07:54:24 UTC (03 h54 HAE)**. Livraison **0.32.0-3**, manifeste208 fichiers /3 605 358 octets, SHA256 `3aba9c0835db05cbafe896061a2424c0cba93b5af65df4e40ac549e761ef2d78`.
@@ -42,7 +58,7 @@ Le défaut de refresh du diagnostic découvert publiquement est fermé par un t�
 Contrat `145ccf1`, base L9 code `ed454203` / reçu `14cc996`. Revues techniques A/B/C/root ; aucune relecture personnelle attribuée à Neegan.
 Préparation d’un repas avec versions/langues/candidates exactes, notes et médias sélectionnés ; images réellement décodées, réception par moteur existant et réessai conditionné. Bilan en mémoire protégé des actualisations, sans certificat conservé après rechargement.
 Livraison immuable **0.32.0-2**, APP_VERSION **0.32.0** : manifeste généré de **208 fichiers / 3 605 171 octets**, SHA256 `500570fb449db2090cd7a43d28e0a70e90dca687a9dedbe6d3fc0bea7e83cf86`. Démarrage contrôlé avant métier, activation naturelle, conservation explicite par les gardes existantes, diagnostic expurgé.
-**11498/11498** navigateur, épingle11497 (+236 depuis L9, aucun scénario supprimé), zéro erreur JavaScript/requête extérieure ; Node **271/271**, deux générateurs `--check`0, syntaxe49 fichiers et diff propres.
+**11498/11498** navigateur, épingle11497 (+236 depuis L9, [hausse nette du total](#audit-tests-2026-10-30)), zéro erreur JavaScript/requête extérieure ; Node **271/271**, deux générateurs `--check`0, syntaxe49 fichiers et diff propres.
 Preuves Chrome : deux livraisons A/B **14 contrôles**, transition historique **14**, vraie application/démarrage/diagnostic **14**, repas hors ligne **34 contrôles/5 mesures**, présentation **24 configurations**. Captures relues ; photo, page source, note et candidate choisie conservées après rechargement réellement hors ligne.
 Volumes :123 recettes,100 pages,103 images dont trois grandes et un PDF ; archive complète restaurée et103 images décodées, copies réduites/inconnues/manques distingués dans une archive partielle. Mesures détaillées sur Apple M3 Pro au rapport, sans extrapolation au téléphone.
 **DB6/archive7 inchangés, aucun SQL L10.** Aucun compte privé, appel assistant réel ou essai physique iPhone/Safari/lecteur vocal/TM7. Les lots L0–L10 sont implémentés ; réception publique L10 encore attendue à ce reçu. E1 clos par décision documentaire, transfert Cookidoo manuel conservé. Le site public reste0.31.0 jusqu’à son reçu de publication.
@@ -58,7 +74,7 @@ E1 est clos par décision documentaire ; **L10 reste à terminer**. Les mentions
 Branche l9-confort-accessibilite, contrat36caf1f ; base L8 code9bb96ac/reçu c9b2048. Revues techniques A/B/C/root ; aucune relecture personnelle attribuée à Neegan.
 Navigation/focus/titres et chargement cohérents, lien d’évitement, groupes de boutons nommés, contraintes au clavier, dialogues nommés avec repli en ligne et conservation du focus. Barre haute/basse mesurée, retour dans le flux sur petite surface, messages au-dessus de la navigation, cibles44px et mouvement réduit.
 **0.31.0**, cache0.31.0-1, DB6/archive7 inchangés, aucun SQL nouveau ni module de production neuf. Public encore0.30.0 à ce reçu.
-**11262/11262** navigateur (épingle11261, +179 depuis L8, aucun scénario retiré), zéro erreur JavaScript/requête extérieure. Node232/232, générateur0, syntaxe36 fichiers et diff propres.
+**11262/11262** navigateur (épingle11261, +179 depuis L8, [hausse nette du total](#audit-tests-2026-10-30)), zéro erreur JavaScript/requête extérieure. Node232/232, générateur0, syntaxe36 fichiers et diff propres.
 A41 contrôles/navigation et géométrie, B62/dialogues, C68/sélecteurs, root8/lisibilité ; régressions L3/navigation45, Carnet301, Thème81 et corbeille/réponses payées conservées. Les attentes historiques de rangée fixe et tablist partiel suivent le nouveau contrat ; les montages iframe disposent leur contrôleur dans la bonne fenêtre.
 Parcours Chrome : navigation12 observations/deux onglets, dialogues20 observations/10 captures, clavier des contraintes6 ;40 configurations de lecture FR/EN320→1280/texte100–200/pastille, plus lien d’évitement, petite hauteur, message, réduction du mouvement à chaud et zoom visuel200% CDP. Captures relues.
 Cuisine8 mesures/36 gestes, photo décodée et note conservées après rechargement réellement hors ligne ; minuteurs sans remontage, API voix/Wake Lock simulées. Aucun essai physique iPhone/Safari/lecteur vocal ni certification WCAG ; zoom CDP distinct du zoom physique. Aucun compte privé ou appel assistant réel.
@@ -77,7 +93,7 @@ Parcours publics inventaire **11 mesures/33 gestes**, repas/courses **8/28** ; d
 Branche l8-repas-inventaire, contrat1c42241 ; base L7 code8fb0784/reçu f7e836a. Revues A/B/C/root ; aucune relecture personnelle attribuée à Neegan.
 Envies et jours sans heure, courses à convention conservée et révision explicite ; stock confirmé, consommation/fin/annulation conditionnées et restes liés à la cuisson exacte.
 **0.30.0**, cache0.30.0-1, DB6/archive7, SQL0013 additive avec inventory_changes1. Public encore0.29.0 à ce reçu.
-**11083/11083** navigateur (épingle11082, +430 depuis L7, aucun scénario retiré), zéro erreur JavaScript/requête extérieure ; Node232/232, générateur0, syntaxe89 fichiers et diff propres.
+**11083/11083** navigateur (épingle11082, +430 depuis L7, [hausse nette du total](#audit-tests-2026-10-30)), zéro erreur JavaScript/requête extérieure ; Node232/232, générateur0, syntaxe89 fichiers et diff propres.
 PostgreSQL UTF8 neuf0001→0013 :201 vecteurs JS/SQL,17 refus causaux/5legacy/21 anciens RPC,175 publication,26 sources,140 ACL et écriture authenticated ; bornes6JS/4SQL, réserve23500 octets sous32768.
 Concurrence35 contrôles avec deux connexions ; deux moteurs42 contrôles/15RPC, confirmation perdue/rejeu courant, refus récupéré, archive/bootstrap et deux passes sans écho. Régressions SQL antérieures21 scripts verts.
 Chrome : inventaire11 mesures/33 gestes et repas8/28, deux onglets, rechargements réellement hors ligne,14 modules en cache unique. Captures relues ; les défauts de navigation globale à texte200% sont consignés pour L9.
@@ -89,7 +105,7 @@ Aucun compte privé/appel assistant réel ni essai physique iPhone/Safari/TM7. P
 Branche `l7-cuisine-minuteurs`, base publique L6 code87855c4/reçu c5b6c08. Revues techniques A/B/C/root ; aucune relecture personnelle attribuée à Neegan.
 Deux régions ingrédients/étape, bonne version active, progrès qualifié et bilan atomique local ; suivis persistants, comparaison/récupération et demandes système explicites.
 **0.29.0** en ligne, cache0.29.0-1, DB6/archive6, migration0012 additive/cooking_persistence1 appliquée.
-**10653/10653** navigateur (épingle10652, +492 depuis L6, aucun scénario retiré), zéro erreur JavaScript/requête extérieure. Node232/232 et générateur0.
+**10653/10653** navigateur (épingle10652, +492 depuis L6, [hausse nette du total](#audit-tests-2026-10-30)), zéro erreur JavaScript/requête extérieure. Node232/232 et générateur0.
 PostgreSQL neuf0001→0012, gardes/ACL et27 contrôles de concurrence réels ; deux moteurs31 contrôles/14RPC, archive et reprise sans écho.
 Parcours Chrome8 mesures/36 gestes, deux onglets, rechargement réellement hors ligne avec note/photo et11 modules en cache unique.
 Voix/Wake Lock simulés ; aucun essai physique iPhone/Safari/TM7, aucune alarme système revendiquée ni appel assistant réel.
@@ -152,7 +168,7 @@ Formulaires structurés de recette/livre, source à côté ou bascule mobile, ci
 Publication atomique et idempotente, métadonnées sans version superflue, lignes/paragraphes/original conservés,
 réponse payée liée au journal exact, comparaison de conflits, récupération de texte et sorties protégées.
 Titre personnalisé principal dans fiches/cartes/listes/cuisine ; valeurs corrigées également utilisées dans les exports.
-**8880/8880** navigateur (épingle8879, +333 depuis L3 sans retrait), Node232/232, générateur0, syntaxe60 et diff propres.
+**8880/8880** navigateur (épingle8879, +333 depuis L3, [hausse nette du total](#audit-tests-2026-10-30)), Node232/232, générateur0, syntaxe60 et diff propres.
 Domaine129 assertions ; vrais parcours Chrome **28+12 mesures**, deux onglets, rechargement/reprise, quota,
 création hors ligne, note/photo conservées, dix nouveaux modules dans le cache unique.
 **0.26.0**, cache `cuisine-os-v0.26.0-1`, DB6/archive3 inchangées, aucun SQL nouveau.
@@ -168,7 +184,7 @@ Parcours publics **28+12 mesures**, reprise/conflits, dix modules en cache uniqu
 Poursuite et publication autorisées par « et enchaine sur le restant des lots » puis « continu ».
 Modifier/Actions visibles, grille et liste communes, filtres, sélection groupée avec résultats individuels,
 retour à la liste avec recherche/position conservées, contextes Recettes/Sources séparés ; maquettes fournies relues.
-**8547/8547** navigateur (épingle8546, +181 sans retrait), Node232/232, générateur0, syntaxe43 et diff propres.
+**8547/8547** navigateur (épingle8546, +181, [hausse nette du total](#audit-tests-2026-10-30)), Node232/232, générateur0, syntaxe43 et diff propres.
 Parcours réels :25 +16 mesures, texte200 %, deux onglets, photos/notes après rechargement hors ligne, quatre modules en cache.
 Modifier livre visible/focalisé à390/1280 ; export documentaire TM et réessai après quota corrigés après revue indépendante.
 Cible **0.25.0**, cache `cuisine-os-v0.25.0-1` ; **DB6 et archive3 inchangées, aucun SQL nouveau**.
@@ -211,7 +227,7 @@ Abandon explicite des anciens brouillons, résultats précédents récupérables
 Corrections TM en versions personnelles avec retour explicite aux étapes source ; exports documentaires des plans invalidés.
 Clôtures connues réconciliées sur réception/envoi, copies tardives consultables localement sans réouverture ; limites des anciens clients documentées.
 
-**Correctif 0.23.2 publié et vérifié.** Navigateur **7952/7952** (épingle7951, +288 depuis7664 ; aucune assertion retirée), zéro erreur JavaScript/requête externe. Node **231/231**, migrations `--check`0, syntaxe de45 fichiers JS et diff propres.
+**Correctif 0.23.2 publié et vérifié.** Navigateur **7952/7952** (épingle7951, +288 depuis7664 ; [hausse nette du total](#audit-tests-2026-10-30)), zéro erreur JavaScript/requête externe. Node **231/231**, migrations `--check`0, syntaxe de45 fichiers JS et diff propres.
 Ciblés : sécurité38, JSON10, brouillons61, repères56, adaptation46, synchronisation67 ; huit mutations de protections détectées.
 Application réelle en profil Chrome jetable : deux passages complets,20 mesures à320/390/768/1280 par passage, sans débordement ni texte parasite ; cinq modules neufs en cache et lecture hors ligne.
 L’anomalie de lecture des temps venait du harnais : son attente asynchrone se résolvait sur `false`. Reproduction minimale conservée ; attente remplacée par lectures explicitement attendues jusqu’à l’état écrit. Les deux parcours corrigés prouvent description, estimations et correction manuelle conservées.
@@ -259,7 +275,7 @@ Archives complètes avec refus intégral des cycles divergents et collisions d�
 
 Application **0.23.0**, cache **cuisine-os-v0.23.0-1**, **IndexedDB 5** (index `trashed_at`), **archive 2** (lecture 1/2).
 Migration additive **0008_corbeille_recettes.sql** préparée ; anciennes migrations inchangées.
-Navigateur **7656/7656** (épingle **7655**, +259 depuis L0, aucune assertion retirée), Node **231/231**,
+Navigateur **7656/7656** (épingle **7655**, +259 depuis L0, [hausse nette du total](#audit-tests-2026-10-30)), Node **231/231**,
 migrations `--check` **0**, syntaxe de **93** fichiers et diff propres. Ciblés L1 : domaine **61**, archives **24**,
 synchronisation **58**, écrans **79**, mutations **30**. Zéro erreur JavaScript ou requête externe dans les preuves navigateur.
 
@@ -293,7 +309,7 @@ Recette active, lien Fiche et progression cohérents, sélection conditionnée ;
 Copier/Partager utilisent la même sortie de courses, avec mode restants/complet ; cases concurrentes réconciliées à l’écran.
 
 Version locale **0.22.0**, cache `cuisine-os-v0.22.0-1`, DB **4**. Deux modules de domaine neufs dans le cache ; aucun magasin, SQL ou outil assistant.
-Navigateur **7397/7397** (épingle **7396**, +279 assertions depuis 7118, aucune retirée). Ciblés : traductions **84**, cuisine **110**, repas/courses **54**, intégration **30** ;
+Navigateur **7397/7397** (épingle **7396**, +279 assertions depuis 7118, [hausse nette du total](#audit-tests-2026-10-30)). Ciblés : traductions **84**, cuisine **110**, repas/courses **54**, intégration **30** ;
 Toronto **13** séparés. Node **230/230**, migrations `--check` **0**, syntaxe de **29** fichiers JS et diff propres.
 Parcours réels sur profil jetable : traduction enregistrée au clavier et relue, heure répétée choisie/rechargée, recette active persistée,
 cases et copie des courses, fiche rechargée hors ligne. Cache actif avec les deux modules. Largeurs 320/390/768/900/1280 et texte à 200 %

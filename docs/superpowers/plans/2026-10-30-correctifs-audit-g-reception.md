@@ -1,5 +1,7 @@
 # Correctifs de l’audit — réception du lot G
 
+**Lot G terminé et reçu localement en 0.32.7-1 ; D–G prêts à publier. Public revérifié : C 0.32.3-1, main `fd84739`.** Les sections suivantes gardent les étapes de réception dans leur ordre.
+
 Référence : [plan fourni et autorisé](2026-10-30-correctifs-audit-L0-L10.md), tâche12. Branche `correctifs-audit-g`, base F `dd3a9d0` reçue localement à **14515/14515**. Public C **0.32.3-1** ; D, E et F reçus localement. Sous-tâches12.1 à12.5 exécutées dans l’ordre avec réception et commit séparés. APP_VERSION0.32.7 ; DB6/archive7 inchangés. Aucun SQL appliqué au service distant ni appel assistant réel.
 
 ## 12.1 — Refus motivés précisément
@@ -80,3 +82,22 @@ La deuxième globale stricte reçoit les29 occurrences attendues, puis refuse le
 La contre-revue repère aussi un journal console collecté mais non comparé dans l’iframe du test d’import. L’épilogue existant compare désormais ensemble exceptions et journal, en conservant les autres champs. Ancien test avec une erreur injectée dans chacune des six vraies iframes : faux52/52 ; même injection après correction :46/52, les six seuls épilogues sont rouges et contiennent l’erreur exacte. Voisin sain puis octets partagés finaux : **52/52**, zéro erreur console/HTTP/JavaScript. Delta d’assertions nul, aucune erreur masquée par une autre garde. Ces deux passages globaux incomplets sont conservés comme échecs ; ils ne sont pas présentés comme des réceptions finales.
 
 Réception globale finale sur Node24.22.2 et Chromium156.0.8078.4 : **14561/14561**, épingle14560 inchangée, aucune erreur console inattendue, JavaScript, HTTP ou requête extérieure. Les29 occurrences de journaux injectés sont reconnues précisément (17 historiques +12 D9.1). Serveur et navigateur fermés, capture/JSON/journal conservés. **12.4 reçue localement ; seule12.5 reste à terminer.** La livraison reste0.32.7-1 ; GitHub/Ubuntu n’a pas été exécuté et rien n’a été publié pour D–G.
+
+
+## 12.5 — Portée exacte des bilans historiques
+
+Les totaux historiques restent conservés, avec leurs dates. Les affirmations générales de conservation des scénarios sont remplacées par une description de la hausse nette du total et un renvoi à la note de portée dans STATE. Dix formulations de la plage auditée sont concernées : les huit repérées dans la première prélecture, plus les deux « sans retrait » de L3/L4 retrouvées dans la seconde. Les reçus antérieurs et celui de la base 0.21.1 restent inchangés ; les chiffres de l’audit ne permettent pas de les juger.
+
+Le patch `git diff cd8c7f2 247b2e5 -- tests` a été régénéré et son SHA256 est identique au patch de l’audit : `141c9a836d583ade9695abfaff2463cd0224ca011c3fe96fee426467fc3d57b0`. Le script original d’analyse statique a été rejoué sur les deux patches, avec les mêmes résultats. Ce rejeu porte sur des lignes et des libellés, pas sur une exécution des anciens tests navigateur.
+
+- **127 libellés non retrouvés** : libellés extraits par regex de lignes supprimées, absents des lignes ajoutées du même fichier. Les déplacements, lignes inchangées ou équivalences de comportement ne sont pas recherchés exhaustivement. Ce n’est pas une preuve de 127 comportements perdus.
+- **22 anciens libellés de suppression** : issus des deux blocs `supprimerLivreVide` de `tests/couverture.js`, remplacés avec le contrat `corbeille_requise` au commit `9ec738c`. Le relevé contient aussi un 23e libellé de vocabulaire distinct. Le chiffre 22 ne désigne pas 22 scénarios indépendants exécutés. Le total de 34 assertions prévu dans les deux blocs a été maintenu par leur remplacement ; aucune nouvelle exécution historique n’est revendiquée.
+- **54 paires de lignes modifiées à libellé conservé** : elles incluent des changements de sélecteur ou de valeur obtenue ; ce ne sont pas nécessairement 54 valeurs attendues changées ni 54 affaiblissements démontrés. Les exemples des commits `8fb0784`, `66734c5` et `39a890a` sont recoupés avec les diffs.
+
+Les valeurs −229/+214 du script désignent des lignes d’assertion reconnues par son motif, pas le nombre d’assertions exécutées. L’ensemble 127/22/54 est attribué à la plage globale auditée, jamais à chacun des lots ni aux correctifs A–G ultérieurs. Sources suivies : [lentille des tests](../../audits/2026-10-30-audit-codex-L0-L10/lentilles/tests.md), [rapport d’audit](../../audits/2026-10-30-audit-codex-L0-L10/rapport-audit.md). Rejeu et prélectures détaillés dans les fichiers ignorés `12-5-*` et `prelecture-12-5.md`.
+
+Cette sous-tâche ne change que la documentation. La réception technique finale de 12.4 reste celle des mêmes octets produit : 14561/14561 navigateur, 281/281 outils historiques, 29/29 outils CI, 30/30 programmes PostgreSQL. Aucun nouveau résultat de test n’est inventé pour la mise à jour des textes.
+
+Revue documentaire : dix annotations et leurs dix renvois, chiffres/dates des lignes historiques conservés, texte depuis la base 0.21.1 inchangé. **12.5 reçue ; plan A–G terminé.** Public revérifié le 31 octobre : 0.32.3-1 et main `fd84739`. D–G sont reçus localement, sans publication supplémentaire. Les points hors périmètre nommés dans l’auto-revue du plan et VIS-4 restent distincts.
+
+Contre-lecture indépendante finale reçue : dix remplacements aux nombres inchangés, base et reçus antérieurs intacts, patch et sorties statiques concordants, distinction public/local et exclusions explicites. Seuls quatre fichiers documentaires changent depuis `fa2d12e`. Diff et scan des fichiers suivis conformes ; aucune suite historique ou technique inutilement rejouée pour ces annotations.
