@@ -285,7 +285,7 @@ export function suivreTitreVue({ racine, estCourante = () => true, document = gl
   const actualiser = () => {
     if (detruit || !estCourante() || !racine.isConnected) return;
     const titre = (racine.matches?.('h1') ? racine : racine.querySelector('h1'))?.textContent.trim();
-    const valeur = titre ? `${titre} — ${t('Cuisine OS')}` : t('Cuisine OS');
+    const valeur = titre ? `${titre} — ${t('Mistu')}` : t('Mistu');
     if (document.title !== valeur) document.title = valeur;
   };
   const Observer = document.defaultView?.MutationObserver;

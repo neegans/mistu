@@ -126,7 +126,7 @@ export async function renderMeal(params, query, ctx, deps = {}) {
     }},label('diet',d));
     return bouton;
   }));
-  root.append(pageHeader(meal.title, { back: { href: '/meals', label: t('Ma semaine') }, actions: [
+  root.append(pageHeader(meal.title, { back: { href: '/meals', label: t('Repas') }, actions: [
     el('button', { class: 'btn', onClick: async () => { const v = await promptDialog(t('Titre'), { value: meal.title }); if (v) { meal.title = v.trim(); save(['title']); } } }, t('Renommer')),
     el('button', { class: 'btn', onClick: redo }, t('Refaire ce repas')),
     el('button',{class:'btn',onClick:async()=>{meal.archived_at=meal.archived_at?null:R.nowIso();await save(['archived_at']);}},meal.archived_at?t('Rouvrir ce repas'):t('Archiver ce repas')),

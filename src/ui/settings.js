@@ -27,9 +27,26 @@ import { createZip } from '../core/zip.js';
 import { extFor } from '../domain/backup.js';
 import { etatAssistant, sessionValide } from '../domain/passerelle.js';
 import { shortcutUrl, SHORTCUT_NAME, isAppleTouchDevice } from '../domain/timers.js';
-import { STORES, SYNC_INTERNAL_STORES, APP_VERSION, ARCHIVE_FORMAT_VERSION } from '../model/schema.js';
+import { STORES, SYNC_INTERNAL_STORES, APP_VERSION } from '../model/schema.js';
 import { pageHeader, section, field, select, segmented, majPastille, sessionAssistant, TEXTE_CONNEXION, boutonSeConnecter, messageGardeRefusee, motifFichier } from './components.js';
 import { invalidate, setSyncState, getSyncState, getSyncGeneration, relireReglages, SYNC_ROUTE_KEY } from './state.js';
+
+// Les noms techniques restent dans les commandes et les archives ; leur libellé
+// est traduit seulement au rendu, y compris après un changement de langue.
+const LIBELLES_MAGASINS = Object.freeze({
+  books: 'Livres', book_editions: 'Éditions de livres',
+  source_documents: 'Documents sources', source_pages: 'Pages sources', scan_sessions: 'Imports de pages',
+  dishes: 'Plats', dish_recipe_links: 'Liens entre plats et recettes',
+  recipes: 'Recettes', recipe_versions: 'Versions de recettes', recipe_translations: 'Traductions de recettes',
+  ingredients: 'Ingrédients', unit_definitions: 'Unités', unit_conventions: 'Conventions de mesure',
+  substitutions: 'Remplacements d’ingrédients', appliances: 'Appareils',
+  cook_history: 'Historique de cuisine', cook_sessions: 'Séances de cuisine', inventory: 'Inventaire',
+  meals: 'Repas', meal_feedback: 'Notes sur les repas', shopping_lists: 'Listes de courses',
+  library_activity: 'Activité de la bibliothèque', rediscovery_prefs: 'Préférences de redécouverte',
+  timer_launches: 'Minuteurs', files: 'Fichiers', assistant_config: 'Configuration de l’assistant',
+  imports: 'Imports', settings: 'Réglages',
+});
+const libelleMagasin = nom => t(typeof nom === 'string' && Object.hasOwn(LIBELLES_MAGASINS, nom) ? LIBELLES_MAGASINS[nom] : 'Données');
 
 // Évite deux opérations d’archive concurrentes, même après un changement d’écran.
 let archiveOperation = false;
@@ -76,7 +93,7 @@ function panneauExclusionsArchive(exclues) {
     el('p', null, t('Ces fiches ne sont pas dans cette archive.')),
     el('details', null, el('summary', null, t('Voir les fiches exclues')),
       el('ul', null, ...lignes.slice(0,100).map(r => el('li', null,
-        `${tronquer(r.store,NOM_MAX)} · ${typeof r.id === 'string' ? tronquer(r.id,NOM_MAX) : t('Fiche non identifiable')} — ${motifExclusionArchive(r.motif)}`))),
+        `${libelleMagasin(r.store)} · ${typeof r.id === 'string' ? tronquer(r.id,NOM_MAX) : t('Fiche non identifiable')} — ${motifExclusionArchive(r.motif)}`))),
       lignes.length > 100 ? el('p', null, t('La liste complète est conservée dans l’archive.')) : null));
 }
 
@@ -131,7 +148,8 @@ export function creerPanneauDiagnostic({collecter=collecterDiagnosticApp,navigat
     }catch{if(!detruit&&estCourante()){texte.value='';texte.hidden=true;etat.textContent=t('Le diagnostic n’a pas pu être relu. Réessaie sur cet écran.');}}
     finally{enCours=false;if(!detruit)bouton.disabled=false;}
   }},t('Copier le diagnostic'));
-  const root=section(t('Diagnostic à partager'),el('p',null,t('Ce diagnostic contient des versions, des compteurs et des états, sans texte de recette, photo ni identité du compte. Les tailles du navigateur sont des estimations.')),
+  const root=section(t('Diagnostic à partager'),el('p',null,t('À envoyer si Mistu se comporte mal : ce diagnostic ne contient aucune recette.')),
+    el('p',null,t('Ce diagnostic contient des versions, des compteurs et des états, sans texte de recette, photo ni identité du compte. Les tailles du navigateur sont des estimations.')),
     el('p',{class:'muted'},t('Les fichiers comptés sont ceux référencés dans cette bibliothèque. Leur présence ne certifie pas leur lecture hors ligne. Une valeur inconnue reste indiquée comme telle.')),protection,bouton,etat,texte);
   root.classList.add('diagnostic-app');
   // Lecture ponctuelle : préserver son attente et son résultat sans déclarer une saisie à enregistrer.
@@ -144,7 +162,7 @@ export function creerPanneauDiagnostic({collecter=collecterDiagnosticApp,navigat
 export async function renderSettings(params, query, ctx, { fetch, createArchive = createArchiveReel, pickFiles: choisirArchive = pickFiles, telechargerArchive = downloadBlob, telechargerRecettes = downloadBlob } = {}) {
   const baseArchives=repo.db;
   const s = ctx.settings;
-  const root = el('div', {class:'reglages-page'}, pageHeader(t('Réglages'), { subtitle: `Cuisine OS ${APP_VERSION}` }));
+  const root = el('div', {class:'reglages-page'}, pageHeader(t('Réglages'), { subtitle: `Mistu ${APP_VERSION}` }));
   let detruit=false;
   const baseStockage=repo.db,stockageLigne=await baseStockage.get('sync_state',CLE_STOCKAGE_PERSISTANT).catch(()=>null);
   const diagnostic=creerPanneauDiagnostic({estCourante:()=>!detruit&&root.isConnected,stockagePersistant:repo.db===baseStockage?stockageLigne?.value:null});
@@ -238,7 +256,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
       let generated = false;
       try {
         const { blob, manifest, bytes, warnings, missingFiles = 0, copies, tracesOrphelines = 0, exclues = [] } = await createArchive(repo.db, { deviceName: s.device_name });
-        telechargerArchive(blob, 'cuisine-os-' + manifest.created_at.slice(0, 19).replace(/[:T]/g, '-') + '.zip');
+        telechargerArchive(blob, 'mistu-' + manifest.created_at.slice(0, 19).replace(/[:T]/g, '-') + '.zip');
         generated = true;
         // § 4.6 : le bilan de création, une phrase par cas (pages manquantes, copies du serveur, octets inconnus) ; rien à dire, rien de dit. Posé
         // juste après le téléchargement (ronde 1, #16) : un suivi qui échoue plus bas ne le fait pas taire ; l'ancien bilan part d'abord.
@@ -303,10 +321,10 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     el('p', { class: 'muted' }, t('Formats d’échange : version courante de chaque recette disponible, dans la langue choisie. Les passages manquants restent signalés dans leur langue d’origine.')),
     field(t('Langue des recettes exportées'),choisirLangueExport),
     el('div', { class: 'row' },
-      el('button', { class: 'btn', onClick: () => preparerExport(false, bundles => telechargerRecettes(new Blob([JSON.stringify(bundles.map((b) => toJsonLd(b, { documentaire: true })), null, 2)], { type: 'application/ld+json' }), 'cuisine-os-recettes.jsonld')) }, t('Recipe / JSON-LD')),
-      el('button', { class: 'btn', onClick: () => preparerExport(false, bundles => telechargerRecettes(new Blob([toPaprikaYaml(bundles, { documentaire: true })], { type: 'text/yaml;charset=utf-8' }), 'cuisine-os-recettes.yml')) }, t('YAML compatible Paprika')),
-      el('button',{class:'btn',onClick:()=>preparerExport(false,bundles=>telechargerRecettes(new Blob([bundles.map(b=>toMarkdown(b)).join('\n\n---\n\n')],{type:'text/markdown;charset=utf-8'}),'cuisine-os-recettes.md'))},t('Exporter Markdown')),
-      el('button',{class:'btn',onClick:()=>preparerExport(false,bundles=>telechargerRecettes(new Blob([bundles.map(b=>toRecipeText(b)).join('\n\n---\n\n')],{type:'text/plain;charset=utf-8'}),'cuisine-os-recettes.txt'))},t('Exporter le texte')),
+      el('button', { class: 'btn', onClick: () => preparerExport(false, bundles => telechargerRecettes(new Blob([JSON.stringify(bundles.map((b) => toJsonLd(b, { documentaire: true })), null, 2)], { type: 'application/ld+json' }), 'mistu-recettes.jsonld')) }, t('Recipe / JSON-LD')),
+      el('button', { class: 'btn', onClick: () => preparerExport(false, bundles => telechargerRecettes(new Blob([toPaprikaYaml(bundles, { documentaire: true })], { type: 'text/yaml;charset=utf-8' }), 'mistu-recettes.yml')) }, t('YAML compatible Paprika')),
+      el('button',{class:'btn',onClick:()=>preparerExport(false,bundles=>telechargerRecettes(new Blob([bundles.map(b=>toMarkdown(b)).join('\n\n---\n\n')],{type:'text/markdown;charset=utf-8'}),'mistu-recettes.md'))},t('Exporter Markdown')),
+      el('button',{class:'btn',onClick:()=>preparerExport(false,bundles=>telechargerRecettes(new Blob([bundles.map(b=>toRecipeText(b)).join('\n\n---\n\n')],{type:'text/plain;charset=utf-8'}),'mistu-recettes.txt'))},t('Exporter le texte')),
       el('button', { class: 'btn', onClick: () => preparerExport(true, async disponibles => {
         const bundles = disponibles.map((b) => ({ ...b, pages: (b.recipe.source_page_ids || []).map((id) => ctx.pagesById.get(id)).filter(Boolean) }));
         const shas = new Set(bundles.flatMap((b) => b.pages.map((p) => p.sha256)));
@@ -315,9 +333,9 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
         const site = toReadableSite(bundles, filesBySha, { locale: s.ui_locale, documentaire: true });
         const entries = [...site.entries];
         for (const [path, f] of site.images) entries.push({ path, data: new Uint8Array(await f.blob.arrayBuffer()) });
-        telechargerRecettes(new Blob([createZip(entries)], { type: 'application/zip' }), 'cuisine-os-copie-lisible.zip');
+        telechargerRecettes(new Blob([createZip(entries)], { type: 'application/zip' }), 'mistu-copie-lisible.zip');
       }) }, t('Créer une copie lisible (HTML)'))), etatExport,
-    el('small', { class: 'muted' }, t('À tester dans les applications cibles (Paprika : Fichier → Importer, YAML). Le HTML se lit hors connexion sans Cuisine OS.'))));
+    el('small', { class: 'muted' }, t('À tester dans les applications cibles (Paprika : Fichier → Importer, YAML). Le HTML se lit hors connexion sans Mistu.'))));
 
   // Assistant IA (Passerelle T4) : plus de configuration ici — la clé vit côté serveur. La section dit si l'assistant est actif pour ce
   // compte (session lue, bornée à 2 s, comme les écrans) et l'état vient d'un GET de la passerelle. `fetch` : injecté par les tests.
@@ -340,8 +358,8 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
   const visibleStores = Object.keys(STORES).filter((n) => !SYNC_INTERNAL_STORES.includes(n));
   const counts = await Promise.all(visibleStores.map(async (n) => [n, await repo.db.count(n)]));
   root.append(section(t('Données sur cet appareil'),
-    el('p', { class: 'muted' }, `${t('Base locale')} « cuisine-os » v${repo.db.version} · ${t('format d’archive')} v${ARCHIVE_FORMAT_VERSION}`),
-    el('div', { class: 'chips' }, ...counts.filter(([, c]) => c).map(([n, c]) => el('span', { class: 'chip neutral' }, `${n} : ${c}`))),
+    el('p', { class: 'muted' }, t('Ta bibliothèque sur cet appareil')),
+    el('div', { class: 'chips' }, ...counts.filter(([, c]) => c).map(([n, c]) => el('span', { class: 'chip neutral' }, `${libelleMagasin(n)} : ${c}`))),
     // Promesse de serveur seulement s'il y a un serveur : sans session acceptée, ces données ne sont nulle part ailleurs.
     el('p', { class: 'muted', dataset: { role: 'consequences-effacement' } }, sync.user
       // Vague finale du lot G, ronde 2 (R-G-28 bis) : la perte est dite — fichiers pas encore envoyés (photos, PDF, EPUB : D-G8, seuls ceux à remote de
@@ -383,7 +401,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     // REFUSÉE, ni l'une ni l'autre (ronde 1, #15 : I5, rien n'est annoncé sans fait).
     const ins = insp.ok ? phrasesInspection(insp.summary || {}) : { puces: [], phrases: [] };
     if (insp.summary) box.append(el('div', { class: 'chips' },
-      ...Object.entries(insp.summary.counts).filter(([, count]) => count).map(([name, count]) => el('span', { class: 'chip neutral' }, name + ' : ' + count)),
+      ...Object.entries(insp.summary.counts).filter(([, count]) => count).map(([name, count]) => el('span', { class: 'chip neutral' }, libelleMagasin(name) + ' : ' + count)),
       el('span', { class: 'chip neutral' }, t('fichiers vérifiés') + ' : ' + insp.summary.files_ok),
       ...ins.puces.map((p) => el('span', { class: 'chip neutral' }, p))));
     for (const phrase of ins.phrases) box.append(el('div', { class: 'status info' }, phrase));
@@ -469,7 +487,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
       if(insp.fusionSansRecettes){
         box.append(el('ul',{dataset:{role:'recettes-ecartees'}},...insp.fusionSansRecettes.recettes.map(r=>el('li',null,tronquer(typeof r.titre==='string'&&r.titre?r.titre:t('Sans titre'),NOM_MAX)))),
           el('p',{class:'muted'},t('{n} fiches liées seront aussi écartées. Les fichiers présents dans l’archive seront récupérés.',{n:insp.fusionSansRecettes.ecartees.length-insp.fusionSansRecettes.recettes.length})),
-          el('details',null,el('summary',null,t('Voir les fiches écartées de cette fusion')),el('ul',null,...insp.fusionSansRecettes.ecartees.map(r=>el('li',null,`${r.store} · ${r.id}`)))));
+          el('details',null,el('summary',null,t('Voir les fiches écartées de cette fusion')),el('ul',null,...insp.fusionSansRecettes.ecartees.map(r=>el('li',null,`${libelleMagasin(r.store)} · ${r.id}`)))));
         controls.append(el('button',{class:'btn primary',onClick:()=>apply('merge',insp.recettes)},insp.refus==='retrait_posterieur'?t('Fusionner sans les recettes retirées'):t('Fusionner sans ces recettes')));
       }
     }else controls.append(
@@ -1268,7 +1286,7 @@ export function syncSectionModel({ available = false, reason = null, user = null
   // Une progression ne s'affiche que PENDANT une passe : une passe terminée laisserait un compteur figé. Les trois
   // valeurs sont nommées une fois, pour les deux phrases qui peuvent les porter.
   const avancement = moteur.enCours && moteur.progression
-    ? { t: moteur.progression.table, n: moteur.progression.n, total: moteur.progression.total }
+    ? { t: libelleMagasin(moteur.progression.table), n: moteur.progression.n, total: moteur.progression.total }
     : null;
   // Lot G (§ 4.1, I-G8) : une erreur de fichier n'est dite que pour une ligne RÉFÉRENCÉE (un orphelin n'est pas nommé), par le nom que la
   // personne reconnaît (nomFichier) et son motif en phrase ; trop_gros et forme à l'envoi n'offrent pas « Réessayer » (B-22). Ronde 1 : le nom
@@ -1285,7 +1303,7 @@ export function syncSectionModel({ available = false, reason = null, user = null
     quarantaine: enQuarantaine.map((e) => ({
       seq: e.seq,
       // Vague finale (I-G8) : une ligne files est nommée par nomFichier dès qu'un snapshot est là (sans snapshot : la forme de L3, bornée).
-      libelle: e.store === 'files' && snapshot ? tronquer(nomFichier(e.id, snapshot), NOM_MAX) : `${e.store} · ${tronquer(e.id, CLE_MAX)}`,
+      libelle: e.store === 'files' && snapshot ? tronquer(nomFichier(e.id, snapshot), NOM_MAX) : `${libelleMagasin(e.store)} · ${tronquer(e.id, CLE_MAX)}`,
       motif: motifEnvoi(e.last_error),
       abandonPossible:peutAbandonnerEnvoi(e),
       ...(estCommandeTraduction(e)||estPhaseJournalTraduction(e) ? {protegee:true,recipeId:e.payload?.recipe_id||e.snapshot?.recipe_id||null} : {}),
@@ -1297,7 +1315,7 @@ export function syncSectionModel({ available = false, reason = null, user = null
       const comparaisonRecette=c.kind==='donnees'&&c.store==='recipes'&&!['refus_http','abandon_envoi'].includes(c.origine)?comparerCopiesRecette(c,versionsById):null;
       return {
         id: c.id,
-        libelle: c.store === 'files' && snapshot ? tronquer(nomFichier(c.record_id, snapshot), NOM_MAX) : `${c.store} · ${nom ? tronquer(nom, NOM_MAX) : tronquer(c.record_id, CLE_MAX)}`,
+        libelle: c.store === 'files' && snapshot ? tronquer(nomFichier(c.record_id, snapshot), NOM_MAX) : `${libelleMagasin(c.store)} · ${nom ? tronquer(nom, NOM_MAX) : tronquer(c.record_id, CLE_MAX)}`,
         dateIci: comparaisonRecette?comparaisonRecette.ici.modification??t('Inconnu'):formatDate(c.local?.updated_at || c.at, { withTime: true }),
         dateAilleurs: comparaisonRecette?comparaisonRecette.ailleurs.modification??t('Inconnu'):formatDate(c.server?.updated_at || c.at, { withTime: true }),
         ...(comparaisonRecette?{comparaisonRecette,copiesTechniques:JSON.stringify({ici:c.local??null,ailleurs:c.server??null},null,2)}:{}),

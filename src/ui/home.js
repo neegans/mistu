@@ -185,7 +185,7 @@ async function rediscoverCard(ctx, query, depot = repo) {
     await depot.save('rediscovery_prefs', { ...pref, last_suggested_at: new Date().toISOString() });
   }
   const title = s.mode === 'rediscover'
-    ? t('À redécouvrir : ce livre n’a pas été consulté dans Cuisine OS depuis {n} mois.', { n: s.months_since })
+    ? t('À redécouvrir : ce livre n’a pas été consulté dans Mistu depuis {n} mois.', { n: s.months_since })
     : t('À explorer dans ta bibliothèque');
   const savePref = async (patch) => { await depot.save('rediscovery_prefs', { ...pref, ...patch }); emit('change', { store: 'rediscovery_prefs' }); refresh(); };
   return el('div', { class: 'card', style: { borderLeft: '4px solid var(--sage)' } },

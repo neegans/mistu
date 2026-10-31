@@ -22,6 +22,9 @@ import {runAuditActionsMotifsTests} from './audit-actions-motifs.js';
 import {runAuditCorbeilleDisponibiliteTests} from './audit-corbeille-disponibilite.js';
 import {runAuditCuisineErreurTests} from './audit-cuisine-erreur.js';
 import {runAuditConflitsLisiblesTests} from './audit-conflits-lisibles.js';
+import {runAuditCuisineTextesTests} from './audit-cuisine-textes.js';
+import {runAuditReglagesTextesTests} from './audit-reglages-textes.js';
+import {runAuditMarqueNavigationTests} from './audit-marque-navigation.js';
 import {runAuditArchiveRetraitTests} from './audit-archive-retrait.js';
 import {runAuditArchiveFichesInvalidesTests} from './audit-archive-fiches-invalides.js';
 import {runAuditArchiveExclusionsUITests} from './audit-archive-exclusions-ui.js';
@@ -754,10 +757,13 @@ try { await runAuditActionsMotifsTests({eq,ok}); } catch (e) { ok(false, 'runAud
 try { await runAuditCorbeilleDisponibiliteTests({eq,ok}); } catch (e) { ok(false, 'runAuditCorbeilleDisponibiliteTests : ' + (e.stack || e)); }
 try { await runAuditCuisineErreurTests({eq,ok}); } catch (e) { ok(false, 'runAuditCuisineErreurTests : ' + (e.stack || e)); }
 try { await runAuditConflitsLisiblesTests({eq,ok}); } catch (e) { ok(false, 'runAuditConflitsLisiblesTests : ' + (e.stack || e)); }
+try { await runAuditCuisineTextesTests({eq,ok}); } catch (e) { ok(false, 'runAuditCuisineTextesTests : ' + (e.stack || e)); }
+try { await runAuditReglagesTextesTests({eq,ok}); } catch (e) { ok(false, 'runAuditReglagesTextesTests : ' + (e.stack || e)); }
+try { await runAuditMarqueNavigationTests({eq,ok}); } catch (e) { ok(false, 'runAuditMarqueNavigationTests : ' + (e.stack || e)); }
 try { await runAuditReponsesRefuseesTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesRefuseesTests : ' + (e.stack || e)); }
 try { await runAuditReponsesParcoursTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesParcoursTests : ' + (e.stack || e)); }
 try { await runAuditReponsesEcranTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesEcranTests : ' + (e.stack || e)); }
-eq(results.length, 14311,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 14462,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

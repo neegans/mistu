@@ -1,4 +1,4 @@
-# Cuisine OS (Mistu)
+# Mistu
 
 Mistu conserve livres, recettes, variantes, photos, notes, repas et inventaire dans IndexedDB. L’application utilise des modules ES natifs et un hébergement statique, sans framework ni bundler. La synchronisation passe par Supabase ; les appels de l’assistant passent par la fonction serveur du projet `mitsu`.
 
@@ -38,7 +38,7 @@ Le dernier outil contrôle le manifeste et le worker générés. Après modifica
 | Corriger avec brouillon local, reprendre une réponse conservée et récupérer un texte non enregistré | Éditeurs |
 | Garder ses notes et photos de cuisson séparées des photos du livre | Fiche recette, bilan de cuisson |
 | Retirer puis restaurer recettes et livres, en conservant les sources et les contrôles de concurrence | Corbeille |
-| Composer un repas, choisir une date sans heure, revoir les courses et leurs conventions | Ma semaine |
+| Composer un repas, choisir une date sans heure, revoir les courses et leurs conventions | Repas |
 | Cuisiner plusieurs versions, reprendre une séance et ses minuteurs indicatifs | Mode cuisine |
 | Confirmer du stock, consommer une quantité choisie et garder les restes d’une cuisson précise | Ma cuisine |
 | Vérifier le contenu et les médias choisis disponibles sur cet appareil | Repas → Préparer hors ligne |

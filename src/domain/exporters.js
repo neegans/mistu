@@ -165,7 +165,7 @@ export function toPaprikaYaml(bundles, { locale = 'fr', documentaire = false } =
     if(lecture.manque)notes.push(avertissementLecture(lecture));
     if (version?.changes) notes.push(`Changements : ${version.changes}`);
     if (edition?.isbn) notes.push(`ISBN ${edition.isbn}`);
-    notes.push(`Exporté de Cuisine OS — recette ${recipe.id}, version ${version?.id || '—'}, langue ${recipe.original_language || '—'}`);
+    notes.push(`Exporté de Mistu — recette ${recipe.id}, version ${version?.id || '—'}, langue ${recipe.original_language || '—'}`);
     if (document) notes.push(texteTM('Texte conservé pour relecture :', locale), ...document.instructions);
     lines.push(`  notes: ${yamlBlock(notes)}`);
     lines.push(`  ingredients: ${yamlBlock(lignesIngredients(lecture))}`);
@@ -216,14 +216,14 @@ ${version ? `<h2>Ingrédients</h2><ul>${lecture.blocs.map(i=>i.kind==='heading'?
 <h2>${document ? esc(texteTM('Texte conservé pour relecture :', locale)) : 'Préparation'}</h2><ol>${(document ? document.instructions.map(texte=>({texte,langReelle:recipe.original_language})) : lecture.etapes).map(s => `<li>${htmlSegment(s)}</li>`).join('')}</ol>` : '<p><em>Référence d’index seulement : la recette n’a pas encore été numérisée.</em></p>'}
 ${version?.changes ? `<h2>Changements</h2><p>${esc(version.changes)}</p>` : ''}
 ${imgs.length ? `<h2>Pages originales</h2>${imgs.map((p) => `<p><img src="../${esc(p)}" alt="Page originale"></p>`).join('')}` : ''}
-<p class="meta">Exporté de Cuisine OS le ${esc(new Date().toLocaleDateString(locale === 'en' ? 'en-CA' : 'fr-CA'))}. Identifiant ${esc(recipe.id)}.</p>
+<p class="meta">Exporté de Mistu le ${esc(new Date().toLocaleDateString(locale === 'en' ? 'en-CA' : 'fr-CA'))}. Identifiant ${esc(recipe.id)}.</p>
 </body></html>`;
     entries.push({ path: file, data: body });
     return { title, file, book };
   });
   items.sort((a, b) => a.title.localeCompare(b.title, locale));
-  const index = `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><title>Mes recettes — Cuisine OS</title><style>${HTML_CSS}</style></head><body>
-<h1>Mes recettes</h1><p class="meta">${items.length} recette(s) — copie lisible hors connexion, produite par Cuisine OS.</p>
+  const index = `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><title>Mes recettes — Mistu</title><style>${HTML_CSS}</style></head><body>
+<h1>Mes recettes</h1><p class="meta">${items.length} recette(s) — copie lisible hors connexion, produite par Mistu.</p>
 <ul>${items.map((it) => `<li><a href="${esc(it.file)}">${esc(it.title)}</a>${it.book ? ` <span class="meta">— ${esc(it.book.title)}</span>` : ''}</li>`).join('')}</ul></body></html>`;
   entries.unshift({ path: 'index.html', data: index });
   return { entries, images: usedImages };

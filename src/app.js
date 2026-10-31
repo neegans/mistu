@@ -375,7 +375,7 @@ async function boot() {
     window.addEventListener('pageshow',e=>{if(e.persisted)surveiller();});
   } catch (e) {
     logError('boot', { error: e });
-    remplacerRacineApplication(document.getElementById('app'), el('div', { class: 'card danger', style: { margin: '1rem' } }, el('h2', null, 'Cuisine OS ne peut pas démarrer'), el('p', { class: 'muted' }, t('Code : {c}', { c: e?.name || 'Erreur' })), el('button', { class: 'btn', onClick: () => location.reload() }, t('Recharger'))));
+    remplacerRacineApplication(document.getElementById('app'), el('div', { class: 'card danger', style: { margin: '1rem' } }, el('h2', null, t('Mistu ne peut pas démarrer')), el('p', { class: 'muted' }, t('Code : {c}', { c: e?.name || 'Erreur' })), el('button', { class: 'btn', onClick: () => location.reload() }, t('Recharger'))));
   }
 }
 

@@ -9,7 +9,7 @@ import { CAPABILITIES } from '../model/schema.js';
 import { pageHeader, section, segmented, field, select, emptyState } from './components.js';
 
 export async function renderKitchen(params, query, ctx, deps = {}) {
-  const tab = query.tab || 'appliances';
+  const tab = query.tab === 'appliances' ? 'appliances' : 'inventory';
   const root = el('div', null, pageHeader(t('Ma cuisine')),
     el('div', { style: { marginBottom: '1rem' } }, segmented([{ value: 'appliances', label: t('Appareils') }, { value: 'inventory', label: t('Inventaire') }], tab, (v) => navigate('/kitchen' + buildQuery({ tab: v })), {nom:t('Ma cuisine')})));
   const contenu = tab === 'inventory' ? await creerInventaire({ctx,query,...deps}) : appliancesTab(ctx);
@@ -19,7 +19,7 @@ export async function renderKitchen(params, query, ctx, deps = {}) {
 
 function appliancesTab(ctx) {
   const root = el('div', null);
-  root.append(el('p', { class: 'muted' }, t('Le moteur raisonne sur les capacités, pas sur la marque. Les adaptations aux appareils arrivent au palier V1 ; le registre se prépare dès maintenant.')));
+  root.append(el('p', { class: 'muted' }, t('Tes appareils, pour adapter les recettes.')));
   const addRow = el('div', { class: 'row', style: { marginBottom: '.8rem' } },
     select([{ value: '', label: t('Ajouter un appareil courant…') }, ...APPLIANCE_PRESETS.map((p, i) => ({ value: String(i), label: p.name }))], '', async (v) => {
       if (v === '') return;

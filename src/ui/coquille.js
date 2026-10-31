@@ -11,7 +11,7 @@ import { icone } from './icones.js';
 export const NAV = [
   { href: '/', label: 'Aujourd’hui', ico: 'soleil', match: (p) => p === '/' || p.startsWith('/search') },
   { href: '/library', label: 'Bibliothèque', ico: 'bibliotheque', match: (p) => p.startsWith('/corbeille') || p.startsWith('/library') || p.startsWith('/books') || p.startsWith('/dishes') || p.startsWith('/recipes') },
-  { href: '/meals', label: 'Ma semaine', ico: 'calendrier', match: (p) => p.startsWith('/meals') || p.startsWith('/lists') },
+  { href: '/meals', label: 'Repas', ico: 'calendrier', match: (p) => p.startsWith('/meals') || p.startsWith('/lists') },
   { href: '/kitchen', label: 'Ma cuisine', ico: 'toque', match: (p) => p.startsWith('/kitchen') },
   { href: '/add', label: 'Ajouter', ico: 'plus', add: true, match: (p) => p.startsWith('/add') || p.startsWith('/import') },
 ];
@@ -28,7 +28,7 @@ export function coquille(path, { fenetre = window } = {}) {
   const side = el('aside', { class: 'sidenav', role: 'navigation', 'aria-label': 'Navigation' }, ...navLinks(path, ''));
   const tabs = el('nav', { class: 'tabs', 'aria-label': 'Navigation' }, ...navLinks(path, ''));
   const top = el('div', { class: 'topbar' },
-    el('a', { class: 'brand', href: '#/' }, 'Cuisine OS'),
+    el('a', { class: 'brand', href: '#/' }, 'Mistu'),
     side,
     el('span', { class: 'spacer' }),
     // Pastille « N modifications à envoyer » (spec § 4.2 ; B04, lot I1) : cachée tant que la file est vide — rien n'est affiché sans fait.

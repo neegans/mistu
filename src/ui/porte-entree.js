@@ -90,7 +90,7 @@ export function renderPorteEntree(model, gestes = {}, { icone = ICONE_APP } = {}
   const boutons = noeuds;
   const lignes = model.lignes.map((ligne) => el('p', { class: 'porte-ligne' }, ligne));
   const logo = el('img', { class: 'porte-logo', src: icone, alt: '', width: '72', height: '72' });
-  const nom = el('p', { class: 'porte-nom' }, 'Cuisine OS');
+  const nom = el('p', { class: 'porte-nom' }, 'Mistu');
   const titre = el('h1', { class: 'porte-titre' }, model.titre);
   const actions = el('div', { class: 'porte-actions' }, ...boutons);
   return el('div', { class: 'porte' }, logo, nom, titre, ...lignes, actions);

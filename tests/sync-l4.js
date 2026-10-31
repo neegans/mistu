@@ -3254,7 +3254,7 @@ export async function runSyncL4Tests({ eq, ok }) {
       moteur: { enCours: false, phase: null, progression: null, dernierEchange: null, aEnvoyer: 0, enQuarantaine: 1, conflits: 1, pause: null, attenteConnexion: false, horloge: null, derniereErreur: null } };
     const avec = syncSectionModel({ ...base, quarantaine: [{ seq: 1, store: 'files', id: sha, last_error: 'taille' }], conflits: [{ id: 'files:' + sha, store: 'files', record_id: sha, local: null, server: null, at: DATE, kind: 'donnees' }], snapshot });
     const sans = syncSectionModel({ ...base, quarantaine: [{ seq: 1, store: 'files', id: sha, last_error: 'taille' }], snapshot: null });
-    eq([avec.quarantaine[0].libelle, avec.conflits[0].libelle, sans.quarantaine[0].libelle.startsWith('files · ')], ['Page 12 · Le livre', 'Page 12 · Le livre', true],
+    eq([avec.quarantaine[0].libelle, avec.conflits[0].libelle, sans.quarantaine[0].libelle.startsWith('Fichiers · ')], ['Page 12 · Le livre', 'Page 12 · Le livre', true],
       'réglages (vague finale) : quarantaine et conflit d’une ligne files nommés « Page 12 · Le livre », jamais l’empreinte (mutant : libellé store · id) ; sans snapshot, la forme bornée de L3 reste');
   });
 

@@ -26,6 +26,8 @@ export const MODULES_NEUFS = ["../src/ui/reponse-refusee.js", "../src/ui/version
 // livre (book.js) ; le refus « non vide » dit la phrase de main (« Un livre avec des recettes… »), sans entrée en.js jusqu’ici : l’entrée est posée, la
 // chaîne n’est pas neuve.
 export const CHAINES_NEUVES_AILLEURS = {
+  // Audit 11.5 : couverture complète des textes de Ma cuisine, registre historique compris.
+  '../src/ui/kitchen.js': ['Ma cuisine', 'Appareils', 'Inventaire', 'Tes appareils, pour adapter les recettes.', 'Ajouter un appareil courant…', 'Appareil ajouté', 'Nom de l’appareil', 'Appareil personnalisé', 'Aucun appareil enregistré.', 'Nom', 'Marque', 'Modèle', 'Notes (capacité, volume utile…)', 'Enregistré', 'Enregistrer', 'Supprimer « {n} » ?', 'Supprimer'],
   '../src/core/dom.js': ['Confirmer', 'Annuler', 'OK', 'Choisir'],
   '../src/ui/book.js': ['Voir plus', 'Filtrer les recettes de ce livre', 'Filtrer les pages source', 'Ajouter une recette', 'Ajouter des pages d’index', 'Pages source', 'Recettes', 'Mots-clés', 'Autre mot-clé', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre',
     // Lot G, tâche 6 : la couverture par état (§ 4.2).

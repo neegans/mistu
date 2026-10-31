@@ -1,6 +1,6 @@
 {
-  "name": "Cuisine OS",
-  "short_name": "Cuisine OS",
+  "name": "Mistu",
+  "short_name": "Mistu",
   "description": "Une intelligence culinaire personnelle : mes livres, mes recettes, mes appareils, mon historique et mon inventaire.",
   "lang": "fr",
   "start_url": "./index.html#/",

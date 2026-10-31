@@ -24,7 +24,7 @@ import {validerTransitionVersionStructuree} from './versions-structurees.js';
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf', 'application/epub+zip': 'epub', 'text/plain': 'txt' };
 export const extFor = (mime) => MIME_EXT[mime] || 'bin';
 
-const README_TXT = `Archive Cuisine OS
+const README_TXT = `Archive Mistu
 ==================
 manifest.json  : format, version du format, date, décomptes, liste des fichiers avec empreinte SHA-256.
 data/*.json    : un tableau JSON par magasin (identifiants stables, relations par identifiant).
@@ -366,7 +366,7 @@ export async function inspectArchive(arrayBuffer, {db = null} = {}) {
   try {
     const zip = readZip(arrayBuffer);
     const entry = zip.get('manifest.json');
-    if (!entry) { errors.push('manifest.json absent : ce n’est pas une archive Cuisine OS'); return fail(); }
+    if (!entry) { errors.push('manifest.json absent : ce n’est pas une archive Mistu'); return fail(); }
     if (!entry.crcOk) { errors.push('CRC invalide : manifest.json'); return fail(); }
     const parsed = JSON.parse(textOf(entry));
     if (!record(parsed)) { errors.push('Manifeste invalide : objet attendu'); return fail(); }

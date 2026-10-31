@@ -1232,7 +1232,7 @@ export async function runSyncL3Tests({ eq, ok }) {
   ok(m1.lines.includes('À envoyer : 3'), 'réglages L3 : « À envoyer » reste la file entière, jamais additionnée à la quarantaine');
   ok(m1.buttons.some((b) => b.action === 'envoyerMaintenant'), 'réglages L3 : « Envoyer maintenant » offert quand connecté');
   eq(m1.quarantaine.map((q) => [q.seq, q.motif]), [[4, 'Fiche trop grosse (plus de 512 Ko)'], [5, 'Fiche mal formée']], 'réglages L3 : chaque entrée en quarantaine, avec son motif en clair');
-  ok(m1.quarantaine[0].libelle.includes('b4') && m1.quarantaine[0].libelle.includes('books'), 'réglages L3 : la fiche est nommée');
+  ok(m1.quarantaine[0].libelle.includes('b4') && m1.quarantaine[0].libelle.includes('Livres'), 'réglages L3 : la fiche est nommée');
   eq(m1.conflits.length, 1, 'réglages L3 : chaque conflit listé');
   ok(m1.conflits[0].libelle.includes('Ici'), 'réglages L3 : le conflit nomme la fiche');
   ok(!!m1.conflits[0].dateIci && !!m1.conflits[0].dateAilleurs, 'réglages L3 : les deux versions du conflit sont datées');
@@ -1246,12 +1246,12 @@ export async function runSyncL3Tests({ eq, ok }) {
   eq(syncSectionModel({ ...base, moteur: etatMoteur({ enQuarantaine: 1 }), quarantaine: [{ seq: 9, store: 'books', id: 'b9' }] }).quarantaine[0].motif,
     'Envoi refusé', 'réglages L3 : une entrée sans motif enregistré est dite refusée, sans rien inventer');
   eq(syncSectionModel({ ...base, moteur: etatMoteur({ enQuarantaine: 1 }), quarantaine: [{ seq: 1, store: 'files', id: 'f'.repeat(64), last_error: 'taille' }] }).quarantaine[0].libelle,
-    'files · ' + 'f'.repeat(12) + '…', 'réglages L3 : un identifiant long est tronqué à 12 caractères, et la coupe se voit');
+    'Fichiers · ' + 'f'.repeat(12) + '…', 'réglages L3 : un identifiant long est tronqué à 12 caractères, et la coupe se voit');
 
   const m2 = syncSectionModel({ ...base, moteur: etatMoteur({ enCours: true, phase: 'envoi_initial', progression: { table: 'recipes', n: 8, total: 24 } }) });
-  eq(m2.progression, 'Envoi initial : recipes 8/24', 'réglages L3 : progression de l’envoi initial');
+  eq(m2.progression, 'Envoi initial : Recettes 8/24', 'réglages L3 : progression de l’envoi initial');
   const m3 = syncSectionModel({ ...base, moteur: etatMoteur({ enCours: true, phase: 'reception', progression: { table: 'books', n: 1, total: 24 } }) });
-  eq(m3.progression, 'Réception : books 1/24', 'réglages L3 : progression de la réception');
+  eq(m3.progression, 'Réception : Livres 1/24', 'réglages L3 : progression de la réception');
   eq(syncSectionModel({ ...base, moteur: etatMoteur({ enCours: false, phase: 'reception', progression: { table: 'books', n: 1, total: 24 } }) }).progression,
     null, 'réglages L3 : une passe terminée n’affiche plus de progression');
   const m4 = syncSectionModel({ ...base, moteur: etatMoteur({ pause: { raison: 'quota', at: 't' }, horloge: { minutes: 12 } }) });
@@ -1268,7 +1268,7 @@ export async function runSyncL3Tests({ eq, ok }) {
   ok(mDates.conflits[0].dateIci !== mDates.conflits[0].dateAilleurs, 'réglages L3 : chaque version est datée de SA date, jamais celle de l’autre');
   eq(mDates.conflits[0].kind, 'version', 'réglages L3 : la nature du conflit est conservée');
   eq(syncSectionModel({ ...base, moteur: etatMoteur({ conflits: 1 }), conflits: [{ id: 'books:k9', store: 'books', record_id: 'k9', local: null, server: { data: {}, updated_at: '2026-10-13T12:00:00Z' }, at: '2026-10-13T12:00:00Z', kind: 'donnees' }] }).conflits[0].libelle,
-    'books · k9', 'réglages L3 : sans version locale (fiche supprimée ici), le conflit se nomme par sa clé');
+    'Livres · k9', 'réglages L3 : sans version locale (fiche supprimée ici), le conflit se nomme par sa clé');
 
   // R-L3-29 : un conflit DÉJÀ RENVOYÉ n'est pas à trancher — la version d'ici est partie, le serveur l'acceptera.
   // Lui offrir « Garder celle d'ici » (qui réhorodate et renvoie encore) ou « Garder celle d'ailleurs » (qui écrase
@@ -1296,7 +1296,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     const boite = document.createElement('div');
     for (const n of syncSectionL3(m1, { reessayer: (seq) => vus.push(['reessayer', seq]), abandonner: (seq) => vus.push(['abandonner', seq]), garderIci: (id) => vus.push(['garderIci', id]), garderAilleurs: (id) => vus.push(['garderAilleurs', id]) })) boite.append(n);
     const texte = boite.textContent;
-    ok(texte.includes('books · b4') && texte.includes('Fiche trop grosse (plus de 512 Ko)'), 'rendu L3 : la quarantaine nomme la fiche et dit le motif en clair');
+    ok(texte.includes('Livres · b4') && texte.includes('Fiche trop grosse (plus de 512 Ko)'), 'rendu L3 : la quarantaine nomme la fiche et dit le motif en clair');
     const mots = texte.split(/[^0-9A-Za-zÀ-ÿ_]+/);
     ok(!jetons.some((j) => mots.includes(j)), 'rendu L3 : aucun jeton brut du serveur à l’écran');
     const libelles = [...boite.querySelectorAll('button')].map((b) => b.textContent);
@@ -1347,7 +1347,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     eq(boite.querySelector('.warn')?.textContent, 'Espace serveur plein — rien n’est perdu, tout reste sur cet appareil.', 'rendu L3 : la pause de quota est un avertissement visible, sans palier (R-G-5, lot G)');
     const boite2 = document.createElement('div');
     for (const n of syncSectionL3(m2, {})) boite2.append(n);
-    eq(boite2.textContent, 'Envoi initial : recipes 8/24', 'rendu L3 : la progression seule, sans liste vide ni titre orphelin');
+    eq(boite2.textContent, 'Envoi initial : Recettes 8/24', 'rendu L3 : la progression seule, sans liste vide ni titre orphelin');
     eq(syncSectionL3(m6, {}).length, 0, 'rendu L3 : sans moteur (L2), la section n’a rien de plus');
   }
 
@@ -1589,9 +1589,9 @@ export async function runSyncL3Tests({ eq, ok }) {
   // plus long (il est fait pour être lu). Dans les deux cas la coupe se voit.
   {
     const conflitNomme = (local, record_id = 'k1') => syncSectionModel({ ...base, moteur: etatMoteur(), conflits: [{ ...unConflit, record_id, local }] }).conflits[0].libelle;
-    eq(conflitNomme(null, 'r'.repeat(40)), 'books · ' + 'r'.repeat(12) + '…', 'ronde 1 : sans titre, la clé du conflit est tronquée comme celle de la quarantaine');
-    eq(conflitNomme({ title: 'T'.repeat(80), updated_at: '2026-10-13T12:00:00Z' }), 'books · ' + 'T'.repeat(40) + '…', 'ronde 1 : un titre très long est borné sans être rendu illisible');
-    eq(conflitNomme({ title: 'Tarte aux pommes', updated_at: '2026-10-13T12:00:00Z' }), 'books · Tarte aux pommes', 'ronde 1 : un titre ordinaire n’est pas coupé');
+    eq(conflitNomme(null, 'r'.repeat(40)), 'Livres · ' + 'r'.repeat(12) + '…', 'ronde 1 : sans titre, la clé du conflit est tronquée comme celle de la quarantaine');
+    eq(conflitNomme({ title: 'T'.repeat(80), updated_at: '2026-10-13T12:00:00Z' }), 'Livres · ' + 'T'.repeat(40) + '…', 'ronde 1 : un titre très long est borné sans être rendu illisible');
+    eq(conflitNomme({ title: 'Tarte aux pommes', updated_at: '2026-10-13T12:00:00Z' }), 'Livres · Tarte aux pommes', 'ronde 1 : un titre ordinaire n’est pas coupé');
   }
 
   // 4. Le cache de lecture de state.js ne sait RIEN des écritures faites par db.mutate (aucun bus) : sans

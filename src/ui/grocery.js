@@ -20,7 +20,7 @@ export async function renderShoppingList(params,query,ctx,deps={}){
  list.checked??={};let mode='restants',actionEnCours=false,editionLibre=null,idLibre=null,busyLibre=false,annulation=null;
  const casesEnCours=new Set(),lignesVisibles=new Map(),hote=el('div',{class:'courses-sections'}),statut=el('p',{role:'status',class:'status warn',hidden:true}),vide=el('p',{class:'muted',role:'status',dataset:{role:'courses-vides'}}),comparaison=el('div',{class:'courses-comparaison'});
  const copier=el('button',{class:'btn',onClick:()=>transmettre('copier')},t('Copier')),partager=typeof navigateur.share==='function'?el('button',{class:'btn',onClick:()=>transmettre('partager')},t('Partager')):null;
- root.append(pageHeader(list.title,{back:{href:list.meal_id?`/meals/${list.meal_id}`:'/meals',label:list.meal_id?t('Repas'):t('Ma semaine')},actions:[copier,partager].filter(Boolean)}));
+ root.append(pageHeader(list.title,{back:{href:list.meal_id?`/meals/${list.meal_id}`:'/meals',label:t('Repas')},actions:[copier,partager].filter(Boolean)}));
  root.append(...[...new Set((list.items||[]).map(it=>it.recipe_id))].map(id=>ctx.recipesById.get(id)).filter(Boolean).map(r=>mentionCycleRecette(r,ctx.editionsById?.get(r.edition_id))).filter(Boolean));
  const items=()=> (list.items||[]).map(it=>{const version=ctx.versionsById.get(it.recipe_version_id),recipe=ctx.recipesById.get(it.recipe_id);return version&&recipe?{version,servings:it.servings??null,title:it.title||recipe.display_title||recipe.original_title,convention_snapshot:it.convention_snapshot??null}:null;}).filter(Boolean);
  const versionsResolues=new Map();let lectureComparaison=false;
