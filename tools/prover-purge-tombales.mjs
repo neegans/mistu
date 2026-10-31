@@ -1,17 +1,11 @@
-// Preuves mutantes réservées au cluster jetable local de l'audit C. Aucun SQL distant.
-// Usage : MISTU_PSQL=/chemin/psql node tools/prover-purge-tombales.mjs mistu_audit_c_rouge
-import {execFileSync} from 'node:child_process';
+// Preuves réservées au contexte local possédé par tools/prouver.sh. Aucun SQL distant.
+import {chargerContextePreuve} from './preuves-postgres-contexte.mjs';
 import {readFileSync} from 'node:fs';
 import {resolve,dirname,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 const racine=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const database=process.argv[2];if(!/^mistu_audit_c_[a-z0-9_]+$/.test(database||'')||database==='mistu_audit_c_0013')throw Error('Clone local jetable audit C requis');
-const pg=process.env.MISTU_PSQL||'/private/tmp/mistu-plan-postgres-mount/Postgres.app/Contents/Versions/17/bin/psql';
-const args=['-X','-qAt','-h','127.0.0.1','-p','55449','-U','postgres','-d',database,'-v','ON_ERROR_STOP=1','-v','VERBOSITY=verbose'];
-const env={...Object.fromEntries(Object.entries(process.env).filter(([k])=>!k.startsWith('PG'))),PGPASSFILE:join(racine,'.superpowers/sdd/2026-10-30-audit-c/sans-mot-de-passe'),PGCONNECT_TIMEOUT:'5'};
-const run=sql=>execFileSync(pg,args,{input:sql,encoding:'utf8',env,maxBuffer:8*1024*1024,stdio:['pipe','pipe','pipe']});
-const identite=JSON.parse(run("select json_build_object('data',current_setting('data_directory'),'port',inet_server_port(),'owner',current_user,'database',current_database(),'encoding',current_setting('server_encoding'));"));
-if(resolve(identite.data)!==join(racine,'.superpowers/sdd/2026-10-30-audit-c/postgres')||identite.port!==55449||identite.owner!=='postgres'||identite.database!==database||identite.encoding!=='UTF8')throw Error('Identité du cluster local non conforme');
+const {run,identite}=chargerContextePreuve(database);
 const q=s=>"'"+String(s).replaceAll("'","''")+"'",j=x=>q(JSON.stringify(x))+'::jsonb';
 const uid='00000000-0000-0000-0000-000000000141',autre='00000000-0000-0000-0000-000000000142',date='2026-07-01T12:00:00.000Z';
 const version={id:'preuve',recipe_id:'parent',kind:'extraction',status:'proposed',ingredients:[],ingredient_structure:{format:1,blocks:[]},steps:[]};

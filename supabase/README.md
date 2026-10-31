@@ -30,13 +30,37 @@ supabase/
   migrations/0011_ingredients_traductions.sql traductions, générée
   migrations/0012_cuisine_minuteurs.sql  cuisine et minuteries, générée
   migrations/0013_inventaire.sql         inventaire, générée
-  migrations/0014_maintenance_et_bornes.sql maintenance, générée ; NON appliquée
+  migrations/0014_maintenance_et_bornes.sql maintenance, générée ; reçu d'application dans RESULTATS-mitsu.md
   proofs/0014_maintenance.sql           preuves mutantes, base locale jetable uniquement
   functions/assistant/                   la fonction de la passerelle (index.ts, logique.js, lecture-web.js, deno.json) ; déployée par le CLI, étape 10
   proofs/0001_hook.md                    gabarit : capture du crochet « Before User Created »
   proofs/0001_providers.md               gabarit : capture des fournisseurs de connexion
   proofs/RESULTATS-<projet>.md           tes sorties, collées (à créer : un fichier par projet)
 ```
+
+## Rejouer les preuves sur PostgreSQL jetable
+
+Depuis la racine du dépôt, avec **Node24 et PostgreSQL17** (`initdb`, `pg_ctl`, `psql`, utilisateur ordinaire) :
+
+```sh
+sh tools/prouver.sh
+```
+
+Le lanceur trouve le répertoire des binaires avec `pg_config --bindir`. Si cette commande n'est pas dans le PATH, indiquer explicitement le répertoire installé :
+
+```sh
+MISTU_PGBIN=/chemin/postgresql17/bin sh tools/prouver.sh
+```
+
+Chaque lancement crée son propre répertoire sous `/tmp/mistu-preuves-*`, choisit un port libre sur `127.0.0.1`, initialise une base UTF-8, puis applique **0001 à0014** dans un socle. Les **30 programmes `tools/prover-*.mjs`** reçoivent chacun un clone de ce socle :27 génèrent du SQL, trois exécutent eux-mêmes leurs connexions (concurrence cuisine, concurrence inventaire et maintenance). Aucun pipeline ne masque le code de sortie du générateur. Le premier échec arrête le rejeu ; le bilan précise le nombre de prouveurs réussis et tentés sur30, sans additionner leurs compteurs hétérogènes.
+
+Le cluster est identifié par son répertoire, son propriétaire, son port, sa base et un nonce de lancement vérifié sur le serveur avant chaque connexion susceptible d'écrire. Les variables `PG*` du terminal ne choisissent pas la cible. Les anciens ports55439/55449 ne sont ni réutilisés ni arrêtés. Cette isolation remplace le port55439 fixe du plan initial, qui pouvait déjà appartenir à une autre session locale.
+
+L'arrêt, même après échec, porte uniquement sur le répertoire créé par cette invocation. Après arrêt confirmé, les données temporaires sont retirées ; **`resultat.json` et `logs/` restent dans le répertoire annoncé dès le lancement**. Le reçu contient l'identité locale, les empreintes des14 migrations et le résultat de chaque programme tenté. Une erreur d'arrêt est un échec explicite, jamais un succès de nettoyage. Deux lancements peuvent coexister avec des clusters distincts.
+
+Le bootstrap simule les schémas Auth/Storage nécessaires aux comptes synthétiques. Il ne vérifie aucun vrai JWT ni connexion OAuth. `cron.job` est un registre local : les commandes sont enregistrées, **aucun ordonnanceur ne les exécute**. La seule adaptation des migrations remplace en mémoire l'instruction exacte d'installation de `pg_cron` dans0001 ; les fichiers SQL du dépôt restent inchangés. Les preuves de maintenance appellent les fonctions directement. Cela ne démontre ni la planification distante, ni PostgREST, ni un parcours sur un compte réel.
+
+Les trois exécuteurs ne se lancent plus directement avec un port ou une URL arbitraire : ils exigent le contexte possédé créé par ce lanceur. L'ancien fichier `proofs/0008_corbeille_concurrence.cjs`, hors du glob des30 prouveurs, n'est pas inclus dans ce bilan. `node --test --test-concurrency=1 tools/*.test.mjs` reste une suite distincte ; il ne remplace pas ce rejeu PostgreSQL.
 
 ## Un seul projet : `mitsu` (depuis le 13 octobre 2026, R33)
 
@@ -457,16 +481,16 @@ ne s’ouvre pas avec l’ancien logiciel DB4 ; un retour arrière ne doit pas e
 
 ### 15. De `0009` à `0014` — reçus, maintenance et suppression administrative
 
-**État du lot C : `0014` écrite pour relecture, non appliquée.** Son application est un geste de Neegan, après son postflight de `0011`–`0013`. Publier le site ou committer le fichier SQL ne l’applique pas. Aucun redéploiement de la fonction `assistant` n’est requis.
+**État reçu du lot C : `0014` appliquée le30 octobre2026 à21:08:02 UTC**, sur l'autorisation de Neegan, après contrôle du catalogue0001–0013 ; postflight consigné dans [RESULTATS-mitsu.md](proofs/RESULTATS-mitsu.md#publication-autorisée-de-0014--30-octobre-2026). Ce reçu couvre aussi les contrôles0011–0013 auparavant manquants. Publier le site ou committer un fichier SQL n'applique aucune migration ; toute nouvelle application distante reste un geste explicitement autorisé. Aucun redéploiement de la fonction `assistant` n'est requis.
 
 | Migration | Objet | État documenté de `mitsu` |
 | --- | --- | --- |
 | `0009_corbeille_livres.sql` | Cycle des éditions | Reçu historique dans `RESULTATS-mitsu.md` |
 | `0010_sources_index.sql` | Sources, index, transferts privés | Reçu historique dans `RESULTATS-mitsu.md` |
-| `0011_ingredients_traductions.sql` | Versions structurées et traductions | Reçu historique rapproché ; postflight de Neegan à consigner |
-| `0012_cuisine_minuteurs.sql` | Cuisine et minuteries | Reçu historique rapproché ; postflight de Neegan à consigner |
-| `0013_inventaire.sql` | Inventaire | Reçu historique rapproché ; postflight de Neegan à consigner |
-| `0014_maintenance_et_bornes.sql` | Purge des tombales, verrous bornés, purge administrative, transferts | **Non appliquée** |
+| `0011_ingredients_traductions.sql` | Versions structurées et traductions | Reçu historique et contrôle du catalogue le30 octobre2026 |
+| `0012_cuisine_minuteurs.sql` | Cuisine et minuteries | Reçu historique et contrôle du catalogue le30 octobre2026 |
+| `0013_inventaire.sql` | Inventaire | Reçu historique et contrôle du catalogue le30 octobre2026 |
+| `0014_maintenance_et_bornes.sql` | Purge des tombales, verrous bornés, purge administrative, transferts | Application et postflight reçus le30 octobre2026 |
 
 Sur une base neuve, appliquer les migrations manquantes dans cet ordre après `0001`–`0008`, une fois chacune. Sur `mitsu`, **ne pas recoller `0009`–`0013`** : vérifier d’abord ce qui est déjà installé. Les empreintes historiques et les preuves locales ne remplacent pas le catalogue distant actuel.
 
