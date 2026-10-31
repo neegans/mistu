@@ -26,6 +26,7 @@ import {runAuditCuisineTextesTests} from './audit-cuisine-textes.js';
 import {runAuditReglagesTextesTests} from './audit-reglages-textes.js';
 import {runAuditMarqueNavigationTests} from './audit-marque-navigation.js';
 import {runAuditImportRouteTests} from './audit-import-route.js';
+import {runAuditRepoAbsenceTests} from './audit-repo-absence.js';
 import {runAuditArchiveRetraitTests} from './audit-archive-retrait.js';
 import {runAuditArchiveFichesInvalidesTests} from './audit-archive-fiches-invalides.js';
 import {runAuditArchiveExclusionsUITests} from './audit-archive-exclusions-ui.js';
@@ -766,7 +767,9 @@ try { await runAuditReponsesParcoursTests({eq,ok}); } catch (e) { ok(false, 'run
 try { await runAuditReponsesEcranTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesEcranTests : ' + (e.stack || e)); }
 try { await runAuditImportRouteTests({eq,ok}); } catch (e) { ok(false, 'runAuditImportRouteTests : ' + (e.stack || e)); }
 
-eq(results.length, 14517,'compte d’assertions : une assertion qui disparait est un rouge');
+try { await runAuditRepoAbsenceTests({eq,ok}); } catch (e) { ok(false, 'runAuditRepoAbsenceTests : ' + (e.stack || e)); }
+
+eq(results.length, 14560,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);
