@@ -155,7 +155,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
 
   let version = (demandee?.recipe_id === recipe.id ? demandee : null) || original || versions[0] || null;
   const actionsCommunes=actionsRecette({recipe,version,ctx,origine},deps);
-  const state = { servings: query.servings ? Number(query.servings) : version?.servings || null, units: ctx.settings.units, lang: query.lang || ctx.settings.reading_locale || 'original', diet: '', onglet: 'ingredients', translationId:query.translation||null };
+  const state = { servings: query.servings ? Number(query.servings) : version?.servings || null, units: ctx.settings.units, lang: query.lang || ctx.settings.reading_locale || 'original', diet: '', onglet: 'ingredients', translationId:query.translation||null, detailsIngredients:false };
   const lecturePreparee=version?await preparerLectureRecette({recipe,version,traductions:ctx.recipe_translations||[]}):null;
   if(Object.hasOwn(query,'translation')){
     const exacte=lecturePreparee?.lectures.find(x=>x.row.id===query.translation&&x.row.locale===state.lang);
@@ -179,7 +179,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     );
   }
   const conventionId = ctx.conventionFor(recipe);
-  const root = el('div', null);
+  const root = el('div', {class:'fiche-recette'});
 
   // Lot F (D-F16) : ★ Favori n'écrit que `favorite`, sur la fiche RELUE — ronde 1 : DANS la transaction d'écriture (condition { key, fusion } par
   // saveBatch, comme photo-plat.js) : une photo du plat posée depuis le rendu (descente web, autre onglet), même pendant ce geste, survit. La valeur
@@ -229,7 +229,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const etat = el('div', { class: 'stack fiche-etat', dataset: { role: 'fiche-etat' } }, entete,
     rangeeEtat(availabilityBadge(recipe), versionBadge(version, recipe), lecture ? etatVerification(version) : null, recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
   if (recipe.original_title && recipe.display_title && recipe.display_title !== recipe.original_title) etat.append(el('p', { class: 'muted alias-recette' }, t('Titre original : {titre}', { titre: recipe.original_title })));
-  etat.append(resumeReperes(recipe, version, { detail: true, modifier: !lectureSeule }));
+  etat.append(resumeReperes(recipe, version, { detail: true, modifier: !lectureSeule, compact:true, discret:true }));
   const web = bandeauWeb(version);
   if (web) etat.append(web); // lot B (§ 4.5) : la source d'une version lue sur le web, d'abord — puis la bannière du lot A
   if (lecture) etat.append(bandeauLecture(lecture));
@@ -241,7 +241,8 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const tete = el('div', { class: 'two-col fiche-tete', dataset: { role: 'fiche-tete' } }, etat, photoFiche);
   root.append(tete);
   const panneauCycle = lectureSeule ? await panneauCycleRecette(recipe, ctx, deps) : null; if (panneauCycle) root.prepend(panneauCycle);
-  root.append(lectureSeule ? sectionPlain(t('Mes notes'), el('div', {style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}, textePersonnel(recipe.personal_notes))) : await monterNotesPersonnelles(recipe, { ctx, repo: gestesLecture.repo, toast: dire }));
+  const notesPersonnelles = lectureSeule ? sectionPlain(t('Mes notes'), el('div', {style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}, textePersonnel(recipe.personal_notes))) : await monterNotesPersonnelles(recipe, { ctx, repo: gestesLecture.repo, toast: dire });
+  root.append(textePersonnel(recipe.personal_notes) ? notesPersonnelles : el('details', {class:'fiche-secondaire',dataset:{role:'notes-fiche'}}, el('summary', null, t('Mes notes')), notesPersonnelles));
 
   if (!version) {
     if(!lectureSeule)etat.insertBefore(el('div',{class:'row geste-principal',dataset:{role:'geste-principal'}},boutonsActions(actionsCommunes,['modifier']),menuActions(actionsCommunes,{titre:titreRecetteAffichee(),onResultat:()=> (deps.refresh??refresh)()})),etat.querySelector('.resume-reperes'));
@@ -415,10 +416,13 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     const scaled=projection.scaled;
     const reperesLus=etat.querySelector('[data-role=reperes]');if(reperesLus)reperesLus.textContent=texteReperes(version,{lecture:projection})||'';
     const titreLu=entete.querySelector('h1');if(titreLu){titreLu.textContent=projection.titre.texte||titreRecetteAffichee();if(projection.titre.langReelle)titreLu.lang=projection.titre.langReelle;else titreLu.removeAttribute('lang');}
-    const ingList = el('ul', { class: 'list plain coches' });
+    // Un avis global suffit lorsque tout le contenu reste original. Une traduction
+    // affichée mais incomplète conserve au contraire ses repères locaux.
+    const signalerManque = !!projection.traductionId;
+    const ingList = el('ul', { class: 'list plain coches', id:`details-ingredients-${++numeroCoche}` });
     for(const ligne of projection.blocs){
-      if(ligne.kind==='heading'){ingList.append(el('li',{class:'ingredient-heading',dataset:{role:'ingredient-heading'}},segmentLectureEl(ligne)));continue;}
-      const ri=ligne.ingredient,li=ingredientLectureEl(ligne),i=ligne.ordinal;
+      if(ligne.kind==='heading'){ingList.append(el('li',{class:'ingredient-heading',dataset:{role:'ingredient-heading'}},segmentLectureEl(ligne,{signalerManque})));continue;}
+      const ri=ligne.ingredient,li=ingredientLectureEl(ligne,{signalerManque,compact:true}),i=ligne.ordinal;
       const contenu=li.firstElementChild,idLigne=`coche-${++numeroCoche}`;contenu.id=idLigne;
       const cles=cochesDe(recipe.id),cle=ri.id||`#${i}`;
       const caseL=el('input',{type:'checkbox',class:'coche','aria-labelledby':idLigne,onChange:e=>{if(e.target.checked)cles.add(cle);else cles.delete(cle);}});caseL.checked=cles.has(cle);
@@ -430,7 +434,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     const messageLecture=state.lang==='original'?t('Texte original affiché.')
       :projection.candidates.length>1&&!state.translationId?t('Choisis une traduction ci-dessous pour l’afficher.')
       :!projection.traductionDemandee?(state.lang==='en'?t('Cette recette est déjà en anglais.'):t('Cette recette est déjà en français.'))
-      :!projection.traductionId?(state.lang==='en'?t('Traduction anglaise non disponible. Le texte original est affiché.'):t('Crée une version française pour lire cette recette en français.'))
+      :!projection.traductionId?(state.lang==='en'?t('Traduction anglaise non disponible. Le texte original est affiché.'):t('Le texte original est affiché. Crée une version française pour lire cette recette en français.'))
       :projection.manque?t('Les passages non traduits restent dans leur langue d’origine.')
       :state.lang==='en'?t('Traduction anglaise affichée.'):t('Traduction française affichée.');
     avisLecture.append(el('p',{class:projection.manque?'status warn':'muted',role:'status'},messageLecture));
@@ -441,7 +445,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     const francaisePrete=!francaise.traductionDemandee||!!francaise.traductionId&&!francaise.manque;
     if(!lectureSeule){
       const href=francaisePrete?lienAvecOrigine(`/recipes/${rid}${buildQuery({...query,v:version.id,lang:'fr',translation:francaise.traductionId||undefined})}`,origine):lienEdition('translation',version.id,'fr',{format:2,assistant:true});
-      avisLecture.append(el('div',{class:'row'},el('a',{class:'btn primary',href,dataset:{role:'version-francaise'}},francaisePrete?t('Lire la version française'):francaise.traductionId?t('Compléter la version française'):t('Créer la version française')),el('a',{class:'btn small',href:lienEdition('translation',version.id,state.lang==='en'?'en':'fr')},t('Traduire moi-même'))));
+      avisLecture.append(el('div',{class:'row'},state.lang==='fr'&&francaisePrete?null:el('a',{class:'btn primary',href,dataset:{role:'version-francaise'}},francaisePrete?t('Lire la version française'):francaise.traductionId?t('Compléter la version française'):t('Créer la version française')),el('a',{class:'btn small',href:lienEdition('translation',version.id,state.lang==='en'?'en':'fr')},t('Traduire moi-même'))));
       if(!francaisePrete)avisLecture.append(el('small',{class:'muted'},t('Le coût en appels est indiqué avant de lancer la traduction. Traduction manuelle sans appel.')));
     }
     // § 3.3, C-6, C-9 : sur une création, ce que l'assistant a dit (préfixé « Selon l’assistant »), sa durée ESTIMÉE (jamais dans
@@ -456,18 +460,25 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     // UI-1 (D-UI-6, D-UI-8) : Ingrédients et Préparation en sections `plain`, côte à côte dès 760 px (.two-col), en onglets au-dessous (segmented ;
     // la section non choisie cachée par hidden, les deux toujours dans le DOM). Le segmented est reconstruit à chaque drawBody ; le choix (state.onglet)
     // survit. La liste garde ingredientLineEl et « Remplacer » ; le select « Évaluer une restriction… » et timeText (« actif · total ») restent dans l'en-tête de la section.
+    const detailsIngredients=el('button',{type:'button',class:'btn link small',dataset:{role:'details-ingredients'},'aria-controls':ingList.id,onClick:()=>{state.detailsIngredients=!state.detailsIngredients;actualiserDetailsIngredients();}});
+    function actualiserDetailsIngredients(){
+      detailsIngredients.textContent=state.detailsIngredients?t('Masquer les détails des ingrédients'):t('Afficher les détails des ingrédients');
+      detailsIngredients.setAttribute('aria-expanded',String(state.detailsIngredients));
+      for(const detail of ingList.querySelectorAll('details.lecture-original, .remplacer'))detail.hidden=!state.detailsIngredients;
+    }
+    actualiserDetailsIngredients();
     const ingredients = sectionPlain(`${t('Ingrédients')}${scaled.ok && scaled.factor !== 1 ? ` — ${t('recalculés pour {n} portions', { n: state.servings })}` : version.servings ? ` — ${t('{n} portions', { n: version.servings })}` : ''}`,
       el('div', { class: 'row between' }, el('span', { class: 'muted' }, timeText(version, recipe)), dietSel),
       assessment ? el('div', { style: { margin: '.4rem 0' } }, dietChip(assessment), assessment.unknown.length ? el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `${t('Inconnus')} : ${assessment.unknown.join(', ')}`) : null) : null,
-      ingList, ...scaled.notes.map((n) => el('small', { class: 'muted', style: { display: 'block' } }, n)),
+      detailsIngredients, ingList, ...scaled.notes.map((n) => el('small', { class: 'muted', style: { display: 'block' } }, n)),
       !conventionId && scaled.ingredients.some((i) => ['cup', 'tbsp', 'tsp', 'fl_oz'].includes(i.unit_id)) ? el('div', { class: 'status warn', style: { marginTop: '.5rem' } }, t('Tasses/cuillères : convention non confirmée pour cette édition — quantités d’origine affichées.'), edition ? el('a', { class: 'btn small', href: `#/books/${edition.id}` }, t('Préciser')) : null) : null);
     ingredients.dataset.role = 'section-ingredients';
     const steps = el('ol', { class: 'list steps' });
     projection.etapes.forEach((s,i)=>{
-      const li=el('li',null,el('span',{class:'step-num'},String(i+1)),el('div',{style:{flex:1}},segmentLectureEl(s,{role:'texte-etape'}),
-        ...(!lectureSeule&&gardeThermomix(version,state.servings).ok?s.timers:[]).slice(0,2).map(tm=>timerBlock(tm.seconds,{seconds_max:tm.seconds_max,locale:projection.locale||ctx.settings?.ui_locale||'fr',compact:true,onRequest:async(channel,seconds)=>{const contexte=await capturerRecette(gestesLecture.repo,recipe,{ctx});return gestesLecture.repo.save('timer_launches',createTimerLaunch({recipe_version_id:version.id,step_id:s.id,device_id:deviceId(),duration_seconds:seconds,channel}),{recettes:[contexte]});}}))));steps.append(li);
+      const li=el('li',null,el('span',{class:'step-num'},String(i+1)),el('div',{style:{flex:1}},segmentLectureEl(s,{role:'texte-etape',signalerManque}),
+        ...(!lectureSeule&&gardeThermomix(version,state.servings).ok?s.timers:[]).slice(0,2).map(tm=>timerBlock(tm.seconds,{seconds_max:tm.seconds_max,locale:projection.locale||ctx.settings?.ui_locale||'fr',compact:true,replie:true,onRequest:async(channel,seconds)=>{const contexte=await capturerRecette(gestesLecture.repo,recipe,{ctx});return gestesLecture.repo.save('timer_launches',createTimerLaunch({recipe_version_id:version.id,step_id:s.id,device_id:deviceId(),duration_seconds:seconds,channel}),{recettes:[contexte]});}}))));steps.append(li);
     });
-    const preparation = sectionPlain(t('Préparation'), estThermomix(version) ? el('small', { class: 'muted' }, t('Durée proposée par l’assistant, à vérifier pendant la cuisson.')) : null, (version.steps || []).length ? steps : el('p', { class: 'muted' }, t('Étapes non numérisées.')), projection.notes.texte ? segmentLectureEl(projection.notes) : null, projection.rendement.texte ? segmentLectureEl(projection.rendement) : null);
+    const preparation = sectionPlain(t('Préparation'), estThermomix(version) ? el('small', { class: 'muted' }, t('Durée proposée par l’assistant, à vérifier pendant la cuisson.')) : null, (version.steps || []).length ? steps : el('p', { class: 'muted' }, t('Étapes non numérisées.')), projection.notes.texte ? segmentLectureEl(projection.notes,{signalerManque}) : null, projection.rendement.texte ? segmentLectureEl(projection.rendement,{signalerManque}) : null);
     preparation.dataset.role = 'section-preparation';
     const onglets = segmented([{ value: 'ingredients', label: t('Ingrédients') }, { value: 'preparation', label: t('Préparation') }], state.onglet, (v) => { state.onglet = v; appliquerCorps(); }, {nom:t('Contenu de la recette')});
     onglets.dataset.role = 'onglets-corps';

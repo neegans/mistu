@@ -444,15 +444,15 @@ export function ingredientLineEl(ri, ctx, ingredientsById) {
 }
 
 // L6 : segments du projecteur commun ; le rendu ne choisit ni ne recalcule la traduction.
-export function segmentLectureEl(segment, {original = true, role = null} = {}) {
+export function segmentLectureEl(segment, {original = true, role = null, signalerManque = true} = {}) {
   const texte = el('span', { ...(segment.langReelle ? {lang:segment.langReelle} : {}), style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}, ...(role ? {dataset:{role}} : {}) }, segment.texte);
   const root = el('div', {class:'lecture-segment'}, texte);
-  if (segment.etat==='manquant'||segment.etat==='perime') root.append(el('small',{class:'lecture-manquante muted',dataset:{role:'traduction-manquante'}},t(segment.etat==='perime'?'Traduction à revoir ; texte original.':'Passage non traduit ; texte original.')));
+  if (signalerManque && (segment.etat==='manquant'||segment.etat==='perime')) root.append(el('small',{class:'lecture-manquante muted',dataset:{role:'traduction-manquante'}},t(segment.etat==='perime'?'Traduction à revoir ; texte original.':'Passage non traduit ; texte original.')));
   if(segment.citationSource)root.append(el('small',{class:'lecture-manquante muted',dataset:{role:'citation-source-tm'}},t('Réglages traduits ; noms d’aliments cités dans la langue source.')));
   if (original && segment.traduit && segment.original !== segment.texte) root.append(el('details',{class:'lecture-original'},el('summary',null,t('Voir l’original')),el('div',{...(segment.originalLang?{lang:segment.originalLang}:{}),style:{whiteSpace:'pre-wrap'}},segment.original)));
   return root;
 }
-export function ingredientLectureEl(ligne) {
+export function ingredientLectureEl(ligne, {signalerManque = true, compact = false} = {}) {
   const ri=ligne.ingredient, principal=ligne.principal;
   const q=el('span',{class:'qty'},ligne.quantite);
   if(ligne.quantiteDetail.converted)q.append(' ',el('span',{class:'est',title:ligne.quantiteDetail.assumptions?.join(' · ')||''},ligne.quantiteDetail.estimate?'≈':'↺'));
@@ -460,19 +460,20 @@ export function ingredientLectureEl(ligne) {
   const nom=el('span',{dataset:{role:'nom-ingredient'},...(principal.langReelle?{lang:principal.langReelle}:{})},principal.texte);
   if(!ligne.sansQuantiteCalculee&&ligne.preparation.texte)nom.append(', ',el('span',{lang:ligne.preparation.langReelle||'',class:'muted'},ligne.preparation.texte));
   if(ri.optional)nom.append(' ',el('span',{class:'muted'},`(${texteLecture('facultatif',ligne.locale)})`));
-  const li=el('li',{'data-ingredient-id':ri.id||''},el('div',{class:'row',style:{gap:'.4rem'}},q,nom,
+  const contenu=compact?[el('span',{class:'ingredient-lecture-texte'},q,ligne.quantite?' ':null,nom)]:[q,nom];
+  const li=el('li',{'data-ingredient-id':ri.id||''},el('div',{class:'row',style:{gap:'.4rem'}},...contenu,
     ri.verification_state!=='verified'?el('span',{class:'chip warn'},t('À vérifier')):null,
     ri.uncertain===true?el('span',{class:'chip warn'},t('incertain')):null,
     ri.unit_candidates?el('span',{class:'chip warn'},`${ri.unit_text||''} ?`):null));
-  if(ligne.source.original)li.append(el('details',{class:'lecture-original'},el('summary',null,t('Texte source et quantités d’origine')),segmentLectureEl(ligne.source)));
-  if(ligne.documentaire)li.append(el('details',{class:'lecture-original'},el('summary',null,t('Traduction conservée aux quantités d’origine')),segmentLectureEl(ligne.documentaire)));
+  if(ligne.source.original)li.append(el('details',{class:'lecture-original'},el('summary',null,t('Texte source et quantités d’origine')),segmentLectureEl(ligne.source,{signalerManque})));
+  if(ligne.documentaire)li.append(el('details',{class:'lecture-original'},el('summary',null,t('Traduction conservée aux quantités d’origine')),segmentLectureEl(ligne.documentaire,{signalerManque})));
   if(ligne.sansQuantiteCalculee&&!ri.name_text)li.append(el('small',{class:'muted',dataset:{role:'quantite-documentaire'}},t('Texte conservé aux quantités d’origine ; quantité non recalculable.')));
-  if(principal.etat==='manquant'||principal.etat==='perime'||(!ligne.sansQuantiteCalculee&&ligne.preparation.original&&['manquant','perime'].includes(ligne.preparation.etat)))li.append(el('small',{class:'lecture-manquante muted',dataset:{role:'traduction-manquante'}},t('Passage non traduit ; texte original.')));
+  if(signalerManque&&(principal.etat==='manquant'||principal.etat==='perime'||(!ligne.sansQuantiteCalculee&&ligne.preparation.original&&['manquant','perime'].includes(ligne.preparation.etat))))li.append(el('small',{class:'lecture-manquante muted',dataset:{role:'traduction-manquante'}},t('Passage non traduit ; texte original.')));
   return li;
 }
 
 // Bloc minuterie (spec §33) : Siri par l'utilisateur, ou raccourci installé. Aucun compteur JS n'est présenté comme alarme.
-export function timerBlock(seconds, { seconds_max = null, onRequest = null, onOpen = null, onChoice = null, locale = 'fr', compact = false, apple = isAppleTouchDevice(), estCourante = () => true } = {}) {
+export function timerBlock(seconds, { seconds_max = null, onRequest = null, onOpen = null, onChoice = null, locale = 'fr', compact = false, replie = false, apple = isAppleTouchDevice(), estCourante = () => true } = {}) {
   const min = normaliserDuree(seconds), max = seconds_max == null ? null : normaliserDuree(seconds_max);
   if (min === null || (seconds_max != null && (max === null || max < min))) return el('div', { class: 'card flat', role: 'status' }, t('Durée de minuterie invalide.'));
   const plage = max !== null && max > min;
@@ -515,12 +516,15 @@ export function timerBlock(seconds, { seconds_max = null, onRequest = null, onOp
   } }, el('option', { value: '' }, t('Choisir une durée')),
   el('option', { value: String(min) }, t('Minimum : {d}', { d: describeDuration(min, locale) })),
   el('option', { value: String(max) }, t('Maximum : {d}', { d: describeDuration(max, locale) }))) : null;
-  const box = el('div', { class: 'card flat stack', dataset: { role: 'timer-block' } },
-    el('div', { class: 'row between' }, titre, preparer, raccourci),
+  const commandes = [
+    !replie||apple ? el('div', { class: 'row between' }, replie ? null : titre, preparer, raccourci) : null,
     choix ? el('label', { class: 'stack' }, t('Durée à demander'), choix) : null,
     el('div', { class: 'muted', style: { fontSize: '.9rem' } }, phrase, ' ', siri), erreur,
     apple ? null : el('div', { class: 'muted', style: { fontSize: '.85rem' } }, t('Sur Mac, utilise Horloge ou Siri directement ; le raccourci s’exécute sur iPhone et iPad.')),
-    compact ? null : el('small', { class: 'muted' }, t('Le raccourci « CuisineOS-Minuterie » doit être installé une fois (voir Réglages). L’app ne peut pas confirmer qu’Horloge a bien démarré.')));
+    compact ? null : el('small', { class: 'muted' }, t('Le raccourci « CuisineOS-Minuterie » doit être installé une fois (voir Réglages). L’app ne peut pas confirmer qu’Horloge a bien démarré.'))];
+  const box = replie
+    ? el('details', { class: 'card flat timer-replie', dataset: { role: 'timer-block' } }, el('summary', null, titre), el('div', {class:'stack'}, ...commandes))
+    : el('div', { class: 'card flat stack', dataset: { role: 'timer-block' } }, ...commandes);
   function actualiser() {
     titre.textContent = `${t('Minuterie')} — ${plage ? t('{min} à {max}', { min: describeDuration(min, locale), max: describeDuration(max, locale) }) : describeDuration(min, locale)}`;
     phrase.textContent = choisie === null ? t('Choisis la durée avant de demander la minuterie.') : `${t('Ou dis à Siri')} : « ${siriPhrase(choisie, locale)} »`;

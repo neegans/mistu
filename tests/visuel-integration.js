@@ -103,7 +103,7 @@ export async function runVisuelIntegrationTests({ eq, ok }) {
     const { recipeCard } = await import('../src/ui/components.js');
     const root = await renderRecipe({ id: r.id }, {}, await getData(true), { repo });
     const carte = recipeCard({ recipe: r, version: v });
-    eq(root.textContent.includes('Temps à estimer'), true, 'Visuel : correction nulle affiche temps inconnu sur la fiche');
+    ok(!root.querySelector('.reperes-badges .temps')&&!root.textContent.includes('Temps à estimer')&&root.querySelector('.details-reperes')?.textContent.includes('Non renseigné'), 'Visuel : correction nulle garde le temps inconnu dans les détails sans badge vide ni valeur inventée');
     ok(!/60 min|20 min|1 h/.test([...root.querySelectorAll('.fiche-tete, [data-role=section-ingredients] .row.between > .muted')].map(n => n.textContent).join(' ')), 'Visuel : aucun ancien temps ne réapparaît dans les ingrédients ou les gestes');
     ok(!/60 min|20 min|1 h/.test(carte.textContent), 'Visuel : carte horizontale utilise aussi la correction nulle');
     root.dispose?.();

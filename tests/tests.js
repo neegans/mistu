@@ -158,6 +158,8 @@ import { runL6CommandesTraductionTests } from './l6-commandes-traduction.js';
 import { runL6LectureExportsTests } from './l6-lecture-exports.js';
 import { runL6LectureEcransTests } from './l6-lecture-ecrans.js';
 import { runCorrectifLangueRecetteTests } from './correctif-langue-recette.js';
+import { runFicheLisibleTests } from './fiche-lisible.js';
+import { runFicheLisibleComposantsTests } from './fiche-lisible-composants.js';
 import { runTraductionGuideeTests } from './traduction-guidee.js';
 import { runL6LectureRecetteTests } from './l6-lecture-recette.js';
 import { runL6PasserelleBrutTests } from './l6-passerelle-brut.js';
@@ -492,6 +494,10 @@ try { await runL6LectureRecetteTests({ eq, ok }); }
 catch (e) { ok(false, 'L6 lecture-recette : ' + (e.stack || e)); }
 try { await runCorrectifLangueRecetteTests({ eq, ok }); }
 catch (e) { ok(false, 'Correctif langue recette : ' + (e.stack || e)); }
+try { await runFicheLisibleTests({ eq, ok }); }
+catch (e) { ok(false, 'Fiche lisible : ' + (e.stack || e)); }
+try { await runFicheLisibleComposantsTests({ eq, ok }); }
+catch (e) { ok(false, 'Fiche lisible composants : ' + (e.stack || e)); }
 try { await runTraductionGuideeTests({ eq, ok }); }
 catch (e) { ok(false, 'Traduction guidée : ' + (e.stack || e)); }
 try { await runL6LectureEcransTests({ eq, ok }); }
@@ -769,7 +775,7 @@ try { await runAuditImportRouteTests({eq,ok}); } catch (e) { ok(false, 'runAudit
 
 try { await runAuditRepoAbsenceTests({eq,ok}); } catch (e) { ok(false, 'runAuditRepoAbsenceTests : ' + (e.stack || e)); }
 
-eq(results.length, 14560,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 14624,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

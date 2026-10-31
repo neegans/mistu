@@ -1871,7 +1871,7 @@ export async function runCarnetTests({ eq, ok }) {
           eq(selection(fiche), ['Original'], 'Langue mobile : la sélection initiale est Original');
           bouton(champLangue(fiche), 'Français').click();
           eq(selection(fiche), ['Français'], 'Langue mobile : FR seul devient visuellement actif après le choix');
-          ok(fiche.querySelector('[data-role=texte-etape]')?.textContent==='Impastare.'&&!!fiche.querySelector('[data-role=traduction-manquante]'), 'Langue mobile : original italien sans traduction française dit son absence');
+          ok(fiche.querySelector('[data-role=texte-etape]')?.textContent==='Impastare.'&&fiche.querySelector('[data-role=etat-lecture]')?.textContent.includes('Le texte original est affiché.')&&!fiche.querySelector('[data-role=traduction-manquante]'), 'Langue mobile : original italien conservé et absence française annoncée une fois près du choix de langue');
           const cibleFr = queryDuLien(lienTraduire(fiche));
           eq([cibleFr.kind, cibleFr.v, cibleFr.locale], ['translation', version.id, 'fr'], 'Langue mobile : le lien de traduction transporte exactement la version et FR choisies');
           let editeur = await renderRecipeEdit({ id: italienne.id }, cibleFr, await ctx());
@@ -1886,7 +1886,7 @@ export async function runCarnetTests({ eq, ok }) {
           eq([selection(fiche), details.open, queryDuLien(lienTraduire(fiche)).locale], [['Français'], true, 'fr'], 'Langue mobile : changer les unités conserve le choix FR et le volet ouvert');
 
           const manque = await renderRecipe({ id: inconnue.id }, { lang: 'fr' }, await ctx()); scene.append(manque);
-          ok(manque.querySelector('[data-role=texte-etape]')?.textContent==='Impastare.'&&!!manque.querySelector('[data-role=traduction-manquante]'), 'Langue mobile : une langue originale absente ne fait pas croire qu’une traduction FR existe');
+          ok(manque.querySelector('[data-role=texte-etape]')?.textContent==='Impastare.'&&manque.querySelector('[data-role=etat-lecture]')?.textContent.includes('Le texte original est affiché.')&&!manque.querySelector('[data-role=traduction-manquante]'), 'Langue mobile : langue originale inconnue, source intacte et absence française annoncée sans répétition');
           const lienInconnu = lienTraduire(manque);
           const cibleInconnue = lienInconnu ? queryDuLien(lienInconnu) : {};
           eq(cibleInconnue.locale, 'fr', 'Langue mobile : sans langue originale, le lien conserve aussi la demande FR');

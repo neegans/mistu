@@ -1,4 +1,12 @@
-# STATE.md — Mistu — 31 octobre 2026 — A–G PUBLIÉS EN 0.32.7-1
+# STATE.md — Mistu — 31 octobre 2026 — FICHE LISIBLE PRÊTE EN 0.32.8-2
+
+**Fiche recette allégée — réception locale terminée, publication en préparation.** Livraison **0.32.8-2**, APP_VERSION 0.32.8, DB6/archive7 inchangés. Informations et notes vides repliées, quantité et ingrédient réunis, sources/remplacements accessibles par un seul bouton, minuteries dépliables. Avis unique sans traduction ; manques locaux conservés pour une traduction partielle. Aucune recette personnelle ni réponse payée modifiée.
+
+**14625/14625 navigateur** (+64 assertions), **281/281 outils Node**, générateurs conformes, revue indépendante. Parcours visuels **21/21** : mêmes données de démonstration, ordinateur/téléphone, détails/coches, durée en fourchette sans lancement, largeur320–1280 et texte200%. Captures relues : ingrédients remontés de274px sur ordinateur et319px sur téléphone ; minuteries réduites à46px repliées. Les ingrédients restent sous le premier écran téléphone. [Contrat](docs/superpowers/specs/2026-10-31-fiche-lisible-design.md) · [Réception et limites](docs/superpowers/plans/2026-10-31-fiche-lisible-reception.md).
+
+La capture de Neegan utilise encore0.32.0-5 avec une mise à jour prête. Conserver la saisie, quitter l’app installée et Chrome complètement avec⌘Q, puis rouvrir ; aucune suppression de données ni activation forcée. La traduction personnelle de Trinity bread reste à créer depuis le parcours existant, avec coût affiché avant lancement.
+
+## État précédent : lots A–G publiés
 
 **Correctifs de l’audit du 30 octobre : lots A–G publiés et reçus.** Livraison **0.32.7-1 en ligne**, code `ea381a5` promu par avance rapide depuis `fd84739` (24 commits). GitHub Pages confirmé le 31 octobre à **13:45:30 UTC (09 h 45 HAE)**. APP_VERSION 0.32.7, DB 6 / archive 7 inchangés. Les cinq sous-tâches G et le plan fourni sont terminés. [Reçu de publication D–G](docs/superpowers/plans/2026-10-30-correctifs-audit-g-reception.md).
 

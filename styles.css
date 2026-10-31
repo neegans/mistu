@@ -533,6 +533,19 @@ details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
 .ingredient-heading > .lecture-segment > span { font-family: var(--serif); font-size: 1.2rem; color: var(--action); }
 .cook .ingredients li[data-ingredient-id] { display: block; min-width: 0; }
 .lecture-segment, .lecture-original { min-width: 0; overflow-wrap: anywhere; }
+.lecture-manquante { display: block; margin-top: .25rem; }
+.ingredient-lecture-texte { min-width: 0; overflow-wrap: anywhere; }
+.ingredient-lecture-texte .qty { white-space: nowrap; }
+.fiche-recette .fiche-secondaire > summary,
+.recipe-body details[data-role="timer-block"] > summary { min-height: 44px; padding-block: .6rem; cursor: pointer; }
+.fiche-recette .fiche-secondaire[open] > summary { margin-bottom: .5rem; }
+.fiche-recette > details[data-role="notes-fiche"] { margin-bottom: .5rem; }
+.fiche-recette .reperes-badges:empty { display: none; }
+.recipe-body details[data-role="timer-block"] { margin-top: .3rem; padding: 0 .65rem; background: transparent; border: 1px solid var(--line); border-radius: var(--radius-btn); }
+.recipe-body details[data-role="timer-block"][open] { padding-bottom: .65rem; }
+.recipe-body details[data-role="timer-block"] > summary { color: var(--action); }
+.recipe-body details[data-role="timer-block"] > summary strong { font-weight: 500; }
+.fiche-recette [data-role="details-ingredients"] { padding-inline: 0; min-height: 44px; }
 .lecture-original { margin-block: .25rem; font-size: .9rem; color: var(--muted); }
 .lecture-original > summary { min-height: 44px; padding-block: .6rem; cursor: pointer; }
 .lecture-original > div { padding-inline-start: .7rem; border-inline-start: 2px solid var(--line); }

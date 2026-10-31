@@ -48,8 +48,8 @@ export async function runCorrectifLangueRecetteTests({eq,ok}){
   ok(!!choix?.closest('.lecture-langue'),'Langue : choix concurrent près du sélecteur de langue');
   if(choix){choix.value='langue-seconde';choix.dispatchEvent(new Event('change',{bubbles:true}));}
   eq(root.querySelector('h1')?.textContent,'Pain','Langue : traduction choisie réellement affichée');
-  const lire=avis()?.querySelector('a[data-role=version-francaise]');
-  ok(lire?.hash.includes('translation=langue-seconde')&&!lire.hash.includes('assistant=1'),'Langue : version française complète se relit sans refaire la traduction');
+  const corriger=avis()?.querySelector('a[href*="kind=translation"]');
+  ok(!avis()?.querySelector('a[data-role=version-francaise]')&&corriger?.hash.includes('translation=langue-seconde')&&!corriger.hash.includes('assistant=1'),'Langue : français déjà affiché sans action redondante, correction liée à la candidate exacte sans appel');
   eq(parseHash(adresses.at(-1)||'').query.translation,'langue-seconde','Langue : candidate choisie conservée dans l’adresse');
   const adresseChoisie=parseHash(adresses.at(-1)||'');root.dispose?.();root.remove();
   root=await renderRecipe({id:f.recipe.id},adresseChoisie.query,ctx,deps);roots.push(root);scene.append(root);

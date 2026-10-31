@@ -2461,4 +2461,7 @@ export const EN = {
   "Frémir": "Simmer",
   "Fermenter": "Ferment",
   "Déshydrater": "Dehydrate",
+  "Le texte original est affiché. Crée une version française pour lire cette recette en français.": "The original text is shown. Create a French version to read this recipe in French.",
+  "Afficher les détails des ingrédients": "Show ingredient details",
+  "Masquer les détails des ingrédients": "Hide ingredient details",
 };
