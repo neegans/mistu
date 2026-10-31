@@ -11,7 +11,7 @@ export async function runAuditImportRouteTests({eq,ok}){
   try{
    await attendre(()=>frame.contentWindow?.fixtureErreur||frame.contentWindow?.fixture?.name===name&&!!frame.contentDocument.querySelector('main')&&!frame.contentDocument.querySelector('main').hasAttribute('aria-busy'),nom+' app prête');
    const w=frame.contentWindow,d=frame.contentDocument,f=w.fixture;if(w.fixtureErreur)throw Error(w.fixtureErreur.message);
-   await fn({w,d,f});eq(f.exceptions,[],`Import11.6 ${nom} : aucune exception navigateur`);eq([f.posts,f.choixFichier],[0,0],`Import11.6 ${nom} : aucun POST ni choix de fichier automatique`);
+   await fn({w,d,f});eq([f.exceptions,f.journal],[[],[]],`Import11.6 ${nom} : aucune exception navigateur ni erreur journalisée`);eq([f.posts,f.choixFichier],[0,0],`Import11.6 ${nom} : aucun POST ni choix de fichier automatique`);
   }catch(e){ok(false,`Import11.6 ${nom} : ${e.stack||e}`);}finally{frame.contentWindow?.fixture?.fermer();frame.remove();await supprimerBase(name);}
  };
  const fini=d=>!!d.querySelector('main')&&!d.querySelector('main').hasAttribute('aria-busy');

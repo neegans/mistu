@@ -54,7 +54,7 @@ export async function runAuditMarqueNavigationTests({eq,ok}){
      eq(c.main.querySelector('h1').textContent,'Cuisine OS — titre choisi par moi','Marque11.5 : titre utilisateur intact');stop();
     }finally{c.dispose();}
    });
-   await run('porte '+lang,()=>{const model=porteEntreeModel({available:true}),p=renderPorteEntree(model,{signIn(){},sansCompte(){}});scene.append(p);eq(p.querySelector('.porte-nom')?.textContent,'Mistu','Marque11.5 '+lang+' : porte nomme Mistu');eq(p.querySelectorAll('.porte-actions button').length,2,'Marque11.5 : deux issues de porte conservées');});
+   await run('porte '+lang,()=>{const model=porteEntreeModel({available:true}),p=renderPorteEntree(model,{signIn(){},sansCompte(){}},{icone:new URL('../icons/icon.svg',import.meta.url).href});scene.append(p);eq(p.querySelector('.porte-nom')?.textContent,'Mistu','Marque11.5 '+lang+' : porte nomme Mistu');eq(p.querySelectorAll('.porte-actions button').length,2,'Marque11.5 : deux issues de porte conservées');});
    await run('parcours '+lang,()=>withRepo(async(repo,db)=>{
     const f=fixtureMarqueNavigation();await db.mutate({origin:'remote',puts:{books:[f.book],book_editions:[f.edition],recipes:[f.recipe],recipe_versions:[f.version],library_activity:[f.activity],rediscovery_prefs:[f.pref],meals:[f.meal],shopping_lists:[f.list]}});
     const ctx=await getData(true);ctx.settings={...ctx.settings,ui_locale:lang,rediscover_enabled:true};

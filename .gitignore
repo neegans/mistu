@@ -1,5 +1,6 @@
 .DS_Store
 node_modules/
+artifacts/ci-navigateur/
 dist/
 .env
 .env.*

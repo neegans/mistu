@@ -3774,15 +3774,16 @@ export async function runSyncL4Tests({ eq, ok }) {
         eq(appels, [[H('1'), H('2')]], 'séance (ronde 1) : la tape passe les deux clés distantes au moteur, dans l’ordre des pages');
         // Fuite d'abonnés (constat Important) : deux rendus montés tour à tour SANS aucun onEtat, un troisième jamais monté, puis l'écran quitté.
         const avant = abonnes.size;
+        await finDesImages(root); // La fixture charge l’image avant que le démontage révoque son URL.
         const r2 = await renderImport({}, { session: 'sr' }, ctxS({ user: { id: 'u1' }, moteur }));
         scene.replaceChildren(r2); await tour();
+        await finDesImages(r2);
         await renderImport({}, { session: 'sr' }, ctxS({ user: { id: 'u1' }, moteur })); // rendu dépassé : jamais inséré
         await tour();
         const pendant = abonnes.size;
         scene.replaceChildren();
         for (const fn of [...abonnes]) fn({ enCours: false });
         eq([avant, pendant, abonnes.size], [1, 2, 0], 'séance (ronde 1) : un rendu jamais monté se désabonne au tour qui suit (il retenait ctx à vie) ; un écran quitté, au premier onEtat qui le trouve détaché — même sans aucun onEtat pendant qu’il était monté (mutants : désabonnement seulement après un onEtat monté → 3 abonnés à vie ; retirer() jamais appelé)');
-        await finDesImages(root); await finDesImages(r2);
       } finally { scene.remove(); }
       const sansPage = { id: 'sv', status: 'open', started_at: DATE, page_ids: [], document_ids: [] };
       const vide = await renderImport({}, { session: 'sv' }, ctxS({ user: { id: 'u1' } }, sansPage));
