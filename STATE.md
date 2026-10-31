@@ -1,4 +1,10 @@
-# STATE.md — Mistu — 31 octobre 2026 — CORRECTIF TRADUCTION 0.32.9-1 PUBLIÉ
+# STATE.md — Mistu — 31 octobre 2026 — INVESTIGATION PHOTO MOBILE ; PUBLIC 0.32.9-1
+
+**Investigation mobile — PWA iPhone, aucun correctif encore déployé.** Base0b0b10e, public **0.32.9-1** inchangé. Annulation du choix de photo ignorée par le helper commun : livre avec boutons actifs mais muets, séance photo verrouillée, bilan de cuisson qui refuse Enregistrer. Reproductions sur vrais composants avec événement `cancel` synthétique, confirmation des bilans dans Chromium et WebKit ; aucun essai caméra/PWA physique revendiqué. Une panne de stockage simulée révèle aussi une couverture référencée sans octets et un message « image illisible » trompeur. Limite16Mpx et HEIF non reconnu distingués des causes confirmées ; HEIC reste autorisé. Aucun obstacle tactile aux boutons photo observé sur les huit vues contrôlées. [Rapport, preuves et priorités](docs/audits/2026-10-31-mobile-photos-pwa.md).
+
+Code, schéma, livraison et tests suivis inchangés ; pas d’appel assistant, de compte privé ni de modification serveur. Les observations aval23/23 attestent les comportements présents, y compris leurs défauts. La sonde d’activation WebKit automatisée échoue à son contrôle négatif et ne prouve donc pas les restrictions natives iOS. Les corrections prioritaires sont documentées ; aucun essai physique iPhone ni correction produit n’est attribué à cette investigation.
+
+## Dernière livraison : correction des traductions
 
 **Traductions masquées après synchronisation — correctif 0.32.9-1 publié.** Code `987f408`, Pages confirmé le31octobre à17:37:41UTC (13h37HAE). **449/449 fichiers publics conformes**, **20/20 contrôles publics** de récupération puis rechargement réellement hors ligne ; zéro erreur JavaScript, HTTP ou POST. CI GitHub verte :281/281 outils Node,29/29 outils CI et14769/14769 navigateur ; job terminé à17:40:59UTC, run à17:41:00UTC. La lecture ciblée du serveur confirme 65/65 passages français encore présents sur la version courante, sans suppression. Le pull remplaçait la date canonique du JSON métier par la date du transport en microsecondes : le valideur refusait ensuite la copie locale. Le helper appliqué en mémoire à la cible réelle restitue exactement le JSON serveur, sans modifier les textes.
 
