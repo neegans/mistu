@@ -1,5 +1,7 @@
 # Correctifs de l’audit — lot D
 
+**Publié avec les lots D–G le 31 octobre 2026 en 0.32.7-1, code `ea381a5`.** [Réception publique et CI](2026-10-30-correctifs-audit-g-reception.md). Le reçu local ci-dessous conserve son état et ses versions au moment de la construction.
+
 Référence : [plan fourni et autorisé par Neegan](2026-10-30-correctifs-audit-L0-L10.md), tâche 9 ; lentille [synchronisation](../../audits/2026-10-30-audit-codex-L0-L10/lentilles/synchro.md). Branche `correctifs-audit-d`, base `fd84739`, après publication C / 0.32.3-1 et application reçue de 0014.
 
 Le « deploy et enchaine ensuite le reste » autorise la construction des lots restants. Le lot D est reçu localement : APP_VERSION **0.32.4**, livraison **0.32.4-7**, DB6/archive7 inchangés. Les tâches9.1 à9.7 ont été exécutées dans l’ordre, avec rouge causal, réception et commit séparés. **12770/12770** navigateur, Node **281/281**, générateurs conformes. Aucune nouvelle migration SQL. D non publié ; C0.32.3-1 reste en ligne. Construction E–G poursuivie, publication à autoriser conformément au plan lot par lot.

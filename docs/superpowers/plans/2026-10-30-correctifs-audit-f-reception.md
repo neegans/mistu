@@ -1,5 +1,7 @@
 # Correctifs de l’audit — réception du lot F
 
+**Publié avec les lots D–G le 31 octobre 2026 en 0.32.7-1, code `ea381a5`.** [Réception publique et CI](2026-10-30-correctifs-audit-g-reception.md). Le reçu local ci-dessous conserve son état et ses versions au moment de la construction.
+
 Référence : [plan fourni et autorisé](2026-10-30-correctifs-audit-L0-L10.md), tâche 11. Branche `correctifs-audit-f`, base E `7a2156e` reçue localement à **14033/14033**. Public C **0.32.3-1** ; D et E reçus localement. Construction des tâches 11.1 à 11.6 dans l’ordre, chacune avec rouge causal, réception et commit séparés. Aucun SQL ni appel assistant réel.
 
 ## 11.1 — Accueil et travaux à reprendre

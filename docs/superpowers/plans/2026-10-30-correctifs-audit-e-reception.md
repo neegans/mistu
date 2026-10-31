@@ -1,5 +1,7 @@
 # Correctifs de l’audit — lot E
 
+**Publié avec les lots D–G le 31 octobre 2026 en 0.32.7-1, code `ea381a5`.** [Réception publique et CI](2026-10-30-correctifs-audit-g-reception.md). Le reçu local ci-dessous conserve son état et ses versions au moment de la construction.
+
 Référence : [plan fourni et autorisé](2026-10-30-correctifs-audit-L0-L10.md), tâche10. Branche `correctifs-audit-e`, base D `dc179ff` reçu localement à12770/12770. Public C0.32.3-1 ; D0.32.4-7 reste local. Construction des tâches10.1–10.6 dans l’ordre, chacune avec rouge causal, réception et commit séparés. Aucun appel assistant réel ni nouvelle migration SQL prévus.
 
 ## 10.1 — Anciens plans Thermomix et usages de la recette d’origine

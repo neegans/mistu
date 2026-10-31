@@ -1,5 +1,7 @@
 # Correctifs de l'audit L0–L10 — plan d'exécution pour Codex
 
+**Plan A–G terminé et publié en 0.32.7-1 le 31 octobre 2026.** [Reçu de publication D–G, CI et suite publique](2026-10-30-correctifs-audit-g-reception.md). Les points explicitement hors périmètre de l’auto-revue restent distincts.
+
 > **Pour l'agent exécutant (Codex) :** exécuter les tâches une à une, dans l'ordre, avec le test rouge AVANT le code. Les cases `- [ ]` servent au suivi. Lire d'abord `docs/audits/2026-10-30-audit-codex-L0-L10/rapport-audit.md` (§ 0, § 2, § 3), puis la lentille citée par chaque tâche.
 
 **But :** fermer les trois défauts bloquants et les défauts importants relevés par l'audit du 30 octobre 2026 sur `cd8c7f2..247b2e5`, sans rouvrir ce qui tient, et laisser derrière chaque correctif un test qui rougit si on le retire.

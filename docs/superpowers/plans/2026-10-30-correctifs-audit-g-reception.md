@@ -1,6 +1,6 @@
 # Correctifs de l’audit — réception du lot G
 
-**Lot G terminé et reçu localement en 0.32.7-1 ; D–G prêts à publier. Public revérifié : C 0.32.3-1, main `fd84739`.** Les sections suivantes gardent les étapes de réception dans leur ordre.
+**Lot G publié avec D–F en 0.32.7-1 le 31 octobre 2026, code `ea381a5`.** Pages, CI Ubuntu, fichiers et parcours publics reçus ; suite publique 14561/14561. Les étapes locales ci-dessous restent historiques ; la publication conjointe est détaillée en fin de document.
 
 Référence : [plan fourni et autorisé](2026-10-30-correctifs-audit-L0-L10.md), tâche12. Branche `correctifs-audit-g`, base F `dd3a9d0` reçue localement à **14515/14515**. Public C **0.32.3-1** ; D, E et F reçus localement. Sous-tâches12.1 à12.5 exécutées dans l’ordre avec réception et commit séparés. APP_VERSION0.32.7 ; DB6/archive7 inchangés. Aucun SQL appliqué au service distant ni appel assistant réel.
 
@@ -101,3 +101,22 @@ Cette sous-tâche ne change que la documentation. La réception technique finale
 Revue documentaire : dix annotations et leurs dix renvois, chiffres/dates des lignes historiques conservés, texte depuis la base 0.21.1 inchangé. **12.5 reçue ; plan A–G terminé.** Public revérifié le 31 octobre : 0.32.3-1 et main `fd84739`. D–G sont reçus localement, sans publication supplémentaire. Les points hors périmètre nommés dans l’auto-revue du plan et VIS-4 restent distincts.
 
 Contre-lecture indépendante finale reçue : dix remplacements aux nombres inchangés, base et reçus antérieurs intacts, patch et sorties statiques concordants, distinction public/local et exclusions explicites. Seuls quatre fichiers documentaires changent depuis `fa2d12e`. Diff et scan des fichiers suivis conformes ; aucune suite historique ou technique inutilement rejouée pour ces annotations.
+
+
+## Publication conjointe D–G — 31 octobre 2026
+
+Autorisation « continu » après le bilan D–G prêts à publier. Promotion par avance rapide des 24 commits de `fd84739` à `ea381a55df1409d9724e8f8a77d88113d7322a86`, sans réécriture d’historique. [GitHub Pages](https://github.com/neegans/mistu/actions/runs/41206958924) reçoit ce commit le 31 octobre à **13:45:30 UTC (09 h 45 HAE)**. Livraison publique **0.32.7-1**, APP_VERSION 0.32.7, DB 6 / archive 7 inchangés. Aucun SQL, changement de configuration distante ou redéploiement de l’assistant supplémentaire.
+
+Préflight indépendant : historique compatible, arbre propre, 216 ressources de coquille vérifiées et reçus locaux relus. Comparaison publique exhaustive : **444/444 fichiers** conformes aux octets, SHA256 et MIME attendus, dont 216 ressources de livraison et 224 fichiers de tests/fixtures. Les deux adresses de répertoire et les quatre relectures d’identité sont également conformes : 450 réponses HTTP 200, sans écart ni réessai. Manifeste 216 fichiers / 3 781 424 octets, SHA256 `20d519d923de2c263d0b37eb51f6b256bb5443dbc6f4f1c4d0f5c5ab113564e0`.
+
+[CI GitHub sur Ubuntu 24.04](https://github.com/neegans/mistu/actions/runs/41206960423) terminée avec succès à **13:51:16 UTC**. Les logs donnent Node 24.22.2, scan 30 mentions sans valeur interdite, **281/281 outils historiques**, **29/29 outils CI** et **14561/14561 tests navigateur**. Les deux générateurs passent en mode `--check`. Cette exécution distante complète la réception locale Mac ; aucun contrôle existant n’est retiré pour publier.
+
+Parcours publics **43/43 contrôles** dans un profil neuf sans compte : deux fenêtres C réchauffées avant le push, recette créée par le vrai éditeur, note personnelle enregistrée via son dialogue et relue dans le second onglet. G reste en attente dans les deux fenêtres C, sans activation ni recharge forcées. Après conservation et fermeture des deux fenêtres, les deux réouvertures exécutent G ; recette, version et note sont strictement identiques. Le seul cache de coquille restant contient les 216 ressources de G.
+
+Mistu/Repas, Ajouter, `/import` vers `/add` sans entrée intermédiaire, Inventaire par défaut, interfaces FR 390 / EN 1280 reçus. L’accès à la traduction ouvre son vrai écran sans appel automatique. Cinq segments sont traduits manuellement et enregistrés : Français affiche la traduction, Anglais la source, et le retour au français retrouve le texte conservé. Les deux fenêtres sont réellement rechargées hors ligne (`navigator.onLine=false`) avec note et traduction toujours visibles, source inchangée. Captures relues, onze mesures sans débordement horizontal.
+
+Le diagnostic indique correctement 0.32.7-1, hors ligne et persistance native refusée. Sa zone de texte de secours est reçue ; la copie presse-papiers refusée par Chromium n’est pas déclarée réussie. Zéro exception JavaScript, requête extérieure ou POST dans les parcours ; aucun compte privé, appel assistant payé, essai physique iPhone/Safari/TM7 ou aller-retour de synchronisation distant revendiqué. Les attentes exploratoires du harnais sur le nom accessible « Modifier » et le titre « Inventaire » sont qualifiées dans le reçu ignoré, puis remplacées par les contrôles des vrais éléments ; aucun défaut produit confirmé.
+
+Preuves conservées sous `.superpowers/sdd/2026-10-30-audit-g/publication/` : préflight, inventaire/empreintes publics, reçus CI, parcours et captures. Les descriptions des étapes locales précédentes restent historiques.
+
+Suite complète chargée directement depuis le site public avec Chromium 156.0.8078.4 et Node 24.22.2 : **14561/14561**, version réellement lue 0.32.7-1, aucune erreur JavaScript/HTTP/console inattendue ni requête extérieure. Les 29 journaux d’incidents injectés sont reconnus par leurs textes exacts et leur fichier d’origine. Passage du 31 octobre **13:50:07 à 13:53:39 UTC** ; navigateur fermé, JSON et capture conservés. L’artefact de la CI Ubuntu est également téléchargé et son empreinte vérifiée ; il confirme les versions, les bilans et le nettoyage. Contre-lecture indépendante des reçus de publication reçue. **Les lots A–G sont publiés et reçus.**
