@@ -216,6 +216,9 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       const refus = refusDeForme(table, ligne, clePrimaire);
       if (refus) return { erreur: refus };
       const locale = await db.get(table, ligne.id);
+      // L6 garde sa date canonique dans le JSON métier. L'enveloppe PostgREST
+      // porte séparément les microsecondes utilisées par la synchronisation.
+      const traductionSignee = (table === 'recipe_translations' || table === 'imports') && estLectureTraductionSignee(table, ligne.data);
       const commandes=fileSources.filter(e=>(estPhaseJournalTraduction(e)?[{store:e.store,id:e.id}]:ciblesCommandeProtegee(e.payload)).some(r=>r.store===table&&r.id===ligne.id));
       const cleSource=CLE_SOURCE_CONFIRMEE(table,ligne.id),confirmationSource=await db.get('sync_state',cleSource);
       const geree=row=>!!row&&(row.source_state!==undefined||row.source_revision!==undefined||row.source_copy!==undefined||row.index_storage!==undefined||row.index_decision_revision!==undefined||row.index_application_receipts!==undefined||row.index_resolved_occurrences!==undefined||estLectureTraductionSignee(table,row)||estLigneCuisine(table,row)||table==='inventory'&&estLotProtege(row));
@@ -226,7 +229,7 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
         if(inventaire&&(!Number.isSafeInteger(ligne.server_seq)||ligne.server_seq<0))return{erreur:{type:'forme'}};
         if(inventaire&&!ligne.deleted_at&&!validerLotInventaire(ligne.data).ok)return{erreur:{type:'forme'}};
         if(cuisine&&!ligne.deleted_at&&!(table==='timer_launches'?validerMinuteurCuisine(ligne.data):validerSessionCuisine(ligne.data)).ok)return{erreur:{type:'forme'}};
-        const confirme={user_id:owner,data:ligne.deleted_at?null:cuisine||inventaire?ligne.data:{...ligne.data,updated_at:ligne.updated_at},server_seq:ligne.server_seq,updated_at:ligne.updated_at,deleted_at:ligne.deleted_at??null};
+        const confirme={user_id:owner,data:ligne.deleted_at?null:cuisine||inventaire||traductionSignee?ligne.data:{...ligne.data,updated_at:ligne.updated_at},server_seq:ligne.server_seq,updated_at:ligne.updated_at,deleted_at:ligne.deleted_at??null};
         (puts.sync_state||=[]).push({key:cleSource,value:confirme});
         // L'intention locale garde toutes ses lignes, même bloquée ou face à une tombale.
         // Seul son accusé exact ou une comparaison explicite pourra la résoudre.
@@ -303,15 +306,15 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       }
       if (decision === 'ignorer') continue;
       if (decision === 'ecrire') {
-        // L'updated_at du serveur est stocké VERBATIM (R-L3-11) : microsecondes et décalage compris. Un renvoi doit
-        // être égal, côté serveur, à la microseconde — et le serveur a pu ajuster l'heure à l'écriture (R25).
+        // Hors traductions signées, l'updated_at du serveur est stocké VERBATIM (R-L3-11) : un renvoi doit
+        // être égal côté serveur à la microseconde. L6 le conserve dans sa confirmation, sans altérer data.
         if (table === 'files') {
           // D-G16 : une ligne files n'apporte JAMAIS d'octets ici — une seule règle de fusion (fusionnerFichier, refaite sur la ligne relue en
           // transaction : conditionFichier) : blob, syncable et created_at locaux gardés, remote tel que la ligne reçue le porte (D-G12 : jamais
           // `true`, jamais effacé sous un blob local).
           fusions.set(ligne.id, conditionFichier(ligne.id, locale ?? null, ligne.data, ligne.updated_at));
           await leverErreurReception(ligne.id, locale?.remote, ligne.data?.remote);
-        } else (puts[table] ||= []).push({ ...ligne.data, updated_at: ligne.updated_at });
+        } else (puts[table] ||= []).push(traductionSignee ? ligne.data : { ...ligne.data, updated_at: ligne.updated_at });
         recues += 1;
         if (table === 'recipes') {
           const pointeur = await conflitDePointeur(ligne, locale);

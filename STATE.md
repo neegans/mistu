@@ -1,4 +1,12 @@
-# STATE.md — Mistu — 31 octobre 2026 — FICHE LISIBLE PUBLIÉE EN 0.32.8-2
+# STATE.md — Mistu — 31 octobre 2026 — CORRECTIF TRADUCTION 0.32.9-1 EN PRÉPARATION
+
+**Traductions masquées après synchronisation — correction locale reçue, publication en préparation.** La lecture ciblée du serveur confirme 65/65 passages français encore présents sur la version courante, sans suppression. Le pull remplaçait la date canonique du JSON métier par la date du transport en microsecondes : le valideur refusait ensuite la copie locale. Le helper appliqué en mémoire à la cible réelle restitue exactement le JSON serveur, sans modifier les textes.
+
+Le pull conserve désormais les dates métier. Une passe de démarrage répare les copies déjà touchées, sans réseau, appel payé ni outbox, avec gardes sur base/connexion/compte/époque/lignes/file. Un brouillon publié est reconnu à son retour dans l’éditeur. **50/50** nouveaux contrôles de pull, **90/90** de reprise, **84/84** du parcours guidé (+4) ; régressions voisines conservées, revue indépendante. Outils Node **281/281**, outils CI **29/29**. **14769/14769** navigateur (+144 assertions), zéro erreur JavaScript ou requête extérieure ; 29 journaux simulés attendus. Parcours réel **20/20**, récupération puis réouverture hors ligne, contre six échecs causaux sur l’ancienne version. Publication en préparation. APP_VERSION **0.32.9**, livraison **0.32.9-1**, DB6/archive7 inchangés ; aucun SQL ni redéploiement assistant.
+
+[Spec](docs/superpowers/specs/2026-10-31-traduction-horodatage-design.md) · [Réception](docs/superpowers/plans/2026-10-31-traduction-horodatage-reception.md). Le français doit revenir lorsque l’appareil charge le correctif ; aucune nouvelle traduction n’est nécessaire. La présence sur le serveur est prouvée, pas encore la mise à jour effective des appareils personnels.
+
+## État précédent : fiche lisible publiée
 
 **Fiche recette allégée — publiée et reçue.** Code `fa30c1b`, GitHub Pages confirmé le 31 octobre à **16:04:14 UTC (12 h 04 HAE)**. **446/446 fichiers publics conformes** ; **29/29 contrôles publics**, dont une traduction manuelle de démonstration enregistrée sur 25 segments puis relue après recharge réellement hors ligne. Zéro erreur JavaScript, requête extérieure ou POST. **CI du code publié verte** : 281/281 outils Node, 29/29 outils CI et 14625/14625 navigateur ; terminée à 16:10:00 UTC. Livraison **0.32.8-2**, APP_VERSION 0.32.8, DB6/archive7 inchangés. Informations et notes vides repliées, quantité et ingrédient réunis, sources/remplacements accessibles par un seul bouton, minuteries dépliables. Avis unique sans traduction ; manques locaux conservés pour une traduction partielle. Aucune recette personnelle ni réponse payée modifiée.
 

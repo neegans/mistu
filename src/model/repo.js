@@ -30,10 +30,12 @@ import { lireCycleEdition, lireEtatRecette, memeCycleEdition, memeExceptionEditi
 import { preparerLotSources } from '../sync/lot-sources.js';
 import { estCleEditeur, validerLigneEditeur, verifierQuotaEditeur, estRecuEditeur, LIMITES_BROUILLONS, ErreurBrouillon } from '../domain/brouillons-format.js';
 import {estImportGere,CLE_REPARATION_IMPORTS_GERES} from '../domain/imports-geres.js';
+import {reparerHorodatageTraduction} from '../domain/traduction-horodatage.js';
 
 // Base de l'application. Liaison vivante : bindDatabase ne sert qu'aux tests, pour travailler sur une base jetable.
 export let db = new Database(DB_NAME, DB_VERSION, STORES);
-export function bindDatabase(database) { db = database; }
+let generationBase=0;
+export function bindDatabase(database) { db = database; generationBase++; }
 
 // --- Identité de l'appareil (spec § 5.1, § 4.2) ----------------------------
 // Une seule identité, gardée dans sync_state : elle survit au vidage (clearDevice), jamais capturée, jamais envoyée.
@@ -98,6 +100,7 @@ export async function init() {
   // Une autre fenêtre peut finir la réparation ou avancer la réception pendant cette passe.
   // Seuls ces refus de concurrence sont rejouables au prochain démarrage ; le stockage reste une erreur réelle.
   try { await reparerImportsGeres(); } catch(e) { if(!REFUS_REPARATION_IMPORTS.has(e?.code))throw e; }
+  try { await reparerHorodatagesTraduction(); } catch(e) { if(!REFUS_REPARATION_TRADUCTION.has(e?.code))throw e; }
   await marquerInterrompus();
   await purgerImportsAnciens();
 }
@@ -227,6 +230,39 @@ export async function reparerImportsGeres(){
     outbox:[{toutes:true,verifier:rows=>{verifierBase();if(!egaux(rows,snapshot.outbox))refusReparationImports('IMPORTS_REPAIR_OUTBOX_CHANGED');}}]
   }});
   return seqs.length;
+}
+
+const REFUS_REPARATION_TRADUCTION=new Set(['TRANSLATION_REPAIR_BASE_CHANGED','TRANSLATION_REPAIR_ACCOUNT_CHANGED','TRANSLATION_REPAIR_LIBRARY_CHANGED','TRANSLATION_REPAIR_ROW_CHANGED','TRANSLATION_REPAIR_OUTBOX_CHANGED']);
+const refusReparationTraduction=code=>{throw Object.assign(new Error(code),{code});};
+// Rejouable : une intention pendante peut disparaître après sa réception. Aucun marqueur global ne doit
+// empêcher alors la récupération. Les confirmations et copies documentaires restent des témoins exacts.
+export async function reparerHorodatagesTraduction(){
+ const base=db,generation=generationBase;
+ await base.open();const connexion=base.idb;
+ const verifierBase=()=>{if(db!==base||generationBase!==generation||base.idb!==connexion)refusReparationTraduction('TRANSLATION_REPAIR_BASE_CHANGED');};
+ verifierBase();
+ const snapshot=await base.getSnapshot(['recipe_translations','imports','sync_state','outbox']);verifierBase();
+ const etat=new Map(snapshot.sync_state.map(r=>[r.key,r])),owner=etat.get('user_id'),epoch=etat.get('editor_library_epoch:v1');
+ const egaux=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
+ const enAttente=(store,row)=>snapshot.outbox.some(e=>{
+  if(e.store===store&&e.id===row.id)return true;
+  if(e.op==='source_batch'&&Array.isArray(e.payload?.rows)&&e.payload.rows.some(r=>r.store===store&&r.id===row.id))return true;
+  if(e.op!=='translation_apply')return false;
+  const p=e.payload;
+  return store==='recipe_translations'?(p?.recipe_version_id===row.recipe_version_id||p?.translation?.id===row.id||p?.target?.id===row.id):Array.isArray(p?.journal_read_set)&&p.journal_read_set.some(r=>r.journal_id===row.id)||p?.target?.id===row.id;
+ });
+ const conditions={},exacte=(attendue,code,remplacement=null)=>courante=>{verifierBase();if(!egaux(courante,attendue))refusReparationTraduction(code);return remplacement;};
+ let nombre=0;
+ for(const store of ['recipe_translations','imports'])for(const row of snapshot[store]){
+  if(enAttente(store,row))continue;
+  const corrigee=reparerHorodatageTraduction(store,row);if(!corrigee)continue;
+  (conditions[store]??=[]).push({key:row.id,fusion:exacte(row,'TRANSLATION_REPAIR_ROW_CHANGED',corrigee)});nombre++;
+ }
+ if(!nombre)return 0;
+ conditions.sync_state=[{key:'user_id',fusion:exacte(owner,'TRANSLATION_REPAIR_ACCOUNT_CHANGED')},{key:'editor_library_epoch:v1',fusion:exacte(epoch,'TRANSLATION_REPAIR_LIBRARY_CHANGED')}];
+ conditions.outbox=[{toutes:true,verifier:rows=>{verifierBase();if(!egaux(rows,snapshot.outbox))refusReparationTraduction('TRANSLATION_REPAIR_OUTBOX_CHANGED');}}];
+ await base.mutate({origin:'device',conditions});
+ return nombre;
 }
 
 // Passe unique (spec assistant-par-le-compte § 5.6, S1/F3/F4) : l'ancien réglage settings.llm devient la ligne

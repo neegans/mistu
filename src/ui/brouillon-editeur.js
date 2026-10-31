@@ -63,7 +63,7 @@ export async function panneauRepriseBrouillon({service,id,portee,onReprendre,onC
  const node=el('section',{class:'card stack editeur-reprise',dataset:{role:'reprise-brouillon'}}),lu=await service.lireBrouillon({id,portee});
  if(!estCourante())return node;
  if(lu.issue!=='ok'){node.append(el('p',{role:'status'},texteErreurBrouillon(lu)));return node;}
- if(lu.etat==='committed'){node.append(el('p',{role:'status'},t('Ce brouillon a déjà été publié.')));return node;}
+ if(['committed','publie'].includes(lu.etat)){node.append(el('p',{role:'status'},t('Ce brouillon a déjà été publié.')));return node;}
  const draft=lu.brouillon,revision=draft?.revision??lu.revision;
  node.append(el('h2',null,t('Brouillon sur cet appareil')),el('p',null,lu.etat==='invalide'?texteErreurBrouillon(lu.raisons?.[0]||'format_inconnu'):lu.etat==='detache'?t('La bibliothèque a été remplacée. Ce texte reste récupérable.'):lu.etat==='anonyme'?t('Ce brouillon a été saisi sans compte. Compare les valeurs avant de le reprendre.'):lu.etat==='bloque'?t('La source de ce brouillon a changé. Compare les valeurs avant de reprendre.'):t('Reprendre la saisie conservée ?')));
  if(draft?.saved_at)node.append(el('p',{class:'muted'},t('Conservé le {date}',{date:formatDate(draft.saved_at,{withTime:true})})));

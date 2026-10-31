@@ -56,10 +56,21 @@ export async function runTraductionGuideeTests({eq,ok}){
   }finally{node.dispose();node.remove();}
  });
  await withRepo(async(repo,db)=>{
-  const f=await fixture(repo,db),node=await f.ouvrir();try{
+  const f=await fixture(repo,db),adresseAvant=location.href,historiqueAvant=history.state;
+  history.replaceState(historiqueAvant,'',`#/recipes/${f.recipe.id}/edit?${new URLSearchParams({...requete,v:f.version.id})}`);let node=await f.ouvrir();try{
    const lancer=bouton(node,'lancer-traduction');ok(!!lancer,'Traduction guidée correction : lancement direct disponible');if(!lancer)return;lancer.click();await attendre(()=>bouton(node,'enregistrer-version-francaise').disabled===false);
-   const titre=node.querySelector('[data-role=traduction-segment]');titre.value='Mon pain';titre.dispatchEvent(new Event('input',{bubbles:true}));await node.flushEditeur();bouton(node,'enregistrer-version-francaise').click();await attendre(()=>f.destination());const tr=(await repo.all('recipe_translations'))[0];eq([tr.translated_content.segments[0].text,tr.translated_content.segments[0].origin],['Mon pain','manual'],'Traduction guidée correction : saisie personnelle prime sur réponse reçue');eq(f.appels.length,1,'Traduction guidée correction : corriger et garder ne rappellent pas');
-  }finally{node.dispose();node.remove();}
+   const titre=node.querySelector('[data-role=traduction-segment]');titre.value='Mon pain';titre.dispatchEvent(new Event('input',{bubbles:true}));await node.flushEditeur();
+   const adresseBrouillon=location.hash,queryBrouillon=Object.fromEntries(new URLSearchParams(adresseBrouillon.split('?')[1]));
+   ok(!!queryBrouillon.draft,'Traduction guidée publiée : adresse du brouillon conservée avant publication');
+   bouton(node,'enregistrer-version-francaise').click();await attendre(()=>f.destination());const tr=(await repo.all('recipe_translations'))[0];eq([tr.translated_content.segments[0].text,tr.translated_content.segments[0].origin],['Mon pain','manual'],'Traduction guidée correction : saisie personnelle prime sur réponse reçue');
+   const magasins=['recipes','recipe_versions','recipe_translations','imports','outbox','sync_state'],publie=JSON.stringify(await db.getSnapshot(magasins));
+   node.dispose();node.remove();node=null;history.replaceState(history.state,'',adresseBrouillon);node=await f.ouvrir(queryBrouillon);
+   const reprise=bouton(node,'reprise-brouillon');
+   ok(reprise?.textContent.includes('Ce brouillon a déjà été publié.'),'Traduction guidée publiée : retour sur le brouillon annonce sa publication');
+   eq([...reprise.querySelectorAll('button,textarea')].map(n=>n.textContent),[],'Traduction guidée publiée : aucun geste de reprise, suppression ou récupération vide');
+   eq(JSON.stringify(await db.getSnapshot(magasins)),publie,'Traduction guidée publiée : retour conserve traduction, journaux, brouillon et envois exacts');
+   eq(f.appels.length,1,'Traduction guidée correction : corriger et garder ne rappellent pas');
+  }finally{node?.dispose();node?.remove();history.replaceState(historiqueAvant,'',adresseAvant);}
  });
  await withRepo(async(repo,db)=>{
   const f=await fixture(repo,db),node=await f.ouvrir();try{
