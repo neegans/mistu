@@ -8,8 +8,9 @@ import {empreinteSources,identifiantSource,comparerUtf8} from './sources-format.
 import {ErreurCuisine,egalesCuisine,estLigneCuisine,validerSessionCuisine,adopterProgressionCuisine,projectionSessionCuisine,projectionContexteSession,projectionSourceCuisine,projectionIdentiteMinuteur,projectionSeedCuisine,signerCommandeCuisine,lireRecuCuisine,projeterSuiviMinuteur} from './cuisine-format.js';
 import {appliquerTransitionCuisine} from './cuisine-mutations.js';
 import {normaliserDuree,shortcutUrl} from './timers.js';
-import {portionsSession} from './thermomix-session.js';
-import {gardeThermomix} from './thermomix.js';
+import {portionsSession,enregistrerSessionCuisine} from './thermomix-session.js';
+import {gardeThermomix,lireThermomix} from './thermomix.js';
+import {resoudreVersionThermomix} from './thermomix-reprise.js';
 import {lireEtatRecette} from './cycle-edition.js';
 const copy=structuredClone,fail=c=>{throw new ErreurCuisine(c);},sort=a=>[...a].sort(comparerUtf8),unique=a=>sort([...new Set(a)]),own=(r,k)=>Object.hasOwn(r||{},k),obj=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
 const issue=e=>typeof e?.code==='string'?{issue:'refuse',raison:e.code,reessayable:false}:{issue:'echec',raison:e?.name==='QuotaExceededError'?'quota_stockage':'stockage_indisponible',reessayable:true};
@@ -25,7 +26,7 @@ export function projeterSessionCuisine(affiche){
   if(v2){current=qualified?.current_step_id??null;explicit=current!==null;done=qualified?.done_step_ids||[];}else{if(qualified&&own(qualified,'current_step_id')){current=qualified.current_step_id;explicit=current!==null;}else if(own(legacy,'current_step_id')&&legacy.current_step_id!==null){explicit=true;if(all&&counts.get(legacy.current_step_id)?.length===1&&ids.includes(legacy.current_step_id))current=legacy.current_step_id;else if(!all||!counts.has(legacy.current_step_id))current=legacy.current_step_id;}
    done=unique([...(Array.isArray(qualified?.done_step_ids)?qualified.done_step_ids.filter(id=>ids.includes(id)):[]),...(all&&Array.isArray(legacy.done_step_ids)?legacy.done_step_ids.filter(id=>ids.includes(id)&&counts.get(id)?.length===1):[])]);}
   const display=ids.includes(current)?current:explicit?null:ids[0]??null;if(explicit&&display===null&&!raison)raison='etape_absente';
-  return{version_id:r.version_id,etat:!v?'version_absente':!r.recipe?'recette_absente':!shape||!valid?'source_invalide':raison==='thermomix_bloque'?'thermomix_bloque':'disponible',servings:servings??null,current_step_id:current,display_step_id:display,done_step_ids:done.filter(id=>ids.includes(id)),total_steps:shape?ids.length:null,execution_autorisee:(!raison||raison==='etape_absente')&&s.status==='active',raison};});
+  return{version_id:r.version_id,etat:!v?'version_absente':!r.recipe?'recette_absente':!shape||!valid?'source_invalide':raison==='thermomix_bloque'?'thermomix_bloque':'disponible',servings:servings??null,current_step_id:current,display_step_id:display,done_step_ids:done.filter(id=>ids.includes(id)),total_steps:shape?ids.length:null,execution_autorisee:(!raison||raison==='etape_absente')&&s.status==='active',raison,...(valid&&lireThermomix(v)?.etat==='a_revoir'?{thermomix_a_revoir:true}:{})};});
  const explicit=s.active_version_id!=null,active=explicit?s.active_version_id:projected.find(r=>r.etat==='disponible')?.version_id??null;
  return{session_id:s.id,status:s.status,etat:!valid||!['active','done'].includes(s.status)?'invalide':s.status==='done'?'terminee':'active',progress_format:v2?valid?'v2':'invalide':'legacy',active_version_id:active,active_par_defaut:!explicit&&active!==null,active_indisponible:explicit&&!projected.some(r=>r.version_id===active&&r.etat==='disponible'),lang:['original','fr','en'].includes(s.lang)?s.lang:'original',versions:projected,absents:projected.filter(r=>r.etat==='version_absente').map(r=>r.version_id),ambigus,done_count:projected.reduce((n,r)=>n+r.done_step_ids.length,0),total_steps:projected.every(r=>r.total_steps!==null)?projected.reduce((n,r)=>n+r.total_steps,0):null};
 }
@@ -33,7 +34,7 @@ export function creerServiceCuisine({repo,getGeneration,maintenant=syncNow,newId
  if(!repo||typeof getGeneration!=='function')throw new TypeError('Dépôt et génération requis');
  // Les lectures ne font pas avancer le plancher réservé aux dates persistées.
  const lireMaintenant=maintenant===syncNow?()=>new Date(Date.now()+getClockOffset()).toISOString():maintenant;
- const portees=new WeakMap(),lectures=new WeakMap(),plans=new WeakMap(),lancements=new WeakMap(),curseurs=new WeakMap(),brouillons=creerServiceBrouillons({repo,getGeneration,maintenant,newId});
+ const portees=new WeakMap(),lectures=new WeakMap(),plans=new WeakMap(),reprises=new WeakMap(),lancements=new WeakMap(),curseurs=new WeakMap(),brouillons=creerServiceBrouillons({repo,getGeneration,maintenant,newId});
  const encadrer=f=>async(...args)=>{try{return await f(...args);}catch(e){return issue(e);}};
  async function capturerPortee({owner_id,estCourante=()=>true}={}){const base=repo.db,generation=getGeneration(),r=await brouillons.capturerPortee({owner_id,estCourante});if(r.issue!=='ok')return r;if(base!==repo.db||generation!==getGeneration()||!estCourante())fail('contexte_change');portees.set(r.portee,{base,generation,estCourante});return r;}
  function garde(p){const x=portees.get(p);if(!x)fail('contexte_change');const verifier=()=>{if(repo.db!==x.base||getGeneration()!==x.generation||!x.estCourante())fail('contexte_change');};verifier();return{...x,verifier};}
@@ -83,5 +84,43 @@ export function creerServiceCuisine({repo,getGeneration,maintenant=syncNow,newId
  async function terminerSession({intention:token,metier={},fichiers=[]}){const p=plans.get(token);if(!p?.cuissons)fail('contexte_change');const batch=metier.puts||{},conditions=Object.fromEntries(Object.entries(metier.conditions||{}).map(([s,cs])=>[s,[...cs]]));if(Object.keys(batch).some(s=>s!=='cook_history'))fail('forme_invalide');for(const row of batch.cook_history||[])if(!p.cuissons.some(r=>egalesCuisine(projectionSeedCuisine(r),projectionSeedCuisine(row))))fail('historique_change');for(const c of conditions.cook_history||[]){const expected=p.cuissons.find(r=>r.id===c.key);if(!expected)fail('historique_change');if(c.fusion){const f=c.fusion;c.fusion=(r,l)=>{const next=f(r,l),actual=next||r;if(!actual||!egalesCuisine(projectionSeedCuisine(actual),projectionSeedCuisine(expected)))fail('historique_change');return next;};}}
   for(const row of batch.cook_history||[]){const old=(conditions.cook_history||[]).find(c=>c.key===row.id);if(old?.fusion)fail('forme_invalide');(conditions.cook_history??=[]).push({key:row.id,fusion:r=>{if(r&&!egalesCuisine(projectionSeedCuisine(r),projectionSeedCuisine(row)))fail('historique_change');return null;}});}
   for(const expected of p.cuissons)if(!(batch.cook_history||[]).some(r=>r.id===expected.id)&&!(conditions.cook_history||[]).some(c=>c.key===expected.id&&c.fusion))fail('historique_incomplet');return appliquer({intention:token,metier:{...metier,conditions},fichiers});}
- return Object.fromEntries(Object.entries({capturerPortee,lireSession,lireMinuteurs,preparerSelection:x=>preparerGeste(x,'active'),preparerLangue:x=>preparerGeste(x,'language'),preparerProgression:x=>preparerGeste(x,'progress'),appliquerSession:appliquer,preparerFin,terminerSession,preparerLancement,conserverLancement:appliquer,preparerAncre,conserverAncre:appliquer,preparerSignalement,signalerDemande:appliquer}).map(([k,f])=>[k,encadrer(f)]));
+ // Une séance signée reste liée à ses anciennes versions. Le retour à l'original est une création distincte.
+ async function preparerRepriseOriginale({portee,lecture}){
+  const date=maintenant(),x=lu(portee,lecture),g=await scope(portee),versions=new Map(),portions=new Map(),correspondances=new Map(),ancetres=[];
+  if(projeterSessionCuisine(x.affiche).etat==='invalide')fail('progression_invalide');
+  let repli=false;
+  for(const entree of x.affiche.versions){
+   if(!entree.version||!entree.recipe)fail('source_absente');
+   if(!['active','retiree'].includes(lireEtatRecette(entree.recipe,entree.edition).etat))fail('cycle_change');
+   const resolue=await resoudreVersionThermomix(entree.version,{lire:async id=>{g.verifier();const row=await g.base.get('recipe_versions',id);g.verifier();return row;}});
+   if(!resolue.ok)fail(resolue.raison);
+   const n=portionsSession(x.affiche.session,entree.version)??null;
+   if(n!==null&&(!Number.isFinite(n)||n<=0))fail('portions_incompatibles');
+   if(!gardeThermomix(resolue.version,n).ok)fail('thermomix_invalide');
+   if(portions.has(resolue.version.id)&&portions.get(resolue.version.id)!==n)fail('portions_incompatibles');
+   repli ||= !!resolue.repli;versions.set(resolue.version.id,resolue.version);portions.set(resolue.version.id,n);
+   correspondances.set(entree.version_id,resolue.version.id);ancetres.push(...resolue.ancetres);
+  }
+  if(!repli)fail('reprise_inutile');
+  const ancienne=x.affiche.session,ids=[...versions.keys()],session={id:newId('cs'),recipe_id:ancienne.recipe_id??null,meal_id:ancienne.meal_id??null,
+   selected_version_ids:ids,active_version_id:correspondances.get(ancienne.active_version_id)??ids[0],servings:ancienne.servings??null,
+   servings_by_version:Object.fromEntries(portions),units:ancienne.units??'original',lang:ancienne.lang??'original',status:'active',started_at:date,
+   progress:{done_step_ids:[]},created_at:date,updated_at:date};
+  await scope(portee);const intention={};reprises.set(intention,{portee,x,session,versions:[...versions.values()],ancetres,conservee:false});
+  return{issue:'ok',intention,session_id:session.id};
+ }
+ async function conserverRepriseOriginale({intention}){
+  const p=reprises.get(intention);if(!p)fail('contexte_change');
+  const g=await scope(p.portee);
+  if(p.conservee){const row=await g.base.get('cook_sessions',p.session.id);g.verifier();if(!row)fail('session_absente');return{issue:'deja_conserve',session_id:row.id};}
+  const context=contextes(p.x),recettes=context.recipes.map(c=>({...c,owner_id:p.portee.owner_id})),editions=context.editions.map(c=>({...c,owner_id:p.portee.owner_id}));
+  const depot={get:async(store,id)=>{g.verifier();const row=await g.base.get(store,id);g.verifier();return row;},saveBatch:async(puts,options)=>{
+   const conditions={...options.conditions,cook_sessions:[{key:p.x.affiche.session.id,fusion:row=>{if(!egalesCuisine(row,p.x.affiche.session))fail('session_changee');return null;}},{key:p.session.id,absente:true}]};
+   return repo.muterCuisine({metier:{puts,conditions,recettes,editions},internes:{conditions:conditionsPortee(p.portee,g)}},{baseAttendue:g.base,contexteValide:()=>{g.verifier();return true;}});
+  }};
+  try{await enregistrerSessionCuisine(p.session,{repo:depot,recettes,versionsAffichees:p.versions,ancetresThermomix:p.ancetres});}
+  catch(error){if(['source_modifiee','version_modifiee','thermomix_modifie','version_absente','thermomix_invalide'].includes(error?.message))fail(error.message);throw error;}
+  p.conservee=true;return{issue:'conserve',session_id:p.session.id};
+ }
+ return Object.fromEntries(Object.entries({capturerPortee,lireSession,lireMinuteurs,preparerRepriseOriginale,conserverRepriseOriginale,preparerSelection:x=>preparerGeste(x,'active'),preparerLangue:x=>preparerGeste(x,'language'),preparerProgression:x=>preparerGeste(x,'progress'),appliquerSession:appliquer,preparerFin,terminerSession,preparerLancement,conserverLancement:appliquer,preparerAncre,conserverAncre:appliquer,preparerSignalement,signalerDemande:appliquer}).map(([k,f])=>[k,encadrer(f)]));
 }

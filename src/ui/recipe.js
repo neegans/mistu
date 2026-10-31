@@ -26,7 +26,7 @@ import { demarrerLectureWeb, texteEchecLecture, enLigneLecture, ligneWebOuverte 
 import { demarrerConnexion } from './settings.js';
 import { estCreationIA, etiquetteCreationIA, lireCreation, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
 import { addToMealFlow,boutonEnvie } from './meals.js';
-import {capturerConventionCourses,validerVolumeRepas} from '../domain/repas-courses.js';
+import {capturerConventionCourses,validerVolumeRepas,portionsSaisies} from '../domain/repas-courses.js';
 import {creerGardeRepas} from './repas-garde.js';
 import {ouvrirCuissonsAvecRestes} from './inventaire-restes.js';
 import { deviceId } from './import.js';
@@ -35,8 +35,9 @@ import { lienSignet } from '../core/lien.js';
 import { capitaliser } from './puces.js';
 import { comparerCuissons, textePersonnel } from '../domain/cuisine-personnelle.js';
 import { ouvrirCuissons, monterNotesPersonnelles, monterMesPhotos, boutonModifierObservation } from './cuisson.js';
-import { estThermomix, gardeThermomix, etiquetteThermomix } from '../domain/thermomix.js';
+import { estThermomix, gardeThermomix, etiquetteThermomix, lireThermomix } from '../domain/thermomix.js';
 import { enregistrerSessionCuisine } from '../domain/thermomix-session.js';
+import {resoudreVersionThermomix,gardesAscendanceThermomix} from '../domain/thermomix-reprise.js';
 import { renderCopieCookidoo } from './cookidoo.js';
 import { BLOCAGE_THERMOMIX, rappelThermomix } from './thermomix-garde.js';
 import { resumeReperes, lienGestionPhoto } from './reperes-affichage.js';
@@ -405,7 +406,8 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     if (lienTM) lienTM.href = lienAvecOrigine(`/recipes/${rid}/thermomix${buildQuery({ v: version.id, servings: state.servings ?? '' })}`,origine);
     const rappelTM = rappelThermomix(version); if (rappelTM) body.append(rappelTM);
     if (estThermomix(version)) {
-      if (!gardeThermomix(version, state.servings).ok) body.append(el('div', { class: 'status warn', dataset: { role: 'thermomix-portions' } }, t(BLOCAGE_THERMOMIX), el('button', { class: 'btn small', onClick: () => { state.servings = version.servings ?? null; root.querySelector('#servings-val').textContent = state.servings ?? t('inconnues'); drawBody(); } }, t('Revenir aux quantités adaptées'))));
+      if (lireThermomix(version)?.etat === 'a_revoir') body.append(el('div',{class:'status warn',style:{display:'block'},dataset:{role:'thermomix-reprise'}},el('p',null,t('Cette adaptation doit être revue. Pour cuisiner ou préparer les courses, la recette d’origine sera utilisée si elle est disponible.')),el('a',{class:'btn small',href:lienAvecOrigine(`/recipes/${rid}/thermomix${buildQuery({v:version.id,servings:state.servings??''})}`,origine)},t('Revoir les réglages Thermomix'))));
+      else if (!gardeThermomix(version, state.servings).ok) body.append(el('div', { class: 'status warn', dataset: { role: 'thermomix-portions' } }, t(BLOCAGE_THERMOMIX), el('button', { class: 'btn small', onClick: () => { state.servings = version.servings ?? null; root.querySelector('#servings-val').textContent = state.servings ?? t('inconnues'); drawBody(); } }, t('Revenir aux quantités adaptées'))));
       body.append(el('details', { class: 'autres-gestes', dataset: { role: 'ouvrir-cookidoo' } },
         el('summary', null, t('Copier pour Cookidoo')), renderCopieCookidoo({ recipe, version, book, edition }, { ...deps, portions: state.servings })));
     }
@@ -494,18 +496,39 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   }
 
   async function startCooking() {
-    const source = structuredClone(version);
-    if (!gardeThermomix(source, state.servings).ok) { dire(t(BLOCAGE_THERMOMIX)); return; }
-    const session = { id: gestesLecture.repo.newId('cs'), recipe_id: recipe.id, meal_id: null, selected_version_ids: [source.id], active_version_id: source.id, servings: state.servings, progress: { current_step_id: source.steps?.[0]?.id || null, done_step_ids: [], total_steps: (source.steps || []).length }, started_at: gestesLecture.repo.nowIso(), active_device_id: deviceId(), status: 'active', units: state.units, lang: state.lang };
-    try { const contexte = await capturerRecette(gestesLecture.repo, recipe, {ctx}); await enregistrerSessionCuisine(session, { repo: gestesLecture.repo, recettes:[contexte], versionsAffichees:[source] }); naviguer(`/cook/${session.id}`); }
-    catch { dire(t(TEXTE_NOUVEL_USAGE_REFUSE)); }
+    const affichee = structuredClone(version), portions = state.servings, R = gestesLecture.repo;
+    try {
+      const contexte = await capturerRecette(R, recipe, {ctx});
+      const resolution = await resoudreVersionThermomix(affichee, {lire:id=>R.get('recipe_versions',id)});
+      if (!resolution.ok) throw Error(resolution.raison);
+      const source = resolution.version;
+      if (resolution.repli) portionsSaisies(portions);
+      if (!gardeThermomix(source, portions).ok) { dire(t(BLOCAGE_THERMOMIX)); return; }
+      const session = { id:R.newId('cs'), recipe_id:recipe.id, meal_id:null, selected_version_ids:[source.id], active_version_id:source.id, servings:portions, progress:{current_step_id:source.steps?.[0]?.id||null,done_step_ids:[],total_steps:(source.steps||[]).length}, started_at:R.nowIso(),active_device_id:deviceId(),status:'active',units:state.units,lang:state.lang };
+      await enregistrerSessionCuisine(session,{repo:R,recettes:[contexte],versionsAffichees:[source],ancetresThermomix:resolution.ancetres});
+      naviguer(`/cook/${session.id}`);
+    } catch { dire(t(TEXTE_NOUVEL_USAGE_REFUSE)); }
   }
 
   async function makeList() {
-    if(listeEnCours)return;const R=gestesLecture.repo,garde=creerGardeRepas(R,ctx),source=structuredClone(version);if(!gardeThermomix(source,state.servings).ok){dire(t(BLOCAGE_THERMOMIX));return;}listeEnCours=true;
-    const proposition={items:[{recipe_id:recipe.id,recipe_version_id:version.id,servings:state.servings,title:recipe.display_title||recipe.original_title,convention_snapshot:capturerConventionCourses(ctx.conventionFor(recipe))}]};if(listePreparee&&JSON.stringify(listePreparee.items)!==JSON.stringify(proposition.items))listePreparee=null;
-    const list = listePreparee||{ id: R.newId('sl'), title: `${recipe.display_title || recipe.original_title}`, items: [{ recipe_id: recipe.id, recipe_version_id: version.id, servings: state.servings, title: recipe.display_title || recipe.original_title, convention_snapshot:capturerConventionCourses(ctx.conventionFor(recipe)) }], checked: {},manual_lines:[],row_overrides:{} };
-    listePreparee=list;try{return await modifier(async contexte=>{await R.saveBatch({},await garde.options({shopping_lists:[{key:list.id,fusion:c=>{if(c){if(JSON.stringify(c.items)!==JSON.stringify(list.items))throw Error('contenu_change');return null;}return validerVolumeRepas(list);}}],recipe_versions:[{key:source.id,fusion:c=>{if(JSON.stringify(c)!==JSON.stringify(source))throw Error('version_changee');return null;}}]},[contexte]));naviguer(`/lists/${list.id}`);});}finally{listeEnCours=false;}
+    if(listeEnCours)return;
+    const R=gestesLecture.repo,garde=creerGardeRepas(R,ctx),affichee=structuredClone(version),portions=state.servings;
+    listeEnCours=true;
+    try {
+      const resolution=await resoudreVersionThermomix(affichee,{lire:id=>R.get('recipe_versions',id)});
+      if(!resolution.ok)throw Error(resolution.raison);
+      if(resolution.repli)portionsSaisies(portions);
+      if(!gardeThermomix(resolution.version,portions).ok){dire(t(BLOCAGE_THERMOMIX));return;}
+      const items=[{recipe_id:recipe.id,recipe_version_id:resolution.version.id,servings:portions,title:recipe.display_title||recipe.original_title,convention_snapshot:capturerConventionCourses(ctx.conventionFor(recipe))}];
+      if(listePreparee&&JSON.stringify(listePreparee.items)!==JSON.stringify(items))listePreparee=null;
+      const list=listePreparee||{id:R.newId('sl'),title:recipe.display_title||recipe.original_title,items,checked:{},manual_lines:[],row_overrides:{}};
+      listePreparee=list;
+      return await modifier(async contexte=>{
+        await R.saveBatch({},await garde.options({shopping_lists:[{key:list.id,fusion:c=>{if(c){if(JSON.stringify(c.items)!==JSON.stringify(list.items))throw Error('contenu_change');return null;}return validerVolumeRepas(list);}}],recipe_versions:gardesAscendanceThermomix(resolution.ancetres)},[contexte]));
+        naviguer(`/lists/${list.id}`);
+      });
+    } catch { dire(t(TEXTE_NOUVEL_USAGE_REFUSE)); }
+    finally { listeEnCours=false; }
   }
 
   async function attachDish(contexte) {

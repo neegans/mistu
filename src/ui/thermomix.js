@@ -12,6 +12,7 @@ import { navigate, remplacerAdresse, buildQuery } from '../core/router.js';
 import * as depot from '../model/repo.js';
 import * as parcours from '../domain/thermomix-parcours.js';
 import { validerReponseThermomix, formaterBlocThermomix, explicationBlocThermomix, lireThermomix, AVERTISSEMENT_TM7 } from '../domain/thermomix.js';
+import { resoudreVersionThermomix } from '../domain/thermomix-reprise.js';
 import { formatQuantity } from '../domain/quantity.js';
 import { unitLabel } from '../domain/units.js';
 import { cibleReprise } from '../domain/import-cible.js';
@@ -24,6 +25,29 @@ const TERMINE = ['enregistre', 'ignore'];
 const copier = (v) => structuredClone(v);
 const portionsDe = (n) => typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : null;
 const ingredientsTexte = (v) => (v.ingredients || []).map(i => i.source_text || [formatQuantity(i.quantity), i.unit_id ? unitLabel(i.unit_id, 'fr') : i.unit_text, i.name_text].filter(Boolean).join(' '));
+
+function brouillonReparation(resolution) {
+  const documents = resolution.ancetres.slice(0, -1).map(v => { const lu = lireThermomix(v); return lu?.ok ? lu : lu?.document; });
+  if (documents.some(d => !d)) throw Error('source_modifiee');
+  const premier = documents[0], courant = id => premier.plan.correspondance.find(c => c.source_step_id === id)?.step_id;
+  const remonter = ids => {
+    let selection = [...ids];
+    for (let i = 0; i < documents.length; i++) {
+      selection = selection.map(id => documents[i].plan.correspondance.find(c => c.step_id === id)?.source_step_id);
+      if (selection.some(id => !id || !resolution.ancetres[i + 1].steps.some(s => s.id === id))) throw Error('source_modifiee');
+    }
+    return resolution.version.steps.filter(s => selection.includes(s.id)).map(s => s.id);
+  };
+  const precisionsBlocs = premier.blocs.map(b => premier.contexte.selection.includes(b.source_step_id) ? premier.contexte.precisions : premier.contexte.anciennes_precisions[b.source_step_id]);
+  const selection = remonter(premier.blocs.map(b => courant(b.source_step_id))), precisions = { reponses: [] }, divergences = {};
+  for (const cle of ['eau_vapeur_g', 'volume_bol_l', 'volume_panier_l']) {
+    const valeurs = [...new Set(precisionsBlocs.map(p => p?.[cle]).filter(v => v != null))];
+    precisions[cle] = valeurs.length === 1 ? valeurs[0] : null;
+    if (valeurs.length > 1) divergences[cle] = valeurs;
+  }
+  precisions.froid_confirme = remonter([...new Set(precisionsBlocs.flatMap(p => p?.froid_confirme || []).map(courant))]).filter(id => selection.includes(id));
+  return { draft: { selection, precisions, demande: premier.contexte.demande, langue: premier.contexte.langue }, divergences };
+}
 
 export function texteErreurThermomix(erreur) {
   const code = erreur?.code || erreur?.raison || erreur?.message;
@@ -72,8 +96,24 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
     if (row?.recipe_id !== propreRecette.id) return el('p', { class: 'status warn' }, t('Ce brouillon appartient à une autre recette.'));
   }
   const versionId = row?.source_version_id || (typeof query.v === 'string' ? query.v : propreRecette.current_version_id);
-  const version = versionId ? await repo.get('recipe_versions', versionId) : null;
+  let version = versionId ? await repo.get('recipe_versions', versionId) : null, reparation = null;
   const rid = encodeURIComponent(propreRecette.id), lien = `/recipes/${rid}`;
+  const lecturePlan = lireThermomix(version);
+  if (lecturePlan?.ok === false && lecturePlan.etat !== 'a_revoir' && version?.provenance?.thermomix_invalide !== true) {
+    return el('div', { class: 'stack' }, el('p', { class: 'status warn' }, t('La version source a changé ou n’est plus disponible. Repars de sa fiche.')),
+      el('a', { class: 'btn', href: `#${lien}` }, t('Revoir la recette source')));
+  }
+  if (!row && lecturePlan?.etat === 'a_revoir') {
+    try {
+      const resolution = await resoudreVersionThermomix(version, { lire: id => repo.get('recipe_versions', id) });
+      if (!resolution.ok || !resolution.repli || resolution.version.recipe_id !== propreRecette.id) throw Error('source_modifiee');
+      reparation = { ...brouillonReparation(resolution), ancetres: resolution.ancetres };
+      version = resolution.version;
+    } catch {
+      return el('div', { class: 'stack' }, el('p', { class: 'status warn' }, t('La version source a changé ou n’est plus disponible. Repars de sa fiche.')),
+        el('a', { class: 'btn', href: `#${lien}` }, t('Revoir la recette source')));
+    }
+  }
   if (!version || version.recipe_id !== propreRecette.id || !Array.isArray(version.steps) || !version.steps.length || propreRecette.availability === 'reference_only') {
     return el('div', { class: 'stack' }, el('p', { class: 'status warn' }, t('Importe d’abord les étapes de cette recette pour les adapter au Thermomix.')),
       el('a', { class: 'btn', href: `#${lien}` }, t('Revoir la recette source')));
@@ -83,6 +123,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
       el('a', { class: 'btn', href: `#${lien}` }, t('Revoir la recette source')));
   }
   let draft = { selection: [], demande: '', precisions: { eau_vapeur_g: null, volume_bol_l: null, volume_panier_l: null, froid_confirme: [], reponses: [] }, langue: getUiLocale() };
+  if (reparation) draft = copier(reparation.draft);
   if (row?.contexte) draft = { selection: [...row.contexte.selection], demande: row.contexte.demande, precisions: copier(row.contexte.precisions), langue: row.contexte.langue };
   let importId = row?.id || null, opening = null, queue = Promise.resolve();
   const operations = new Set();
@@ -137,7 +178,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
   }
   async function ensure(snapshot) {
     if (importId) return importId;
-    if (!opening) opening = P.ouvrirThermomix({ recipeId: propreRecette.id, versionId: version.id, contexteRecette, ...snapshot }, patchDeps()).then(r => {
+    if (!opening) opening = P.ouvrirThermomix({ recipeId: propreRecette.id, versionId: version.id, contexteRecette, ancetresThermomix: reparation?.ancetres || [], ...snapshot }, patchDeps()).then(r => {
       row = r; importId = r.id;
       if (vivant()) adresse(`#${lien}/thermomix${buildQuery({ ...query, import: importId })}`);
       return r.id;
@@ -145,6 +186,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
     return opening;
   }
   function persist() {
+    if (invalidNumbers.size) return Promise.resolve();
     const snapshot = copier(draft), questionsAttendues = row?.questions_tour_id ?? null;
     queue = queue.catch(() => {}).then(async () => {
       if (closed || readonly() || terminal() || perime()) return;
@@ -192,6 +234,12 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
       }
       invalidNumbers.delete(key); e.target.removeAttribute('aria-invalid'); draft.precisions[key] = n; changed();
     } }); controls.push(number); materiel.append(field(label, number));
+    const initiale = draft.precisions[key];
+    if ((initiale != null && (!Number.isFinite(initiale) || initiale < 0 || initiale > max)) || reparation?.divergences[key]) {
+      invalidNumbers.add(key); number.setAttribute('aria-invalid', 'true'); materiel.open = true;
+      message(t('Cette valeur dépasse les limites du profil TM7 ou n’est pas un nombre valide.'));
+    }
+    if (reparation?.divergences[key]) materiel.append(el('p', { class: 'status warn' }, t('Valeurs conservées : {valeurs}. Renseigne la valeur à utiliser.', { valeurs: reparation.divergences[key].join(' · ') })));
   }
   materiel.append(el('p', { class: 'muted' }, t('Laisse vide ce que tu ne connais pas. Les grammes ne permettent pas de déduire le volume ; vérifie les repères sur les contenants.')));
   const proposer = action(t('Proposer l’adaptation — 1 appel'), 'proposer-tm7', proposerAdaptation, true);
@@ -243,6 +291,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
   append(root, [pageHeader(t('Chef Thermomix'), { subtitle: propreRecette.display_title || propreRecette.original_title, back: {...retourConnu({query,portee:ctx.navigation?.portee||porteeNavigation(ctx),repli:lien+buildQuery({v:version.id})}),label:t('Retour')} }),
     el('div', { class: 'status' }, t('TM7 · Amérique du Nord · 120 V. Manuel et vapeur, sans chauffe ou 100 °C. Les autres modes restent hors de cette version.')),
     el('p', { class: 'muted' }, t('Adapte seulement les étapes choisies. Les ingrédients et les autres étapes resteront inchangés.')),
+    reparation ? el('p', { class: 'status warn', dataset: { role: 'reparation-tm7' } }, t('Revoir les réglages depuis la recette d’origine. L’ancien plan reste conservé. Corrige les valeurs signalées avant de demander une nouvelle proposition.')) : null,
     propreRecette.availability === 'partial' ? el('p', { class: 'status warn' }, t('Cette recette est partielle. Les informations nécessaires doivent être complétées avant toute proposition qui en dépend.')) : null,
     lireThermomix(version)?.ok === false ? el('p', { class: 'status warn' }, t('Cette version a modifié une adaptation TM7. Sélectionne toutes ses étapes pour proposer un nouveau plan complet.')) : null,
     avisCycle, quantites, ficheSource, selection, field(t('Ce que tu voudrais faire (facultatif)'), demande), materiel, questionsZone,

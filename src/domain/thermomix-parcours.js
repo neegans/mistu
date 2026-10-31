@@ -6,6 +6,7 @@ import { construireContexteThermomix, empreinteThermomix, validerReponseThermomi
 import { ignorerPropositionImport } from './reprise-import.js';
 import { extraireObjetJson } from './reponse-json.js';
 import { TransitionRefusee } from '../core/db.js';
+import { gardesAscendanceThermomix } from './thermomix-reprise.js';
 import { contexteRecetteImport, memoireCycleImport, verifierCycleImport, verifierCaptureImport } from './contexte-import.js';
 
 const TERMINES = ['enregistre', 'ignore'];
@@ -116,7 +117,7 @@ export async function ignorerPropositionPrecedenteThermomix(importId, {repo,cont
   return lireBrouillonThermomix(importId,{repo});
 }
 
-export async function ouvrirThermomix({ recipeId, versionId, selection = [], demande = '', precisions = {}, langue = 'fr', contexteRecette = null } = {}, { repo, ...deps } = {}) {
+export async function ouvrirThermomix({ recipeId, versionId, selection = [], demande = '', precisions = {}, langue = 'fr', contexteRecette = null, ancetresThermomix = [] } = {}, { repo, ...deps } = {}) {
   if (!propreId(recipeId) || !propreId(versionId)) throw erreur('source_absente');
   const moi = device(repo), id = repo.newId('imp');
   const refs = { recipe_id: recipeId, source_version_id: versionId };
@@ -125,6 +126,14 @@ export async function ouvrirThermomix({ recipeId, versionId, selection = [], dem
   const row = { ...ligneImportNeuve({ id, kind: 'thermomix', recipe_id: recipeId, device_id: moi }), source_version_id: versionId,
     ...memoireCycleImport(contexteRecette || await contexteRecetteImport(repo, recipe)), contexte, phase: 'selection', revision_brouillon: 0, tentative_id: null, version_id: null, questions: [], copie_de: null };
   const conditions = { ...conditionsSource(row, source, recipe), imports: [{ key: id, absente: true }, { index: 'recipe_id', valeur: recipeId, exclus: IMPORTS_OUVERTS }] };
+  for (const garde of gardesAscendanceThermomix(ancetresThermomix)) {
+    const index = conditions.recipe_versions.findIndex(c => c.key === garde.key), precedente = conditions.recipe_versions[index];
+    const condition = { key: garde.key, fusion: (courant, lecture) => {
+      precedente?.fusion(courant, lecture);
+      try { return garde.fusion(courant, lecture); } catch { throw erreur('source_modifiee'); }
+    } };
+    if (index < 0) conditions.recipe_versions.push(condition); else conditions.recipe_versions[index] = condition;
+  }
   try { await repo.saveBatch({ imports: [row] }, { recettes: [contexteRecette || await contexteRecetteImport(repo, recipe, row)], conditions }); }
   catch (e) { if (e instanceof TransitionRefusee && e.store === 'imports') throw erreur('import_ouvert'); throw convertir(e); }
   return lireBrouillonThermomix(id, { repo, ...deps });

@@ -3,6 +3,10 @@ import {runAuditFichesCycleTests} from './audit-fiches-cycle.js';
 import {runAuditVersionBaseTests} from './audit-version-base.js';
 import {runAuditHorlogesCuisineTests} from './audit-horloges-cuisine.js';
 import {runAuditEnvoiInitialTests} from './audit-envoi-initial.js';
+import {runAuditThermomixHistoriqueTests} from './audit-thermomix-historique.js';
+import {runAuditThermomixUsagesTests} from './audit-thermomix-usages.js';
+import {runAuditThermomixReparationTests} from './audit-thermomix-reparation.js';
+import {runAuditThermomixSeancesTests} from './audit-thermomix-seances.js';
 import {runAuditArchiveRetraitTests} from './audit-archive-retrait.js';
 import {runAuditArchiveFichesInvalidesTests} from './audit-archive-fiches-invalides.js';
 import {runAuditArchiveExclusionsUITests} from './audit-archive-exclusions-ui.js';
@@ -719,7 +723,11 @@ try { await runAuditFichesCycleTests({eq,ok}); } catch (e) { ok(false, 'runAudit
 try { await runAuditVersionBaseTests({eq,ok}); } catch (e) { ok(false, 'runAuditVersionBaseTests : ' + (e.stack || e)); }
 try { await runAuditHorlogesCuisineTests({eq,ok}); } catch (e) { ok(false, 'runAuditHorlogesCuisineTests : ' + (e.stack || e)); }
 try { await runAuditEnvoiInitialTests({eq,ok}); } catch (e) { ok(false, 'runAuditEnvoiInitialTests : ' + (e.stack || e)); }
-eq(results.length, 12769,'compte d’assertions : une assertion qui disparait est un rouge');
+try { await runAuditThermomixHistoriqueTests({eq,ok}); } catch (e) { ok(false, 'runAuditThermomixHistoriqueTests : ' + (e.stack || e)); }
+try { await runAuditThermomixUsagesTests({eq,ok}); } catch (e) { ok(false, 'runAuditThermomixUsagesTests : ' + (e.stack || e)); }
+try { await runAuditThermomixReparationTests({eq,ok}); } catch (e) { ok(false, 'runAuditThermomixReparationTests : ' + (e.stack || e)); }
+try { await runAuditThermomixSeancesTests({eq,ok}); } catch (e) { ok(false, 'runAuditThermomixSeancesTests : ' + (e.stack || e)); }
+eq(results.length, 13078,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

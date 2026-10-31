@@ -14,8 +14,9 @@ import { MEAL_ROLES, DIET_TAGS, RECIPE_TYPES } from '../model/schema.js';
 import { pageHeader, section, emptyState, select, field, dietChip, versionBadge, vignettePlat, contexteFichiers } from './components.js';
 import { libelleSource } from '../core/lien.js';
 import { deviceId } from './import.js';
-import { estThermomix, gardeThermomix } from '../domain/thermomix.js';
+import { estThermomix, gardeThermomix, lireThermomix } from '../domain/thermomix.js';
 import { portionsRepas, enregistrerSessionCuisine } from '../domain/thermomix-session.js';
+import {resoudreVersionThermomix,gardesAscendanceThermomix} from '../domain/thermomix-reprise.js';
 import { BLOCAGE_THERMOMIX, rappelThermomix } from './thermomix-garde.js';
 import { photosPersonnellesParRecette, photoPrincipale } from '../domain/cuisine-personnelle.js';
 import { formaterHeureLocale, analyserHeureLocale, decalageUTC } from '../domain/heure-locale.js';
@@ -164,7 +165,8 @@ export async function renderMeal(params, query, ctx, deps = {}) {
           el('button', { class: 'btn small danger', disabled: it.locked, onClick: async () => { if (await confirmDialog(t('Retirer « {r} » du repas ? Les autres éléments restent.', { r: it.recipe.original_title }), { okLabel: t('Retirer') })) { meal.items = meal.items.filter((x) => x.id !== it.id); save(['items']); } } }, t('Retirer')))),
       !it.version ? el('div', { class: 'status warn' }, t('Référence d’index seulement : ingrédients et durées inconnus.')) : null);
     const rappelTM = rappelThermomix(it.version); if (rappelTM) card.append(rappelTM);
-    if (!gardeThermomix(it.version, portionsRepas(it, meal)).ok) card.append(el('div', { class: 'status warn', dataset: { role: 'thermomix-portions' } }, t(BLOCAGE_THERMOMIX), el('button', { class: 'btn small', onClick: async () => { const cible = meal.items.find(x => x.id === it.id); cible.servings = it.version.servings ?? null; cible.servings_custom = true; await save(['items']); } }, t('Revenir aux quantités adaptées'))));
+    if (lireThermomix(it.version)?.etat === 'a_revoir') card.append(el('div',{class:'status warn',style:{display:'block'},dataset:{role:'thermomix-reprise'}},el('p',null,t('Cette adaptation doit être revue. Pour cuisiner ou préparer les courses, la recette d’origine sera utilisée si elle est disponible.')),el('a',{class:'btn small',href:lienAvecOrigine(`/recipes/${encodeURIComponent(it.recipe.id)}/thermomix${buildQuery({v:it.version.id,servings:portionsRepas(it,meal)??''})}`)},t('Revoir les réglages Thermomix'))));
+    else if (!gardeThermomix(it.version, portionsRepas(it, meal)).ok) card.append(el('div', { class: 'status warn', dataset: { role: 'thermomix-portions' } }, t(BLOCAGE_THERMOMIX), el('button', { class: 'btn small', onClick: async () => { const cible = meal.items.find(x => x.id === it.id); cible.servings = it.version.servings ?? null; cible.servings_custom = true; await save(['items']); } }, t('Revenir aux quantités adaptées'))));
     list.append(card);
   }
   root.append(section(t('Mon repas — {n} élément(s)', { n: items.length }), list,
@@ -211,9 +213,20 @@ export async function renderMeal(params, query, ctx, deps = {}) {
    if(envoiListe)return;envoiListe=true;
    try{
     const existantes=(ctx.shopping_lists||[]).filter(l=>l.meal_id===meal.id);if(existantes.length){let id=existantes[0].id;if(existantes.length>1)id=await(deps.chooseDialog??chooseDialog)(t('Choisis une liste de courses'),existantes.map(l=>({value:l.id,label:l.title||t('Courses'),hint:formatDate(l.created_at)})));if(id)(deps.navigate??navigate)(`/lists/${id}`);return;}
-    const recettes=await contextesActifs(),entries=itemsCoursesRepas(mealAffiche,ctx);if(entries.some(it=>it.recipe_version_id&&!ctx.versionsById.get(it.recipe_version_id)))throw Error('version_absente');if(entries.some(it=>it.recipe_version_id&&!gardeThermomix(ctx.versionsById.get(it.recipe_version_id),it.servings).ok))throw Error('thermomix_invalide');
+    const recettes=await contextesActifs(),entries=itemsCoursesRepas(mealAffiche,ctx),ancetres=[];
+    for(const it of entries){
+      if(!it.recipe_version_id)continue;
+      const affichee=ctx.versionsById.get(it.recipe_version_id);
+      if(!affichee||affichee.recipe_id!==it.recipe_id)throw Error('version_absente');
+      const resolution=await resoudreVersionThermomix(affichee,{lire:id=>R.get('recipe_versions',id)});
+      if(!resolution.ok)throw Error(resolution.raison);
+      if(resolution.repli)portionsSaisies(it.servings);
+      if(!gardeThermomix(resolution.version,it.servings).ok)throw Error('thermomix_invalide');
+      it.recipe_version_id=resolution.version.id;ancetres.push(...resolution.ancetres);
+    }
+    if(creationListe&&JSON.stringify(creationListe.items)!==JSON.stringify(entries))creationListe=null;
     creationListe??={id:R.newId('sl'),title:`${meal.title} — ${t('courses')}`,meal_id:meal.id,items:entries,checked:{},manual_lines:[],row_overrides:{},meal_basis_sha256:await empreinteBaseCourses(entries)};
-    await R.saveBatch({},await garde.options({recipe_versions:entries.filter(it=>it.recipe_version_id).map(it=>{const v=structuredClone(ctx.versionsById.get(it.recipe_version_id));return{key:it.recipe_version_id,fusion:c=>{if(JSON.stringify(c)!==JSON.stringify(v))throw Error('version_changee');return null;}};}),meals:[{key:meal.id,fusion:current=>{if(JSON.stringify(current?.items)!==JSON.stringify(mealAffiche.items)||current?.servings!==mealAffiche.servings)throw Error('contenu_change');return null;}}],shopping_lists:[{key:creationListe.id,fusion:r=>{if(r){if(JSON.stringify(r.items)!==JSON.stringify(creationListe.items))throw Error('contenu_change');return null;}return validerVolumeRepas(creationListe);}}]},recettes));(deps.navigate??navigate)(`/lists/${creationListe.id}`);
+    await R.saveBatch({},await garde.options({recipe_versions:gardesAscendanceThermomix(ancetres),meals:[{key:meal.id,fusion:current=>{if(JSON.stringify(current?.items)!==JSON.stringify(mealAffiche.items)||current?.servings!==mealAffiche.servings)throw Error('contenu_change');return null;}}],shopping_lists:[{key:creationListe.id,fusion:r=>{if(r){if(JSON.stringify(r.items)!==JSON.stringify(creationListe.items))throw Error('contenu_change');return null;}return validerVolumeRepas(creationListe);}}]},recettes));(deps.navigate??navigate)(`/lists/${creationListe.id}`);
    }catch{(deps.toast??toast)(t(TEXTE_NOUVEL_USAGE_REFUSE));}finally{envoiListe=false;}
   }
   async function contextesHistoriques(exclus = new Set()) {
@@ -230,14 +243,28 @@ export async function renderMeal(params, query, ctx, deps = {}) {
     try {
       const recettes = await contextesActifs();
       if (sources.some(it => it.recipe_version_id && !it.version) || sources.length !== (affiche.items || []).length) throw new Error('version_absente');
-      const withV = sources.filter(it => it.version);
+      const withV = [], ancetres = [], portionsParVersion = new Map();
+      for(const it of sources.filter(it=>it.version)){
+        if(it.version.recipe_id!==it.recipe_id)throw Error('version_absente');
+        const resolution=await resoudreVersionThermomix(it.version,{lire:id=>R.get('recipe_versions',id)});
+        if(!resolution.ok)throw Error(resolution.raison);
+        const portions=portionsRepas(it,affiche);
+        if(resolution.repli)portionsSaisies(portions);
+        if(!gardeThermomix(resolution.version,portions).ok){(deps.toast??toast)(t(BLOCAGE_THERMOMIX));return;}
+        ancetres.push(...resolution.ancetres);
+        if(portionsParVersion.has(resolution.version.id)){
+          if(portionsParVersion.get(resolution.version.id)!==portions)throw Error('portions_incompatibles');
+          continue;
+        }
+        portionsParVersion.set(resolution.version.id,portions);withV.push({...it,version:resolution.version});
+      }
       if (!withV.length) return;
-      if (withV.some(it => !gardeThermomix(it.version, portionsRepas(it, affiche)).ok)) { (deps.toast ?? toast)(t(BLOCAGE_THERMOMIX)); return; }
-      const session = { id: R.newId('cs'), recipe_id: withV[0].recipe_id, meal_id: affiche.id, selected_version_ids: withV.map(it => it.version.id), active_version_id: withV[0].version.id, servings_by_version: Object.fromEntries(withV.map(it => [it.version.id, portionsRepas(it, affiche)])), servings: affiche.servings ?? null, progress: { done_step_ids: [], by_version: {}, total_steps: withV.reduce((n, it) => n + (it.version.steps || []).length, 0) }, started_at: R.nowIso(), active_device_id: deviceId(), status: 'active', units: ctx.settings?.units || 'original', lang: ctx.settings?.reading_locale || 'original' };
-      await enregistrerSessionCuisine(session, { repo: R, recettes, versionsAffichees:withV.map(it => it.version), repasAffiche:affiche });
+      const session = { id: R.newId('cs'), recipe_id: withV[0].recipe_id, meal_id: affiche.id, selected_version_ids: withV.map(it => it.version.id), active_version_id: withV[0].version.id, servings_by_version: Object.fromEntries(portionsParVersion), servings: affiche.servings ?? null, progress: { done_step_ids: [], by_version: {}, total_steps: withV.reduce((n, it) => n + (it.version.steps || []).length, 0) }, started_at: R.nowIso(), active_device_id: deviceId(), status: 'active', units: ctx.settings?.units || 'original', lang: ctx.settings?.reading_locale || 'original' };
+      await enregistrerSessionCuisine(session, { repo: R, recettes, versionsAffichees:withV.map(it => it.version), repasAffiche:affiche,ancetresThermomix:ancetres });
       (deps.navigate ?? navigate)(`/cook/${session.id}`);
-    } catch { (deps.toast ?? toast)(t(TEXTE_NOUVEL_USAGE_REFUSE)); }
+    } catch(e) { (deps.toast ?? toast)(t(e?.message==='portions_incompatibles'?'La même recette est prévue avec des portions différentes. Cuisine ces éléments séparément.':TEXTE_NOUVEL_USAGE_REFUSE)); }
   }
+
   async function feedback() {
     try {
     const recettes = await contextesHistoriques();

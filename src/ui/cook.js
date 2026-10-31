@@ -44,6 +44,11 @@ export async function renderCook(params,query,ctx,deps={}){
  const terminer=el('button',{class:'btn',type:'button',onClick:()=>finir([])},t('Terminer'));
  const langues=[{value:'original',label:t('Original')},{value:'fr',label:t('Français')},{value:'en',label:t('Anglais')}];
  const langueChoix=segmented(langues,'original',lang=>geste('langue',{lang}),{nom:t('Langue de lecture')});langueChoix.dataset.role='langue-cuisine';
+ let repriseIntention=null,repriseEnCours=false;
+ const etatReprise=el('p',{role:'status',hidden:true,dataset:{role:'etat-reprise-originale'}});
+ const boutonReprise=el('button',{type:'button',class:'btn',onClick:()=>void reprendreOriginale()},t('Cuisiner la recette d’origine'));
+ const reprise=el('section',{class:'status warn',hidden:true,style:{display:'block'},dataset:{role:'reprise-originale'}},
+  el('p',null,t('Cette adaptation doit être revue. Une nouvelle séance utilisera la recette d’origine. Les étapes cochées et les suivis de cette séance restent ici.')),boutonReprise,etatReprise);
  const entete=el('div',{class:'cuisine-entete'},titre,el('div',{class:'row'},terminer,fiche));
  const avertissements=el('div',{class:'stack',dataset:{role:'avertissements-cuisine'}}),onglets=el('div',{class:'row cuisine-recettes',role:'group','aria-label':t('Recette active')});
  const outils=el('div',{class:'row cuisine-outils'},langueChoix),contenu=el('div',{class:'cuisine-contenu'}),navigation=el('div',{class:'controls cuisine-navigation navigation-cuisine'}),photoHote=el('div');
@@ -52,7 +57,7 @@ export async function renderCook(params,query,ctx,deps={}){
  ecran=(deps.creerControleurEcran??creerControleurEcran)({document:deps.document??document,wakeLock:deps.wakeLock??globalThis.navigator?.wakeLock,estCourante});
  commandeEcran=(deps.creerCommandeEcranAllume??creerCommandeEcranAllume)({controleur:ecran});outils.append(commandeEcran);
  voix=(deps.creerControleurVoix??creerControleurVoix)({speechSynthesis:deps.speechSynthesis??globalThis.speechSynthesis,SpeechSynthesisUtterance:deps.SpeechSynthesisUtterance??globalThis.SpeechSynthesisUtterance,estCourante});
- root.append(entete,onglets,outils,etat,avertissements,contenu,navigation,panneau,comparaisons,photoHote);
+ root.append(entete,onglets,outils,etat,avertissements,reprise,contenu,navigation,panneau,comparaisons,photoHote);
  const ctxF=await contexteFichiers(ctx),photos=photosPersonnellesParRecette(ctx.cook_history||[]);let fichiers=new Map();
  const initiale=await service.lireSession({portee,sessionId:params.id});
  if(initiale.issue!=='ok'||!estCourante()){signaler(initiale);terminer.disabled=true;fiche.hidden=true;return root;}
@@ -61,6 +66,28 @@ export async function renderCook(params,query,ctx,deps={}){
  const visible=()=>{if(document.visibilityState==='visible')actualiser();};document.addEventListener('visibilitychange',visible);permanents.push(()=>document.removeEventListener('visibilitychange',visible));
  return root;
 
+ async function reprendreOriginale(){
+  if(repriseEnCours||!estCourante())return;
+  repriseEnCours=true;boutonReprise.disabled=true;etatReprise.hidden=true;
+  try{
+   if(!repriseIntention){const p=await service.preparerRepriseOriginale({portee,lecture});if(p.issue!=='ok'){erreurReprise(p);return;}repriseIntention=p.intention;}
+   if(!estCourante())return;
+   const r=await service.conserverRepriseOriginale({intention:repriseIntention});
+   if(!['conserve','deja_conserve'].includes(r.issue)){erreurReprise(r);return;}
+   if(estCourante())(deps.navigate??navigate)('/cook/'+encodeURIComponent(r.session_id));
+  }catch{erreurReprise({reessayable:true});}
+  finally{repriseEnCours=false;if(estCourante())boutonReprise.disabled=false;}
+ }
+ function erreurReprise(r){
+  if(!estCourante())return;
+  etatReprise.hidden=false;
+  etatReprise.textContent=r.raison==='quota_stockage'?t('L’espace de stockage est insuffisant. La nouvelle séance n’est pas enregistrée.')
+   :r.raison==='portions_incompatibles'?t('Ces adaptations utilisent la même recette d’origine avec des portions différentes. Cuisine-les séparément.')
+   :r.reessayable===false?t('La recette ou la séance a changé. Rouvre la séance avant de réessayer.')
+   :t('La nouvelle séance n’a pas pu être enregistrée. Réessaie.');
+  if(r.reessayable===false)repriseIntention=null;
+  boutonReprise.textContent=r.reessayable===false?t('Cuisiner la recette d’origine'):t('Réessayer l’ouverture');
+ }
  function signaler(resultat,type){etat.hidden=false;etat.textContent=resultat?.raison==='session_terminee'?t('Cette séance est terminée. Les suivis de durée restent consultables.'):!estCourante()?t('La bibliothèque a changé. Rouvre la séance de cuisine.'):type==='langue'?t('La langue de lecture n’a pas pu être enregistrée. Réessaie.'):type==='selection'?t('La sélection n’a pas été enregistrée. La session ou la recette a changé ; réessaie après rechargement.'):type==='progression'?t('La progression n’a pas été enregistrée. La session ou la recette a changé ; réessaie après rechargement.'):t('Le changement n’a pas été conservé. Ta séance reste disponible ; relis son état avant de réessayer.');}
  async function recevoir(resultat){
   const n=++numeroLecture;if(!resultat.affiche||!resultat.projection)return false;
@@ -113,6 +140,7 @@ export async function renderCook(params,query,ctx,deps={}){
  function mutation(label,fn,{interdit=false,classe='btn',role=null}={}){return el('button',{class:classe,type:'button',disabled:interdit,dataset:{mutationCuisine:'',interdit:String(interdit),...(role?{role}:{})},onClick:fn},label);}
  function dessiner(){
   nettoyer();voix.arreter();contenu.replaceChildren();navigation.replaceChildren();photoHote.replaceChildren();avertissements.replaceChildren();onglets.replaceChildren();
+  reprise.hidden=!projection.versions.some(v=>v.thermomix_a_revoir);
   if(projection.etat==='active'&&projection.done_count===0){
    const rappels=avertissementsAvantCuisson(items.filter(it=>it.projection?.execution_autorisee));
    if(rappels.length)avertissements.append(el('div',{class:'card warn',dataset:{role:'avant-de-commencer'}},el('strong',null,t('Avant de commencer')),el('ul',null,...rappels.map(texte=>el('li',null,texte)))));

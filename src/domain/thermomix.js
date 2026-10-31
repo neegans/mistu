@@ -95,11 +95,13 @@ function instantane(version, { incomplete } = {}) {
     plan_invalide: p.thermomix_invalide === true || version.plan_invalide === true });
 }
 export function empreinteThermomix(version, options = {}) { return canon(instantane(version, options)); }
-function precisionsDe(value = {}, source) {
+function precisionsDe(value = {}, source, securite = erreur) {
   ferme(value, ['eau_vapeur_g', 'volume_bol_l', 'volume_panier_l', 'froid_confirme', 'reponses'], []);
   const froid = liste(value.froid_confirme || [], LIMITES_THERMOMIX.etapes).map(identifiant);
   if (new Set(froid).size !== froid.length || froid.some(id => !source.steps.some(s => s.id === id))) erreur('froid_invalide');
-  if (value.eau_vapeur_g != null && (typeof value.eau_vapeur_g !== 'number' || !Number.isFinite(value.eau_vapeur_g) || value.eau_vapeur_g < 0 || value.eau_vapeur_g > PROFIL_TM7.bolLitres * 1000)) erreur('eau_vapeur');
+  // La borne historique de forme reste contrôlée même lors d'une lecture documentaire.
+  if (value.eau_vapeur_g != null && (typeof value.eau_vapeur_g !== 'number' || !Number.isFinite(value.eau_vapeur_g) || value.eau_vapeur_g < 0 || value.eau_vapeur_g > 10000)) erreur('eau_vapeur');
+  if (value.eau_vapeur_g > PROFIL_TM7.bolLitres * 1000) securite('eau_vapeur');
   return { eau_vapeur_g: value.eau_vapeur_g ?? null, volume_bol_l: nombreOuNull(value.volume_bol_l, PROFIL_TM7.bolLitres),
     volume_panier_l: nombreOuNull(value.volume_panier_l, PROFIL_TM7.panierLitres),
     froid_confirme: source.steps.filter(s => froid.includes(s.id)).map(s => s.id),
@@ -130,7 +132,7 @@ export function construireContexteThermomix({ version, selection = [], demande =
   return borneContexte(contexte);
 }
 
-function relireContexte(c) {
+function relireContexte(c, securite = erreur) {
   ferme(c, ['revision', 'profil', 'langue', 'source', 'source_signature', 'selection', 'demande', 'precisions', 'anciens_blocs', 'anciennes_precisions', 'anciennes_langues']);
   if (c.revision !== 1 || c.profil !== PROFIL_TM7.id || !['fr', 'en'].includes(c.langue)) erreur('profil');
   const source = instantane(c.source, { incomplete: c.source?.incomplete });
@@ -138,11 +140,11 @@ function relireContexte(c) {
   const selection = liste(c.selection, LIMITES_THERMOMIX.selection).map(identifiant);
   if (new Set(selection).size !== selection.length || selection.some(id => !source.steps.some(s => s.id === id))
     || canon(selection) !== canon(source.steps.filter(s => selection.includes(s.id)).map(s => s.id))) erreur('selection');
-  const p = precisionsDe(c.precisions, source);
+  const p = precisionsDe(c.precisions, source, securite);
   if (canon(p) !== canon(c.precisions)) erreur('precisions');
   if (!objet(c.anciennes_precisions)) erreur('precisions');
   for (const [id, value] of Object.entries(c.anciennes_precisions)) {
-    if (!source.steps.some(s => s.id === id) || canon(precisionsDe(value, source)) !== canon(value)) erreur('precisions');
+    if (!source.steps.some(s => s.id === id) || canon(precisionsDe(value, source, securite)) !== canon(value)) erreur('precisions');
   }
   if (!objet(c.anciennes_langues) || Object.entries(c.anciennes_langues).some(([id, lg]) => !source.steps.some(s => s.id === id) || !['fr', 'en'].includes(lg))) erreur('langue');
   texte(c.demande, LIMITES_THERMOMIX.demande, { vide: true });
@@ -207,7 +209,7 @@ const graisse = (i) => /(?:^|[\s’'])huile|beurre|graisse|\boil\b|\bbutter\b|\b
 const graisseChaude = (i) => graisse(i) && /chaud|chauff|br[uû]lant|\bhot\b|heated/iu.test(`${i.name_text || ''} ${i.source_text || ''} ${i.preparation || ''}`);
 const DEPART_VIDE = 'Commencer cette partie avec le bol, le panier et le Varoma vides. Vérifier les ingrédients et quantités indiqués avant tout ajout.';
 function ancienDepartVide(step, c) { return step.text.startsWith(tr(DEPART_VIDE, null, c.anciennes_langues[step.id])); }
-function verifierSequence(blocs, c) {
+function verifierSequence(blocs, c, securite = erreur) {
   const map = new Map(blocs.map(b => [b.source_step_id, b]));
   if (map.size !== blocs.length) erreur('blocs_dupliques');
   let chaude = false, inconnue = false, vapeur = 0, fouet = 0, actions = 0;
@@ -229,7 +231,7 @@ function verifierSequence(blocs, c) {
       // Somme des volumes déjà mesurés, jamais de densité alimentaire supposée.
       if (enMl.ok && !enMl.estimate) total += enMl.value;
     }
-    if (total > capacite + 1e-9) erreur('capacite');
+    if (total > capacite + 1e-9) securite('capacite');
   };
   const placer = (refs, cible) => {
     if (!connu[cible]) erreur('contenu_non_etabli');
@@ -299,7 +301,7 @@ function verifierSequence(blocs, c) {
         if (!(p.eau_vapeur_g >= 500)) erreur('eau_vapeur');
         // Eau de service distincte des ingrédients. Une suite de réglages ne la rajoute pas.
         if (eauVapeur === null) { eau.bol = p.eau_vapeur_g; eauVapeur = p.eau_vapeur_g; }
-        else if (eauVapeur !== p.eau_vapeur_g) erreur('eau_vapeur');
+        else if (eauVapeur !== p.eau_vapeur_g) securite('eau_vapeur');
         verifierVolume('bol');
         vapeur += a.secondes; if (vapeur > LIMITES_THERMOMIX.vapeurCumulee) erreur('vapeur_cumulee');
       }
@@ -308,7 +310,7 @@ function verifierSequence(blocs, c) {
     }
   }
 }
-function reponseDe(raw, c) {
+function reponseDe(raw, c, securite = erreur) {
   if (typeof raw === 'string') {
     if (octets(raw) > LIMITES_THERMOMIX.corps) erreur('reponse_trop_grande');
     try { raw = extraireObjetJson(raw, { maxOctets: LIMITES_THERMOMIX.corps }); } catch (_) { erreur('json'); }
@@ -334,7 +336,7 @@ function reponseDe(raw, c) {
     if (source.text !== formaterBlocThermomix(b, ancienContexte, { locale: lg, initialisation: ancienDepartVide(source, c) }) || canon(source.timers || []) !== canon(minuteursBloc(b, lg))) erreur('ancien_bloc_modifie');
   }
   const anciens = anciensTous.filter(b => !c.selection.includes(b.source_step_id));
-  verifierSequence([...anciens, ...ordered], c);
+  verifierSequence([...anciens, ...ordered], c, securite);
   return { type: 'proposition', blocs: ordered };
 }
 export function validerReponseThermomix(raw, contexte) { return reponseDe(raw, relireContexte(contexte)); }
@@ -455,7 +457,11 @@ export function lireThermomix(version) {
     if (!['proposed', 'tested'].includes(version.status) || !Number.isFinite(Date.parse(p.reviewed_at))) erreur('statut');
     texte(p.modele, 160, { vide: true });
     if (version.provenance.model !== p.modele) erreur('modele');
-    const c = relireContexte(p.contexte), r = reponseDe(p.resultat, c);
+    // Reporter les seuls contrôles durcis depuis les premières versions conservées.
+    // Toute erreur d'intégrité ultérieure prime : eau/capacité ne prouvent jamais un document intact.
+    let motif = null;
+    const securite = raison => { motif ??= raison; };
+    const c = relireContexte(p.contexte, securite), r = reponseDe(p.resultat, c, securite);
     if (r.type !== 'proposition' || version.parent_version_id !== c.source.id || version.recipe_id !== c.source.recipe_id) erreur('source_modifiee');
     const blocs = c.source.steps.map(s => [...c.anciens_blocs.filter(b => !c.selection.includes(b.source_step_id)), ...r.blocs].find(b => b.source_step_id === s.id)).filter(Boolean);
     if (canon(blocs) !== canon(p.blocs)) erreur('plan_modifie');
@@ -468,7 +474,8 @@ export function lireThermomix(version) {
     if (canon(etapes) !== canon(version.steps) || canon(version.ingredients) !== canon(c.source.ingredients) || version.servings !== c.source.servings
       || [version.prep_minutes, version.cook_minutes, version.active_minutes, version.total_minutes].some(x => x !== null)
       || signatureVersion(version) !== p.version_signature) erreur('version_modifiee');
-    return { ok: true, plan: cloneJson(p), contexte: c, resultat: r, blocs: cloneJson(blocs) };
+    const document = { plan: cloneJson(p), contexte: c, resultat: r, blocs: cloneJson(blocs) };
+    return motif ? { ok: false, etat: 'a_revoir', raison: motif, motifs: [motif], document } : { ok: true, ...document };
   } catch (e) { return { ok: false, raison: e?.raison || 'plan_invalide' }; }
 }
 export function gardeThermomix(version, portionsDemandees = version?.servings ?? null) {
