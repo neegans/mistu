@@ -6,7 +6,7 @@ import { empreinteSources, projectionIdentitePage, projectionAnnotationPage, pro
 import { preparerStockageIndex, reconstruireResultatIndex } from '../src/domain/index-stockage.js';
 import { validerPageIndex } from '../src/domain/index-livre.js';
 
-const refuse=async fn=>{try{await fn();return false;}catch{return true;}};
+const erreur=async fn=>{try{await fn();return null;}catch(e){return e;}};
 async function fixture(db) {
   const blob=new Blob(['Source L5 à conserver'],{type:'image/png'}),sha256=await sha256Hex(blob);
   const p={id:'p-source',edition_id:'e-source',document_id:'d-source',sha256,rotation:0,position:1,source_revision:{format:1,family_id:'p-source',parent_page_id:null,operation_id:'op-capture',reason:'capture'}};
@@ -59,7 +59,7 @@ export async function runL5ArchivesTests({eq,ok}) {
     p[champ]=champ==='rotation'?180:champ==='sha256'?'b'.repeat(64):{...p.source_revision,operation_id:'autre-intention'};
     await db.mutate({origin:'remote',puts:{source_pages:[p]}});
     const avant=await db.getSnapshot();
-    ok(await refuse(()=>applyArchive(db,inspection)),'L5 archive : collision d’identité '+champ+' refusée');
+    eq((await erreur(()=>applyArchive(db,inspection)))?.code, "sources_divergentes",'L5 archive : collision d’identité '+champ+' refusée');
     eq(await db.getSnapshot(),avant,'L5 archive : collision '+champ+' garde toute la base');
   });
   for(const format of [1,2,3])await withDatabase(async db=>{
@@ -73,7 +73,7 @@ export async function runL5ArchivesTests({eq,ok}) {
       if(opts.archive_import&&!atteinte){atteinte=true;const s=await db.get('scan_sessions','s-source');await db.mutate({origin:'remote',puts:{scan_sessions:[{...s,source_state:{...s.source_state,revision:'choix-autre-onglet',active_page_ids:['p-source']}}]}});apresCourse=await db.getSnapshot();}
       return db.mutate(opts);
     }});
-    ok(await refuse(()=>applyArchive(facade,inspection)),'L5 archive : une sélection changée après préparation refuse le commit');
+    eq((await erreur(()=>applyArchive(facade,inspection)))?.code, "sources_divergentes",'L5 archive : sélection changée après préparation : snapshot de sources divergent refuse le commit');
     ok(atteinte,'L5 archive : la course atteint vraiment la transaction finale');
     eq(await db.getSnapshot(),apresCourse,'L5 archive : refus atomique conserve tout le changement concurrent sans restauration partielle');
   });
@@ -154,7 +154,7 @@ export async function runL5ArchivesTests({eq,ok}) {
   });
   await withDatabase(async db=>{
     await fixture(db);await db.mutate({origin:'remote',puts:{recipes:[{...refInline,original_title:'Correction concurrente'}]}});const avant=await db.getSnapshot();
-    ok(await refuse(()=>applyArchive(db,inline)),'L5 archive : collision de référence gérée refusée avant restauration');
+    eq((await erreur(()=>applyArchive(db,inline)))?.code, "id_collision",'L5 archive : collision de référence gérée refusée avant restauration');
     eq(await db.getSnapshot(),avant,'L5 archive : collision de référence conserve toute la bibliothèque');
   });
   let grosseArchive,logique,journalId;

@@ -6,7 +6,7 @@ import {fixtureLectureL6} from './l6-lecture-ecrans.js';
 import {traductionLectureL6} from './l6-lecture-recette.js';
 import {capturerSourceTraduction,empreinteTexteTraduction,lireRecuPublication,validerJournalTraduction,verifierCommandeTraduction} from '../src/domain/traductions-format.js';
 import {withRepo} from './sync-fixture.js';
-const clone=x=>structuredClone(x),refuse=async f=>{try{await f();return false;}catch{return true;}};
+const clone=x=>structuredClone(x),erreur=async f=>{try{await f();return null;}catch(e){return e;}};
 
 async function fixture(db) {
  const f=fixtureLectureL6(),translation=await traductionLectureL6(f);
@@ -46,7 +46,7 @@ export async function runL6ArchivesTests({eq,ok}) {
   eq((await db.get('recipe_versions',source.version.id)).notes,source.version.notes,'L6 archive '+mode+' : octets source signés intacts');
   ok(!!(await db.get('files',source.puts.files[0].sha256))?.blob,'L6 archive '+mode+' : photo conservée');
   eq((await db.get('recipes',source.recipe.id)).personal_notes,'Ma note personnelle.','L6 archive '+mode+' : note personnelle intacte');
-  const avant=await db.getSnapshot();ok(await refuse(()=>applyArchive(db,inspection,{mode})),'L6 archive '+mode+' : nouvel import historique divergent exige comparaison');eq(await db.getSnapshot(),avant,'L6 archive '+mode+' : refus sans écriture partielle');
+  const avant=await db.getSnapshot();eq((await erreur(()=>applyArchive(db,inspection,{mode})))?.code, "traduction_changee",'L6 archive '+mode+' : nouvel import historique divergent exige comparaison');eq(await db.getSnapshot(),avant,'L6 archive '+mode+' : refus sans écriture partielle');
   await db.mutate({origin:'remote',puts:{recipe_translations:[{...tr,revision:'tr_op_'+'f'.repeat(64)}]}});
   ok(!(await verifyRestored(db,inspection,{mode,normalisationsTraductions:resultat.normalisationsTraductions})).ok,'L6 archive '+mode+' : révision altérée après restauration détectée');
  });
@@ -63,7 +63,7 @@ export async function runL6ArchivesTests({eq,ok}) {
  await withDatabase(async db=>{
   await fixture(db);let atteinte=false,apres;
   const facade=Object.assign(Object.create(db),{mutate:async opts=>{if(opts.archive_import&&!atteinte){atteinte=true;const t=await db.get('recipe_translations',source.translation.id);t.translated_content.segments[0].text='Pain changé ailleurs';await db.mutate({origin:'remote',puts:{recipe_translations:[t]}});apres=await db.getSnapshot();}return db.mutate(opts);}});
-  ok(await refuse(()=>applyArchive(facade,inspection)),'L6 archive : traduction changée après préparation refuse le commit');ok(atteinte,'L6 archive : course atteint la vraie transaction');eq(await db.getSnapshot(),apres,'L6 archive : aucune restauration partielle après la course');
+  eq((await erreur(()=>applyArchive(facade,inspection)))?.code, "sources_divergentes",'L6 archive : traduction changée après préparation : snapshot divergent refuse le commit');ok(atteinte,'L6 archive : course atteint la vraie transaction');eq(await db.getSnapshot(),apres,'L6 archive : aucune restauration partielle après la course');
  });
 }
 
@@ -78,7 +78,7 @@ export async function runL6TransfertsTraductionTests({eq,ok}) {
  eq([c.recipe_id,c.recipe_version_id,c.edition_id,c.base_cycle_id,c.base_edition_cycle_id],[f.recipe.id,f.version.id,null,null,null],'L6 transfert : association et cycles capturés');
  ok(p.couvertes.has('recipe_translations:'+tr.id),'L6 transfert : cible retirée des put ordinaires');
  const snapshot={recipe_translations:[{...clone(tr),translated_content:{...tr.translated_content,segments:tr.translated_content.segments.map((s,i)=>i?s:{...s,text:'Autre'})}}]};
- ok(await refuse(()=>preparer({batch,snapshot,owner_id:null})),'L6 transfert : collision locale refusée avant transaction');
+ eq((await erreur(()=>preparer({batch,snapshot,owner_id:null})))?.code, "traduction_changee",'L6 transfert : collision locale refusée avant transaction');
 }
 
 export async function runL6ArchivesJournauxTests({eq,ok}) {

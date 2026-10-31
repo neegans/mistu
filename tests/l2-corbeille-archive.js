@@ -7,7 +7,7 @@ import { sha256Hex } from '../src/core/hash.js';
 const at = '2026-10-29T18:00:00.000Z';
 const edition = { id: 'l2-ed', book_id: 'l2-book', lifecycle_id: 'edition-trash', trashed_at: at, trash_mode: 'with_recipes' };
 const recette = { id: 'l2-r', original_title: 'Pain', edition_id: 'l2-ed', lifecycle_id: 'restore-member', trashed_at: null, restored_from_edition: { edition_id: 'l2-ed', lifecycle_id: 'edition-trash' } };
-const refuse = async fn => { try { await fn(); return false; } catch { return true; } };
+const erreur=async fn=>{try{await fn();return null;}catch(e){return e;}};
 const seed = db => db.putBatch({ books: [{ id: 'l2-book', title: 'Cuisine' }], book_editions: [edition], recipes: [recette] });
 
 export async function runL2CorbeilleArchiveTests({ eq, ok }) {
@@ -24,19 +24,19 @@ export async function runL2CorbeilleArchiveTests({ eq, ok }) {
   for (const mode of ['merge', 'replace']) await withDatabase(async db => {
     await seed(db); await db.put('book_editions', { ...edition, lifecycle_id: 'edition-autre', trashed_at: null, trash_mode: null });
     const avant = await db.getSnapshot();
-    ok(await refuse(() => applyArchive(db, inspection, { mode })), 'L2 archive : cycle édition divergent refuse ' + mode);
+    eq((await erreur(() => applyArchive(db, inspection, { mode })))?.code, "cycles_divergents", 'L2 archive : cycle édition divergent refuse ' + mode);
     eq(await db.getSnapshot(), avant, 'L2 archive : aucun graphe hybride en ' + mode);
   });
   await withDatabase(async db => {
     await seed(db); await db.put('recipes', { ...recette, restored_from_edition: null }); const avant = await db.getSnapshot();
-    ok(await refuse(() => applyArchive(db, inspection)), 'L2 archive : exception différente refuse même cycle propre');
+    eq((await erreur(() => applyArchive(db, inspection)))?.code, "cycles_divergents", 'L2 archive : exception différente refuse même cycle propre');
     eq(await db.getSnapshot(), avant, 'L2 archive : aucune restauration individuelle implicite');
   });
   let vide;
   await withDatabase(async db => { vide = await inspectArchive(await (await createArchive(db)).blob.arrayBuffer()); });
   await withDatabase(async db => {
     await db.putBatch({ books: [{ id: 'l2-book', title: 'Cuisine' }], book_editions: [edition] });
-    ok(await refuse(() => applyArchive(db, vide, { mode: 'replace' })), 'L2 archive : remplacement ne purge pas édition protégée omise');
+    eq((await erreur(() => applyArchive(db, vide, { mode: 'replace' })))?.code, "cycles_divergents", 'L2 archive : remplacement ne purge pas édition protégée omise');
     eq((await db.get('book_editions', 'l2-ed')).lifecycle_id, 'edition-trash', 'L2 archive : édition omise conservée');
   });
   // L'export B3 écarte désormais la fiche invalide ; l'inspecteur reste strict sur un ZIP hostile.
@@ -47,7 +47,7 @@ export async function runL2CorbeilleArchiveTests({ eq, ok }) {
   await withDatabase(async db => {
     await seed(db); const mutate = db.mutate.bind(db); let premier = true;
     db.mutate = async args => { if (premier) { premier = false; await mutate({ puts: { book_editions: [{ ...edition, lifecycle_id: 'retour-concurrent', trashed_at: null, trash_mode: null }] }, origin: 'remote' }); } return mutate(args); };
-    ok(await refuse(() => applyArchive(db, inspection)), 'L2 archive : cycle parent survenu entre inspection et transaction refuse tout');
+    eq((await erreur(() => applyArchive(db, inspection)))?.code, "sources_divergentes", 'L2 archive : cycle parent survenu : snapshot concurrent refusé avant la comparaison finale des cycles');
     eq((await db.get('book_editions', 'l2-ed')).lifecycle_id, 'retour-concurrent', 'L2 archive : retour concurrent conservé');
   });
   let collision;
@@ -58,7 +58,7 @@ export async function runL2CorbeilleArchiveTests({ eq, ok }) {
   await withDatabase(async db => {
     await db.putBatch({ books: [{ id: 'l2-book', title: 'Cuisine' }], book_editions: [edition], recipes: [{ id: 'l2-r', edition_id: 'l2-ed', original_title: 'Pain' }], recipe_versions: [{ id: 'version-partagee', recipe_id: 'l2-r', steps: [] }] });
     const avant = await db.getSnapshot();
-    ok(await refuse(() => applyArchive(db, collision)), 'L2 archive : enfant du membre hérité protégé malgré cycle propre initial');
+    eq((await erreur(() => applyArchive(db, collision)))?.code, "cycles_divergents", 'L2 archive : enfant du membre hérité protégé malgré cycle propre initial');
     eq(await db.getSnapshot(), avant, 'L2 archive : collision ne déplace pas un enfant hors du livre retiré');
   });
   for (const store of ['imports', 'cook_history', 'meals']) {
@@ -72,7 +72,7 @@ export async function runL2CorbeilleArchiveTests({ eq, ok }) {
     await withDatabase(async db => {
       await seed(db); await db.put(store, enfant(recette.id));
       const avant = await db.getSnapshot();
-      ok(await refuse(() => applyArchive(db, entrante)), `L2 archive : ${store} ne peut quitter son membre protégé`);
+      eq((await erreur(() => applyArchive(db, entrante)))?.code, "cycles_divergents", `L2 archive : ${store} ne peut quitter son membre protégé`);
       eq(await db.getSnapshot(), avant, `L2 archive : refus ${store} conserve le graphe entier`);
     });
   }
@@ -86,18 +86,18 @@ export async function runL2CorbeilleArchiveTests({ eq, ok }) {
     for(const mode of ['merge','replace'])await withDatabase(async db=>{
       await db.putBatch(graphe(ancien));const avant=await db.getSnapshot();const {conflitsCyclesArchive}=await import('../src/domain/backup.js');
       ok((await conflitsCyclesArchive(db,entrante,{mode})).length>0,`L2 archive ${store} : collision directe ${champ} détectée avant ${mode}`);
-      ok(await refuse(()=>applyArchive(db,entrante,{mode})),`L2 archive ${store} : même cycle ne permet pas de remplacer ${champ}`);
+      eq((await erreur(()=>applyArchive(db,entrante,{mode})))?.code, "cycles_divergents",`L2 archive ${store} : même cycle ne permet pas de remplacer ${champ}`);
       eq(await db.getSnapshot(),avant,`L2 archive ${store} : aucun changement du groupe protégé après collision`);
     });
     const compatible=await archiveDe(ancien);
     await withDatabase(async db=>{
       await db.putBatch(graphe(ancien));const mutate=db.mutate.bind(db);let injecte=false,concurrent;
       db.mutate=async args=>{if(!injecte){injecte=true;await mutate({puts:graphe(nouveau),origin:'remote'});concurrent=await db.getSnapshot();}return mutate(args);};
-      ok(await refuse(()=>applyArchive(db,compatible)),`L2 archive ${store} : parent changé entre contrôle et transaction refuse tout`);
+      eq((await erreur(()=>applyArchive(db,compatible)))?.code, "sources_divergentes",`L2 archive ${store} : parent changé entre contrôle et transaction refuse tout`);
       eq(await db.getSnapshot(),concurrent,`L2 archive ${store} : graphe concurrent intégralement conservé`);
     });
     const initiale=await archiveDe(nouveau,false);
-    await withDatabase(async db=>{await db.putBatch(graphe(ancien,false));const avant=await db.getSnapshot();ok(await refuse(()=>applyArchive(db,initiale)),`L5 archive ${store} : une collision d’identité est aussi refusée sans cycle de corbeille`);eq(await db.getSnapshot(),avant,`L5 archive ${store} : l’ancien parent actif et ses données restent intacts`);});
+    await withDatabase(async db=>{await db.putBatch(graphe(ancien,false));const avant=await db.getSnapshot();eq((await erreur(()=>applyArchive(db,initiale)))?.code, "sources_divergentes",`L5 archive ${store} : une collision d’identité est aussi refusée sans cycle de corbeille`);eq(await db.getSnapshot(),avant,`L5 archive ${store} : l’ancien parent actif et ses données restent intacts`);});
   }
   for (const mode of ['keep_recipes', 'with_recipes']) await withDatabase(async source => {
     const parent = { ...edition, trash_mode: mode };

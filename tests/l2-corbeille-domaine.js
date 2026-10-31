@@ -7,7 +7,7 @@ const version = { id: 'l2-v', recipe_id: 'l2-r', ingredients: [], steps: [] };
 const retired = (mode = 'with_recipes') => edition({ lifecycle_id: 'edition-trash', trashed_at: at, trash_mode: mode });
 const rc = (extra = {}) => ({ recipe_id: 'l2-r', expected_cycle_id: null, expected_edition_id: 'l2-ed', expected_edition_cycle_id: null, owner_id: null, ...extra });
 const ed = (extra = {}) => ({ edition_id: 'l2-ed', expected_cycle_id: null, owner_id: null, ...extra });
-const refus = async fn => { try { await fn(); return false; } catch { return true; } };
+const motif = async fn => { try { await fn(); return null; } catch (e) { return e.raison ?? e.code ?? e.message; } };
 const seed = (db, e = edition(), r = recette()) => db.putBatch({ books: [{ id: 'l2-book', title: 'Cuisine' }], book_editions: [e], recipes: [r], recipe_versions: [version] }, { origin: 'device' });
 
 export async function runL2CorbeilleDomaineTests({ eq, ok }) {
@@ -31,25 +31,26 @@ export async function runL2CorbeilleDomaineTests({ eq, ok }) {
   }
   await bloc('garde tardive de membre', async (repo, db) => {
     await seed(db, retired()); const avant = await db.getSnapshot(['recipes', 'recipe_versions', 'outbox']);
-    ok(await refus(() => repo.saveBatch({ recipe_versions: [{ ...version, id: 'l2-tardive' }] }, { recettes: [rc()] })), 'L2 : enfant refusé quand son livre a été retiré');
+    eq(await motif(() => repo.saveBatch({ recipe_versions: [{ ...version, id: 'l2-tardive' }] }, { recettes: [rc()] })), 'edition_retiree', 'L2 : enfant refusé quand son livre a été retiré');
     eq(await db.getSnapshot(['recipes', 'recipe_versions', 'outbox']), avant, 'L2 : garde édition atomique sans enfant ni capture');
     await db.put('book_editions', edition({ lifecycle_id: 'edition-restored', trashed_at: null, trash_mode: null }), { origin: 'device' });
-    ok(await refus(() => repo.save('recipes', recette({ favorite: true }), { recettes: [rc()] })), 'L2 : ancien geste refuse aussi après retour du livre');
+    eq(await motif(() => repo.save('recipes', recette({ favorite: true }), { recettes: [rc()] })), 'cycle_change', 'L2 : ancien geste refuse aussi après retour du livre');
   });
   await bloc('garder les membres et interdire les nouveaux', async (repo, db) => {
     await seed(db, retired('keep_recipes'));
     await repo.save('recipes', recette({ favorite: true }), { recettes: [rc({ expected_edition_cycle_id: 'edition-trash' })] });
     eq((await db.get('recipes', 'l2-r')).favorite, true, 'L2 : contenu du membre gardé modifiable avec la base exacte');
-    ok(await refus(() => repo.saveBatch({ recipes: [recette({ id: 'l2-neuve', current_version_id: null })] }, { conditions: { recipes: [{ key: 'l2-neuve', absente: true }] }, editions: [ed({ expected_cycle_id: 'edition-trash' })] })), 'L2 : aucun nouveau membre sur livre retiré même keep_recipes');
-    ok(await refus(() => repo.save('recipes', recette({ restored_from_edition: { edition_id: 'l2-ed', lifecycle_id: 'edition-trash' } }), { recettes: [rc({ expected_edition_cycle_id: 'edition-trash' })] })), 'L2 : exception réservée ne passe pas par put');
+    eq(await motif(() => repo.saveBatch({ recipes: [recette({ id: 'l2-neuve', current_version_id: null })] }, { conditions: { recipes: [{ key: 'l2-neuve', absente: true }] }, editions: [ed({ expected_cycle_id: 'edition-trash' })] })), 'cycle_change', 'L2 : nouveau membre avec contextes de cycles incohérents refusé avant la création');
+    eq(await motif(() => repo.saveBatch({ recipes: [recette({ id: 'l2-neuve', current_version_id: null })] }, { conditions: { recipes: [{ key: 'l2-neuve', absente: true }] }, recettes: [rc({ recipe_id: 'l2-neuve', expected_edition_cycle_id: 'edition-trash', creation: true })], editions: [ed({ expected_cycle_id: 'edition-trash' })] })), 'creation_refusee', 'L2 : nouveau membre refusé sous livre retiré keep_recipes avec contextes alignés');
+    eq(await motif(() => repo.save('recipes', recette({ restored_from_edition: { edition_id: 'l2-ed', lifecycle_id: 'edition-trash' } }), { recettes: [rc({ expected_edition_cycle_id: 'edition-trash' })] })), 'cycle_reserve', 'L2 : exception réservée ne passe pas par put');
   });
   await bloc('garde compte et C09', async (repo, db) => {
     await seed(db, retired()); const avant = await db.getSnapshot(['books', 'book_editions', 'recipes']);
-    ok(await refus(() => repo.removeBatch({ book_editions: ['l2-ed'], books: ['l2-book'] })), 'L2 : ancien C09 ne purge plus édition ni parent');
-    ok(await refus(() => repo.remove('books', 'l2-book')), 'L2 : suppression isolée de book référencé refusée');
+    eq(await motif(() => repo.removeBatch({ book_editions: ['l2-ed'], books: ['l2-book'] })), 'suppression_interdite', 'L2 : ancien C09 ne purge plus édition ni parent');
+    eq(await motif(() => repo.remove('books', 'l2-book')), 'suppression_interdite', 'L2 : suppression isolée de book référencé refusée');
     eq(await db.getSnapshot(['books', 'book_editions', 'recipes']), avant, 'L2 : suppression refusée conserve toutes les relations');
     await db.put('sync_state', { key: 'user_id', value: 'nouveau' }, { origin: 'device' });
-    ok(await refus(() => repo.capturerContexteEdition(retired(), { owner_id: 'ancien' })), 'L2 : capture édition refuse nouveau propriétaire');
+    eq(await motif(() => repo.capturerContexteEdition(retired(), { owner_id: 'ancien' })), 'compte_change', 'L2 : capture édition refuse nouveau propriétaire');
   });
   for (const [store, id] of [['recipes', 'l2-r'], ['recipe_versions', 'l2-v']]) for (const chemin of ['suppression', 'transition']) await bloc('contenu conservé après restauration ' + store + chemin, async (repo, db) => {
     const retour = edition({ lifecycle_id: 'edition-revenue', trashed_at: null, trash_mode: null });
@@ -72,13 +73,13 @@ export async function runL2CorbeilleDomaineTests({ eq, ok }) {
     eq(ajout.session.recipe_ids, ['l2-r'], 'L2 : complément source rattaché exclusivement au membre');
     eq((await db.get('imports', 'l2-photo-import')).expected_edition_cycle_id, 'edition-trash', 'L2 : première page persiste base édition du journal');
     const avant = await db.getSnapshot(['source_pages', 'source_documents', 'files', 'outbox']);
-    ok(await refus(() => repo.save('source_pages', { ...ajout.pages[0], printed_page: 8 }, { recettes: [contexte], editions: [parent] })), 'L2 : page existante ne se modifie pas sous livre retiré');
+    eq(await motif(() => repo.save('source_pages', { ...ajout.pages[0], printed_page: 8 }, { recettes: [contexte], editions: [parent] })), 'edition_retiree', 'L2 : page existante ne se modifie pas sous livre retiré');
     eq(await db.getSnapshot(['source_pages', 'source_documents', 'files', 'outbox']), avant, 'L2 : source conservée après refus');
-    ok(await refus(() => repo.saveBatch({ source_pages: [{ ...ajout.pages[0], id: 'page-detour' }] }, { recettes: [contexte], editions: [parent] })), 'L2 : pas de page nouvelle sous document existant par détour');
+    eq(await motif(() => repo.saveBatch({ source_pages: [{ ...ajout.pages[0], id: 'page-detour' }] }, { recettes: [contexte], editions: [parent] })), 'source_modifiee', 'L2 : pas de page nouvelle sous document existant par détour');
   });
   await bloc('métadonnées bibliographiques et rattachement', async (repo, db) => {
     await seed(db, retired('keep_recipes'));
-    ok(await refus(() => repo.save('books', { id: 'l2-book', title: 'Ancien formulaire' })), 'L2 : ancien éditeur book ne passe pas autour du cycle édition');
+    eq(await motif(() => repo.save('books', { id: 'l2-book', title: 'Ancien formulaire' })), 'edition_retiree', 'L2 : ancien éditeur book ne passe pas autour du cycle édition');
     await db.put('book_editions', edition({ id: 'l2-autre' }), { origin: 'device' });
     const cible = { edition_id: 'l2-autre', expected_cycle_id: null, owner_id: null };
     await repo.save('books', { id: 'l2-book', title: 'Autre édition active' }, { editions: [cible] });
@@ -109,7 +110,7 @@ export async function runL2CorbeilleDomaineTests({ eq, ok }) {
     await seed(db); const contexte = await repo.capturerContexteEdition(edition());
     const bilan = await D.preparerRetraitLivre(edition(), { repo, contexte });
     await db.put('imports', { id: 'l2-arrive', edition_id: 'l2-ed', status: 'inconnu' }, { origin: 'device' });
-    ok(await refus(() => D.mettreLivreALaCorbeille(edition(), { repo, contexte, bilan, mode: 'with_recipes', operationId: 'refuse', maintenant: () => at })), 'L2 : import apparu impose nouveau bilan');
+    eq(await motif(() => D.mettreLivreALaCorbeille(edition(), { repo, contexte, bilan, mode: 'with_recipes', operationId: 'refuse', maintenant: () => at })), 'bilan_change', 'L2 : import apparu impose nouveau bilan');
     eq((await db.get('book_editions', 'l2-ed')).lifecycle_id, undefined, 'L2 : bilan périmé ne retire rien');
     eq((await db.get('imports', 'l2-arrive')).edition_id, 'l2-ed', 'L2 : journal inconnu conservé sans détachement');
   });

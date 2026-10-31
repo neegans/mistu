@@ -5,7 +5,7 @@ import * as R from '../src/domain/reperes.js';
 import * as P from '../src/domain/reperes-parcours.js';
 import { renderReperesRoute, texteErreurReperes } from '../src/ui/reperes.js';
 const input = (n, v) => { n.value = v; n.dispatchEvent(new Event(n.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); };
-const refuse = fn => { try { fn(); return false; } catch { return true; } };
+const motif = fn => { try { fn(); return null; } catch (e) { return e?.raison ?? e?.code ?? e?.message; } };
 const deps = repo => ({ repo, sessionAssistant: async () => SESSION_REPERES, config: CONFIG_REPERES, enLigne: () => true, navigate: () => {}, remplacerAdresse: () => {}, toast: () => {}, fetch: async () => reponseAssistantReperes(reponseReperesTest()) });
 
 export async function runCorrectifsReperesTests({ eq, ok }) {
@@ -18,7 +18,7 @@ export async function runCorrectifsReperesTests({ eq, ok }) {
     const raw = { description_fr: null, difficulte: null, temps: { total: null, actif: null, cuisson: { min: 20, max: 25, origine: 'source' }, attentes: null, attentes_incluses: null, explication: '', references: [{ type: 'etape', index: 0, extrait: texte }] } };
     let lu; try { lu = R.validerReponseReperes(raw, contexte); } catch {}
     eq(lu?.temps.cuisson, raw.temps.cuisson, 'Correctifs repères : fourchette explicite conservée ' + texte);
-    ok(refuse(() => R.validerReponseReperes({ ...raw, temps: { ...raw.temps, cuisson: { min: 20, max: 20, origine: 'source' } } }, contexte)), 'Correctifs repères : une borne de la fourchette ne devient pas durée exacte');
+    eq(motif(() => R.validerReponseReperes({ ...raw, temps: { ...raw.temps, cuisson: { min: 20, max: 20, origine: 'source' } } }, contexte)), 'duree_non_sourcee', 'Correctifs repères : une borne de la fourchette ne devient pas durée exacte');
   }
   const c1 = R.construireContexteReperes({ recipe, version }), v2 = { ...version, id: 'autre-version' }, c2 = R.construireContexteReperes({ recipe, version: v2 });
   const corr = (texte, c) => R.fabriquerCorrectionsReperes({ description_fr: { texte } }, c);
@@ -36,7 +36,7 @@ export async function runCorrectifsReperesTests({ eq, ok }) {
   eq(R.lireReperes({ ...recipe, reperes: ensemble }, version).temps.actif, { min: 6, max: 6, origine: 'manuel' }, 'Correctifs repères : correction d’un autre champ depuis copie ancienne garde la correction concurrente');
   const nouvelleEstimation = { ...raw, temps: { ...raw.temps, total: { min: 50, max: 55, origine: 'estimation_ia', complet: true }, actif: { min: 40, max: 40, origine: 'estimation_ia' } } };
   const totalCorrige = R.fusionnerReperes(null, { proposition, corrections: seconde });
-  ok(refuse(() => R.fusionnerReperes(totalCorrige, { proposition: R.fabriquerPropositionReperes({ contexte: c1, resultat: nouvelleEstimation, modele: 'fixture' }) })), 'Correctifs repères : nouvelle estimation incompatible avec total corrigé demande relecture sans fausse durée rapide');
+  eq(motif(() => R.fusionnerReperes(totalCorrige, { proposition: R.fabriquerPropositionReperes({ contexte: c1, resultat: nouvelleEstimation, modele: 'fixture' }) })), 'actif_incompatible', 'Correctifs repères : nouvelle estimation incompatible avec total corrigé demande relecture sans fausse durée rapide');
 
   const { createArchive, inspectArchive, applyArchive } = await import('../src/domain/backup.js');
   const { withDatabase } = await import('./backup.js');

@@ -20,51 +20,67 @@ export async function runI3ThermomixTests({ eq, ok }) {
   const T = await import('../src/domain/thermomix.js');
   const src = sourceThermomix();
   const ctx = (opts = {}) => T.construireContexteThermomix({ version: src, selection: ['s1'], ...opts });
-  const refused = (fn, message, raison) => { let e = null; try { fn(); } catch (x) { e = x; } if (raison) eq(e?.raison, raison, 'I3 : ' + message); else ok(!!e?.raison, 'I3 : ' + message); };
+  const motif = fn => { try { fn(); return null; } catch (e) { return e?.raison ?? e?.code ?? e?.message; } };
+  const refused = (fn, message, raison) => { eq(motif(fn), raison, 'I3 : ' + message); };
   const rule = (patch, options = {}) => { const p = propositionThermomix(); Object.assign(p.blocs[0].actions[1], patch); return T.validerReponseThermomix(p, ctx(options)); };
   eq(ctx().source.servings, 4, 'I3 : portions source explicites');
   eq(ctx({ selection: [] }).selection, [], 'I3 : brouillon sans présélection');
   eq(ctx({ selection: ['s3', 's1'] }).selection, ['s1', 's3'], 'I3 : sélection remise dans l’ordre source');
   eq(T.ingredientsContexteThermomix(ctx()).map(i => i.ref), ['i1', 'i2'], 'I3 : références client stables');
-  refused(() => ctx({ selection: ['s1', 's1'] }), 'sélection doublonnée refusée');
-  refused(() => ctx({ selection: ['inventee'] }), 'étape étrangère refusée');
-  refused(() => ctx({ demande: 'a'.repeat(501) }), 'demande trop longue non tronquée');
+  refused(() => ctx({ selection: ['s1', 's1'] }), 'sélection doublonnée refusée', 'selection');
+  refused(() => ctx({ selection: ['inventee'] }), 'étape étrangère refusée', 'selection');
+  refused(() => ctx({ demande: 'a'.repeat(501) }), 'demande trop longue non tronquée', 'texte');
   const secret = { ...src, notes: 'note privée', provenance: { ...src.provenance, secret: 'texte privé' } };
   const secretCtx = T.construireContexteThermomix({ version: secret, selection: ['s1'] });
   ok(!JSON.stringify(secretCtx).includes('privé'), 'I3 : notes/provenance privée absentes du contexte');
   eq(T.validerReponseThermomix(propositionThermomix(), ctx()).type, 'proposition', 'I3 : proposition normale acceptée');
   eq(T.validerReponseThermomix({ type: 'questions', questions: ['Quelle quantité d’eau prévois-tu dans le bol ?'] }, ctx()).type, 'questions', 'I3 : question sans fabrication');
   eq(T.validerReponseThermomix({ type: 'refus', raison: 'Cette opération demande un mode hors du profil.' }, ctx()).type, 'refus', 'I3 : refus distinct des pannes');
-  refused(() => T.validerReponseThermomix(propositionThermomix(), ctx({ selection: [] })), 'aucune proposition pour une sélection vide');
-  for (const raw of [null, [], { type: 'proposition', blocs: [] }, { type: 'refus', raison: '' }, { type: 'questions', questions: [] }, { type: 'refus', raison: 'Voir https://evil.test' }, { type: 'refus', raison: '<b>Faux</b>' }, { type: 'refus', raison: 'Cuisson sans danger garantie.' }, { type: 'refus', raison: 'Motif', url: 'x' }]) {
-    refused(() => T.validerReponseThermomix(raw, ctx()), 'réponse hostile/structure incomplète refusée');
+  refused(() => T.validerReponseThermomix(propositionThermomix(), ctx({ selection: [] })), 'aucune proposition pour une sélection vide', 'selection');
+  for (const [raw, raison] of [
+    [null, 'structure'], [[], 'structure'], [{ type: 'proposition', blocs: [] }, 'limite'],
+    [{ type: 'refus', raison: '' }, 'texte'], [{ type: 'questions', questions: [] }, 'limite'],
+    [{ type: 'refus', raison: 'Voir https://evil.test' }, 'texte_interdit'],
+    [{ type: 'refus', raison: '<b>Faux</b>' }, 'texte_interdit'],
+    [{ type: 'refus', raison: 'Cuisson sans danger garantie.' }, 'texte_interdit'],
+    [{ type: 'refus', raison: 'Motif', url: 'x' }, 'structure'],
+  ]) {
+    refused(() => T.validerReponseThermomix(raw, ctx()), 'réponse hostile/structure incomplète refusée', raison);
   }
   const inherited = Object.create({ type: 'refus' }); inherited.raison = 'Refus';
-  refused(() => T.validerReponseThermomix(inherited, ctx()), 'propriétés héritées refusées');
+  refused(() => T.validerReponseThermomix(inherited, ctx()), 'propriétés héritées refusées', 'structure');
   const dup = propositionThermomix(); dup.blocs.push(copie(dup.blocs[0]));
-  refused(() => T.validerReponseThermomix(dup, ctx()), 'bloc dupliqué refusé');
+  refused(() => T.validerReponseThermomix(dup, ctx()), 'bloc dupliqué refusé', 'selection');
   const other = propositionThermomix('s2');
-  refused(() => T.validerReponseThermomix(other, ctx()), 'bloc hors sélection refusé');
-  for (const patch of [{ temperature: 99 }, { temperature: '100' }, { temperature: 'Varoma' }, { vitesse: 0 }, { vitesse: 2.5 }, { vitesse: 6.5 }, { vitesse: Infinity }, { secondes: 0 }, { secondes: 1801 }, { secondes: 1.5 }, { accessoire: 'sensor' }, { accessoire: 'cutter' }, { mode: 'turbo' }, { sens: 'reverse' }, { ingredients: ['i3'] }, { ingredients: ['i1', 'i1'] }, { url: 'forbidden' }]) {
-    refused(() => rule(patch), 'réglage hors contrat refusé');
+  refused(() => T.validerReponseThermomix(other, ctx()), 'bloc hors sélection refusé', 'selection');
+  for (const [patch, raison] of [
+    [{ temperature: 99 }, 'temperature'], [{ temperature: '100' }, 'temperature'], [{ temperature: 'Varoma' }, 'temperature'],
+    [{ vitesse: 0 }, 'reglage'], [{ vitesse: 2.5 }, 'reglage'], [{ vitesse: 6.5 }, 'reglage'],
+    // Infinity est refusé par la lecture JSON avant la validation du réglage.
+    [{ vitesse: Infinity }, 'nombre'],
+    [{ secondes: 0 }, 'reglage'], [{ secondes: 1801 }, 'reglage'], [{ secondes: 1.5 }, 'reglage'],
+    [{ accessoire: 'sensor' }, 'reglage'], [{ accessoire: 'cutter' }, 'reglage'], [{ mode: 'turbo' }, 'reglage'], [{ sens: 'reverse' }, 'reglage'],
+    [{ ingredients: ['i3'] }, 'ingredient'], [{ ingredients: ['i1', 'i1'] }, 'ingredient'], [{ url: 'forbidden' }, 'structure'],
+  ]) {
+    refused(() => rule(patch), 'réglage hors contrat refusé', raison);
   }
   eq(rule({ secondes: 1 }).blocs[0].actions[1].secondes, 1, 'I3 : durée minimale inclusive');
   eq(rule({ secondes: 1800 }).blocs[0].actions[1].secondes, 1800, 'I3 : durée maximale inclusive');
   eq(rule({ vitesse: 2 }).blocs[0].actions[1].vitesse, 2, 'I3 : chauffe à vitesse 2 acceptée');
-  refused(() => rule({ vitesse: 3 }), 'chauffe à vitesse 3 refusée par profil Mistu');
-  refused(() => rule({ temperature: null, vitesse: 5 }), 'sans chauffe ne prouve pas le froid');
+  refused(() => rule({ vitesse: 3 }), 'chauffe à vitesse 3 refusée par profil Mistu', 'vitesse');
+  refused(() => rule({ temperature: null, vitesse: 5 }), 'sans chauffe ne prouve pas le froid', 'froid_non_etabli');
   eq(rule({ temperature: null, vitesse: 10 }, { precisions: { froid_confirme: ['s1'] } }).blocs[0].actions[1].vitesse, 10, 'I3 : froid explicitement confirmé, vitesse 10');
-  refused(() => rule({ temperature: null, vitesse: 3, sens: 'inverse' }, { precisions: { froid_confirme: ['s1'] } }), 'inverse au-dessus de 2 refusé');
+  refused(() => rule({ temperature: null, vitesse: 3, sens: 'inverse' }, { precisions: { froid_confirme: ['s1'] } }), 'inverse au-dessus de 2 refusé', 'vitesse');
   eq(rule({ temperature: null, vitesse: 4, accessoire: 'fouet' }, { precisions: { froid_confirme: ['s1'] } }).blocs[0].actions[1].accessoire, 'fouet', 'I3 : fouet à froid vitesse 4');
-  refused(() => rule({ temperature: null, vitesse: 5, accessoire: 'fouet' }, { precisions: { froid_confirme: ['s1'] } }), 'fouet vitesse 5 refusé');
-  refused(() => rule({ accessoire: 'fouet', sens: 'inverse' }), 'fouet sens inverse refusé');
-  refused(() => rule({ accessoire: 'panier', vitesse: 2 }), 'panier au-dessus de 1 refusé');
-  refused(() => rule({ mode: 'vapeur', temperature: null, accessoire: 'varoma' }), 'vapeur sans eau explicitée refusée');
+  refused(() => rule({ temperature: null, vitesse: 5, accessoire: 'fouet' }, { precisions: { froid_confirme: ['s1'] } }), 'fouet vitesse 5 refusé', 'accessoire');
+  refused(() => rule({ accessoire: 'fouet', sens: 'inverse' }), 'fouet sens inverse refusé', 'accessoire');
+  refused(() => rule({ accessoire: 'panier', vitesse: 2 }), 'panier au-dessus de 1 refusé', 'accessoire');
+  refused(() => rule({ mode: 'vapeur', temperature: null, accessoire: 'varoma' }), 'vapeur sans eau explicitée refusée', 'eau_vapeur');
   eq(rule({ mode: 'vapeur', temperature: null, accessoire: 'panier_varoma' }, { precisions: { eau_vapeur_g: 500 } }).blocs[0].actions[1].mode, 'vapeur', 'I3 : eau et montage vapeur panier/Varoma');
-  refused(() => rule({ mode: 'vapeur', temperature: 100, accessoire: 'varoma' }, { precisions: { eau_vapeur_g: 500 } }), 'pas de température numérique vapeur');
-  refused(() => rule({ mode: 'vapeur', temperature: null, accessoire: 'fouet' }, { precisions: { eau_vapeur_g: 500 } }), 'pas de fouet en vapeur');
-  refused(() => ctx({ precisions: { volume_bol_l: 2.201 } }), 'bol au-dessus de 2,2 L refusé');
-  refused(() => ctx({ precisions: { volume_panier_l: 1.401 } }), 'panier au-dessus de 1,4 L refusé');
+  refused(() => rule({ mode: 'vapeur', temperature: 100, accessoire: 'varoma' }, { precisions: { eau_vapeur_g: 500 } }), 'pas de température numérique vapeur', 'temperature');
+  refused(() => rule({ mode: 'vapeur', temperature: null, accessoire: 'fouet' }, { precisions: { eau_vapeur_g: 500 } }), 'pas de fouet en vapeur', 'accessoire');
+  refused(() => ctx({ precisions: { volume_bol_l: 2.201 } }), 'bol au-dessus de 2,2 L refusé', 'nombre');
+  refused(() => ctx({ precisions: { volume_panier_l: 1.401 } }), 'panier au-dessus de 1,4 L refusé', 'nombre');
   eq(ctx({ precisions: { volume_bol_l: 2.2, volume_panier_l: 1.4 } }).precisions.volume_bol_l, 2.2, 'I3 : capacités maximales inclusives');
   eq(ctx().precisions.volume_bol_l, null, 'I3 : volume inconnu reste inconnu');
   const both = ctx({ selection: ['s1', 's2'], precisions: { eau_vapeur_g: 500, froid_confirme: ['s1', 's2'] } });
@@ -76,13 +92,13 @@ export async function runI3ThermomixTests({ eq, ok }) {
   const mixed = propositionThermomix(); mixed.blocs[0].actions.push({ ...mixed.blocs[0].actions[1], temperature: null, vitesse: 5 });
   refused(() => T.validerReponseThermomix(mixed, ctx({ precisions: { froid_confirme: ['s1'] } })), 'chauffe puis vitesse rapide dans le même bloc refusée', 'froid_non_etabli');
   const free = propositionThermomix(); free.blocs[0].actions[0] = { type: 'preparation', text: 'Ajouter deux œufs.' };
-  refused(() => T.validerReponseThermomix(free, ctx()), 'préparation en prose libre refusée');
+  refused(() => T.validerReponseThermomix(free, ctx()), 'préparation en prose libre refusée', 'structure');
   const adding = propositionThermomix(); adding.blocs[0].actions.push(copie(adding.blocs[0].actions[0]));
-  refused(() => T.validerReponseThermomix(adding, ctx()), 'double ajout en quantité complète refusé');
+  refused(() => T.validerReponseThermomix(adding, ctx()), 'double ajout en quantité complète refusé', 'double_ajout');
   const oil = sourceThermomix(); oil.ingredients = [{ id: 'ri-oil', source_text: '100 ml d’huile', name_text: 'huile', quantity: { value: 100 }, unit_id: 'ml' }];
   refused(() => T.validerReponseThermomix(propositionThermomix('s1', [{ type: 'preparation', operation: 'ajouter', ingredients: ['i1'], contenant: 'bol' }, { ...propositionThermomix().blocs[0].actions[1], ingredients: ['i1'] }]), T.construireContexteThermomix({ version: oil, selection: ['s1'] })), 'chauffe d’huile seule refusée', 'huile_seule');
   const unknown = sourceThermomix(); unknown.ingredients[0].quantity = null;
-  refused(() => T.validerReponseThermomix(propositionThermomix(), T.construireContexteThermomix({ version: unknown, selection: ['s1'] })), 'quantité utile absente exige une question');
+  refused(() => T.validerReponseThermomix(propositionThermomix(), T.construireContexteThermomix({ version: unknown, selection: ['s1'] })), 'quantité utile absente exige une question', 'quantite_inconnue');
   let seq = 0; const make = (source = src, contexte = ctx(), resultat = propositionThermomix()) => T.fabriquerVersionThermomix({ source, contexte, resultat, id: 'rv-adaptee-' + (++seq), newId: () => 'step-new-' + (++seq), maintenant: '2026-10-28T23:00:00Z', modele: 'fixture' });
   const before = JSON.stringify(src); const child = make();
   eq(JSON.stringify(src), before, 'I3 : source intégralement intacte');
@@ -117,8 +133,8 @@ export async function runI3ThermomixTests({ eq, ok }) {
   eq(copied.etapes.length, src.steps.length, 'I3 : un champ Cookidoo par étape source');
   eq(copied.ingredients, src.ingredients.map(i => i.source_text), 'I3 : copie quantités source exactes');
   ok(copied.texte.includes('non testée') && copied.texte.includes('Mon livre'), 'I3 : copie provenance et proposition non testée');
-  refused(() => T.copieCookidooThermomix({ ...bundle, recipe: { ...bundle.recipe, availability: 'partial' } }), 'copie source partielle refusée');
-  refused(() => T.copieCookidooThermomix(bundle, { portions: 8 }), 'copie avec portions étrangères refusée');
+  refused(() => T.copieCookidooThermomix({ ...bundle, recipe: { ...bundle.recipe, availability: 'partial' } }), 'copie source partielle refusée', 'recette_incomplete');
+  refused(() => T.copieCookidooThermomix(bundle, { portions: 8 }), 'copie avec portions étrangères refusée', 'portions');
   eq(T.lireThermomix(JSON.parse(JSON.stringify(child)))?.ok, true, 'I3 : restauration JSON conserve revalidation');
   const withExtra = sourceThermomix(); withExtra.steps[1].other_metadata = { imported: true };
   const extraChild = make(withExtra, ctx({ version: withExtra }));
@@ -127,7 +143,7 @@ export async function runI3ThermomixTests({ eq, ok }) {
   eq(T.gardeThermomix(invalidManual).ok, false, 'I3 : édition générique marquée invalide est bloquée');
   ok(T.etiquetteThermomix(invalidManual).includes('Version personnelle'), 'I3 : édition générique conserve ascendance sans approbation');
   const invalidCtx = T.construireContexteThermomix({ version: invalidManual, selection: [invalidManual.steps[0].id] });
-  refused(() => T.validerReponseThermomix(propositionThermomix(invalidManual.steps[0].id), invalidCtx), 'réparation partielle ne laisse pas de vieux réglages invalidés');
+  refused(() => T.validerReponseThermomix(propositionThermomix(invalidManual.steps[0].id), invalidCtx), 'réparation partielle ne laisse pas de vieux réglages invalidés', 'plan_invalide');
   const fullCtx = T.construireContexteThermomix({ version: invalidManual, selection: invalidManual.steps.map(s => s.id) });
   const fullReply = { type: 'proposition', blocs: invalidManual.steps.map(s => propositionThermomix(s.id, [{ type: 'preparation', operation: 'verifier_texture', ingredients: [], contenant: 'bol' }]).blocs[0]) };
   const repaired = make(invalidManual, fullCtx, fullReply);
@@ -144,7 +160,7 @@ export async function runI3ThermomixTests({ eq, ok }) {
   longWhisk.blocs[2].actions = [{ type: 'preparation', operation: 'verifier_texture', ingredients: [], contenant: 'bol' }];
   eq(T.validerReponseThermomix(longWhisk, five).type, 'proposition', 'I3 : cumul fouet 2 h inclusif');
   const hotFat = sourceThermomix(); hotFat.ingredients[0] = { id: 'ri-oil', source_text: '100 ml d’huile chaude', name_text: 'huile chaude', quantity: { value: 100 }, unit_id: 'ml' };
-  refused(() => T.validerReponseThermomix(propositionThermomix(), ctx({ version: hotFat })), 'graisse explicitement chaude ne se verse pas dans le bol');
+  refused(() => T.validerReponseThermomix(propositionThermomix(), ctx({ version: hotFat })), 'graisse explicitement chaude ne se verse pas dans le bol', 'graisse_chaude');
   const badRef = sourceThermomix(); badRef.ingredients[0].ref = 'i99';
   eq(T.ingredientsContexteThermomix(ctx({ version: badRef }))[0].ref, 'i1', 'I3 : données source ne choisissent pas les références client');
   const badModel = copie(child); badModel.provenance.model = 'autre';
@@ -152,10 +168,10 @@ export async function runI3ThermomixTests({ eq, ok }) {
   const changedConstraints = copie(child); changedConstraints.constraints = {};
   eq(T.lireThermomix(changedConstraints)?.ok, false, 'I3 : contraintes alimentaires modifiées détectées');
   const overLong = sourceThermomix(); overLong.steps[0].text = 'a'.repeat(2001);
-  refused(() => ctx({ version: overLong }), 'texte source excessif jamais tronqué');
+  refused(() => ctx({ version: overLong }), 'texte source excessif jamais tronqué', 'texte');
   const tooMany = sourceThermomix(); tooMany.ingredients = Array.from({ length: 61 }, (_, i) => ({ ...src.ingredients[0], id: 'i-' + i }));
-  refused(() => ctx({ version: tooMany }), 'contexte trop nombreux ingrédients refusé');
-  for (const claimed of ['Sans lactose.', 'Sans noix.', 'Vegan.', 'Allergen-free.']) refused(() => T.validerReponseThermomix({ type: 'refus', raison: claimed }, ctx()), 'aucune affirmation alimentaire générée');
+  refused(() => ctx({ version: tooMany }), 'contexte trop nombreux ingrédients refusé', 'limite');
+  for (const claimed of ['Sans lactose.', 'Sans noix.', 'Vegan.', 'Allergen-free.']) refused(() => T.validerReponseThermomix({ type: 'refus', raison: claimed }, ctx()), 'aucune affirmation alimentaire générée', 'texte_interdit');
   const steamCtx = ctx({ precisions: { eau_vapeur_g: 700 } });
   const steamFirst = make(src, steamCtx, propositionThermomix('s1', [propositionThermomix().blocs[0].actions[0], { ...vapeur, secondes: 200 }]));
   const steamSecondCtx = T.construireContexteThermomix({ version: steamFirst, selection: [steamFirst.steps[1].id] });
@@ -168,20 +184,22 @@ export async function runI3ThermomixTests({ eq, ok }) {
   eq(steamThird?.steps[0].text, steamFirst.steps[0].text, 'I3 : eau réellement renseignée du bloc initial conservée dans le texte');
   const hiddenOnion = sourceThermomix(); hiddenOnion.ingredients[0] = { id: 'oil', source_text: '100 ml d’huile', name_text: 'huile', quantity: { value: 100 }, unit_id: 'ml' };
   const hiddenReply = propositionThermomix(); hiddenReply.blocs[0].actions[0].ingredients = ['i1'];
-  refused(() => T.validerReponseThermomix(hiddenReply, ctx({ version: hiddenOnion })), 'ingrédient déclaré seulement par réglage ne masque pas huile seule');
+  // Ces trois cas refusent d'abord les références hors du contenu réel du bol.
+  // Le voisin cohérent « chauffe d’huile seule » atteint déjà huile_seule ci-dessus.
+  refused(() => T.validerReponseThermomix(hiddenReply, ctx({ version: hiddenOnion })), 'ingrédient cité par réglage mais absent du bol refusé avant huile seule', 'contenu_incoherent');
   const otherContainer = propositionThermomix(); otherContainer.blocs[0].actions = [
     { type: 'preparation', operation: 'ajouter', ingredients: ['i1'], contenant: 'bol' },
     { type: 'preparation', operation: 'repartir_varoma', ingredients: ['i2'], contenant: 'varoma' },
     otherContainer.blocs[0].actions[1],
   ];
-  refused(() => T.validerReponseThermomix(otherContainer, ctx({ version: hiddenOnion })), 'aliment placé dans Varoma ne rend pas bol huileux mixte');
+  refused(() => T.validerReponseThermomix(otherContainer, ctx({ version: hiddenOnion })), 'aliment dans Varoma cité à tort dans le réglage du bol refusé', 'contenu_incoherent');
   const removed = propositionThermomix(); removed.blocs[0].actions.splice(1, 0, { type: 'preparation', operation: 'reserver', ingredients: ['i2'], contenant: 'recipient' });
-  refused(() => T.validerReponseThermomix(removed, ctx({ version: hiddenOnion })), 'ingrédient réservé ne reste pas comme contenu établi du bol');
+  refused(() => T.validerReponseThermomix(removed, ctx({ version: hiddenOnion })), 'ingrédient réservé cité à tort comme contenu du bol refusé', 'contenu_incoherent');
   const twiceVaroma = propositionThermomix('s1', [
     { type: 'preparation', operation: 'repartir_varoma', ingredients: ['i1'], contenant: 'varoma' },
     { type: 'preparation', operation: 'repartir_varoma', ingredients: ['i1'], contenant: 'varoma' },
   ]);
-  refused(() => T.validerReponseThermomix(twiceVaroma, ctx()), 'répartir deux fois la même quantité dans Varoma refusé');
+  refused(() => T.validerReponseThermomix(twiceVaroma, ctx()), 'répartir deux fois la même quantité dans Varoma refusé', 'double_ajout');
   const falsifiedOld = copie(second);
   falsifiedOld.provenance.thermomix.contexte.anciens_blocs[0].actions[1].secondes = 1;
   falsifiedOld.provenance.thermomix.blocs[0].actions[1].secondes = 1;
@@ -207,7 +225,7 @@ export async function runI3ThermomixTests({ eq, ok }) {
   eq(T.lireThermomix(inserted)?.ok, true, 'I3 : adaptation avant un ancien bloc conserve son montage initial explicite');
   eq(inserted?.steps[1].text, later.steps[1].text, 'I3 : texte source ancien conservé même si un bloc TM7 est ajouté avant');
   const oversizeVolume = sourceThermomix(); oversizeVolume.ingredients[0] = { id: 'water', name_text: 'eau', source_text: '3 L d’eau', quantity: { value: 3 }, unit_id: 'l' };
-  refused(() => T.validerReponseThermomix(propositionThermomix(), ctx({ version: oversizeVolume })), 'volume source individuel explicite au-dessus du bol refusé');
+  refused(() => T.validerReponseThermomix(propositionThermomix(), ctx({ version: oversizeVolume })), 'volume source individuel explicite au-dessus du bol refusé', 'capacite');
   oversizeVolume.ingredients[0] = { id: 'water', name_text: 'eau', source_text: '1 401 ml d’eau', quantity: { value: 1401 }, unit_id: 'ml' };
-  refused(() => T.validerReponseThermomix(propositionThermomix('s1', [prep(['i1'], 'panier')]), ctx({ version: oversizeVolume })), 'volume source individuel au-dessus du panier refusé');
+  refused(() => T.validerReponseThermomix(propositionThermomix('s1', [prep(['i1'], 'panier')]), ctx({ version: oversizeVolume })), 'volume source individuel au-dessus du panier refusé', 'capacite');
 }

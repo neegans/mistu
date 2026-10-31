@@ -2,7 +2,7 @@ import { withDatabase, rewriteArchive } from './backup.js';
 import { createArchive, inspectArchive, applyArchive, verifyRestored } from '../src/domain/backup.js';
 import { createZip, readZip, textOf } from '../src/core/zip.js';
 
-const refuse = async fn => { try { await fn(); return false; } catch { return true; } };
+const erreur=async fn=>{try{await fn();return null;}catch(e){return e;}};
 const recette = (id = null, date = null) => ({ id: 'l1-r', original_title: 'Pain', current_version_id: 'l1-v', ...(id ? { lifecycle_id: id, trashed_at: date } : {}) });
 const version = { id: 'l1-v', recipe_id: 'l1-r', ingredients: [], steps: [] };
 export async function runL1CorbeilleArchiveTests({ eq, ok }) {
@@ -23,7 +23,7 @@ export async function runL1CorbeilleArchiveTests({ eq, ok }) {
   for (const mode of ['merge', 'replace']) await withDatabase(async db => {
     await db.putBatch({ recipes: [recette('restore-2', null)], recipe_versions: [{ ...version, steps: [{ text: 'Correction locale' }] }] });
     const avant = await db.getSnapshot();
-    ok(await refuse(() => applyArchive(db, inspection, { mode })), 'L1 archive : cycle divergent refuse tout en ' + mode);
+    eq((await erreur(() => applyArchive(db, inspection, { mode })))?.code, "cycles_divergents", 'L1 archive : cycle divergent refuse tout en ' + mode);
     eq(await db.getSnapshot(), avant, 'L1 archive : aucun contenu hybride ni effacement en ' + mode);
   });
   await withDatabase(async db => {
@@ -33,7 +33,7 @@ export async function runL1CorbeilleArchiveTests({ eq, ok }) {
       if (!injecte) { injecte = true; await mutate({ puts: { recipes: [recette('restore-concurrent', null)] }, origin: 'remote' }); }
       return mutate(args);
     };
-    ok(await refuse(() => applyArchive(db, inspection)), 'L1 archive : changement après inspection refusé dans transaction');
+    eq((await erreur(() => applyArchive(db, inspection)))?.code, "sources_divergentes", 'L1 archive : cycle changé après inspection : snapshot concurrent refusé dans la transaction');
     eq((await db.get('recipes', 'l1-r')).lifecycle_id, 'restore-concurrent', 'L1 archive : cycle concurrent intact');
   });
   // B3 filtre cet orphelin à l'export : fabriquer le ZIP hostile conserve ici la preuve
@@ -45,7 +45,7 @@ export async function runL1CorbeilleArchiveTests({ eq, ok }) {
   await withDatabase(async db => {
     await db.putBatch({ recipes: [recette('restore-2', null)], recipe_versions: [version] });
     const avant = await db.getSnapshot();
-    ok(await refuse(() => applyArchive(db, partielle)), 'L1 archive : inspection invalide ne contourne pas les liens obligatoires');
+    eq((await erreur(() => applyArchive(db, partielle)))?.message, "Archive non validée", 'L1 archive : inspection invalide ne contourne pas les liens obligatoires');
     eq(await db.getSnapshot(), avant, 'L1 archive : archive partielle refusée sans contenu hybride');
   });
   let vide;
@@ -53,13 +53,13 @@ export async function runL1CorbeilleArchiveTests({ eq, ok }) {
   await withDatabase(async db => {
     await db.putBatch({ recipes: [recette('restore-2', null)], recipe_versions: [version] });
     const avant = await db.getSnapshot();
-    ok(await refuse(() => applyArchive(db, vide, { mode: 'replace' })), 'L1 archive : remplacement ne purge pas une recette protégée absente de l’archive');
+    eq((await erreur(() => applyArchive(db, vide, { mode: 'replace' })))?.code, "cycles_divergents", 'L1 archive : remplacement ne purge pas une recette protégée absente de l’archive');
     eq(await db.getSnapshot(), avant, 'L1 archive : recette omise et enfants conservés');
   });
   await withDatabase(async db => {
     const mutate = db.mutate.bind(db); let injecte = false;
     db.mutate = async args => { if (!injecte) { injecte = true; await mutate({ puts: { sync_state: [{ key: 'user_id', value: 'nouveau-compte' }] }, origin: 'device' }); } return mutate(args); };
-    ok(await refuse(() => applyArchive(db, inspection)), 'L1 archive : changement de compte avant commit refuse tout');
+    eq((await erreur(() => applyArchive(db, inspection)))?.message, "Le compte a changé pendant la restauration.", 'L1 archive : changement de compte avant commit refuse tout');
     eq([await db.count('recipes'), await db.count('recipe_versions')], [0, 0], 'L1 archive : aucune recette importée sous le nouveau compte');
   });
   let collision;
@@ -71,14 +71,14 @@ export async function runL1CorbeilleArchiveTests({ eq, ok }) {
   await withDatabase(async db => {
     await db.putBatch({ recipes: [recette('restore-2', null)], recipe_versions: [version] });
     const avant = await db.getSnapshot();
-    ok(await refuse(() => applyArchive(db, collision)), 'L1 archive : une clé de version ne peut quitter sa recette protégée omise');
+    eq((await erreur(() => applyArchive(db, collision)))?.code, "cycles_divergents", 'L1 archive : une clé de version ne peut quitter sa recette protégée omise');
     eq(await db.getSnapshot(), avant, 'L1 archive : collision enfant refuse tout, sans parent hybride');
   });
   await withDatabase(async db => {
     await db.putBatch({ recipes: [recette()], recipe_versions: [version] });
     const mutate = db.mutate.bind(db); let injecte = false;
     db.mutate = async args => { if (!injecte) { injecte = true; await mutate({ puts: { recipes: [recette('restore-survenu', null)] }, origin: 'remote' }); } return mutate(args); };
-    ok(await refuse(() => applyArchive(db, collision)), 'L1 archive : collision recontrôlée si le cycle arrive après inspection');
+    eq((await erreur(() => applyArchive(db, collision)))?.code, "sources_divergentes", 'L1 archive : cycle arrivé après inspection : snapshot divergent refusé avant la comparaison finale des cycles');
     eq([(await db.get('recipe_versions', version.id)).recipe_id, (await db.get('recipes', 'l1-r')).lifecycle_id, await db.get('recipes', 'autre-recette')], ['l1-r', 'restore-survenu', undefined], 'L1 archive : course conserve le lien ancien et le cycle arrivé');
   });
   const zip = readZip(new Uint8Array(await ancienne.blob.arrayBuffer()));

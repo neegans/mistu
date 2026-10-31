@@ -4,7 +4,7 @@ import {createArchive,inspectArchive,applyArchive,verifyRestored} from '../src/d
 import {createZip,readZip,textOf} from '../src/core/zip.js';
 import {sha256Hex} from '../src/core/hash.js';
 import {adopterProgressionCuisine,lireRecuCuisine} from '../src/domain/cuisine-format.js';
-const clone=structuredClone,refuse=async f=>{try{await f();return false;}catch{return true;}};
+const clone=structuredClone,erreur=async f=>{try{await f();return null;}catch(e){return e;}};
 const op='ck_op_'+'a'.repeat(64),at='2026-10-30T10:00:00.000Z';
 async function fixture(db){
  const version={id:'l7-version',recipe_id:'l7-recette',kind:'original',ingredients:[],steps:[{id:'etape',text:'Attendre.\u0001',timers:[{seconds:90}]}]},recipe={id:'l7-recette',original_title:'Pain',current_version_id:version.id};
@@ -27,9 +27,9 @@ export async function runL7ArchivesTests({eq,ok}){
  const inspection=await inspectArchive(await archive.blob.arrayBuffer());eq(inspection.errors,[],'L7 archive : forme valide inspectée');
  await withDatabase(async db=>{
   const alteree=clone(inspection);alteree.payload.stores.timer_launches.find(x=>x.id===source.timer.id).mirror.deadline_at=at;
-  ok(await refuse(()=>applyArchive(db,alteree)),'L7 archive : preuve altérée après inspection refusée avant écriture');eq((await db.getAll('timer_launches')).length,0,'L7 archive : refus avant écriture sans minuteur partiel');
+  eq((await erreur(()=>applyArchive(db,alteree)))?.message, "Archive non validée : Séance ou minuteur invalide : ancre_invalide",'L7 archive : preuve altérée après inspection refusée avant écriture');eq((await db.getAll('timer_launches')).length,0,'L7 archive : refus avant écriture sans minuteur partiel');
   const ancien=clone(inspection);ancien.manifest.format_version=5;
-  ok(await refuse(()=>applyArchive(db,ancien)),'L7 archive : format abaissé après inspection encore refusé');
+  eq((await erreur(()=>applyArchive(db,ancien)))?.message, "Archive non validée : Les séances et minuteurs persistants exigent le format 6.",'L7 archive : format abaissé après inspection encore refusé');
  });
  for(const format of[1,2,3,4,5])ok(!(await transformer(archive,(s,m)=>m.format_version=format)).ok,'L7 archive : formes réservées refusées sous format'+format);
  ok(!(await transformer(archive,s=>s.timer_launches.find(x=>x.id===source.timer.id).mirror.deadline_at=at)).ok,'L7 archive : échéance incohérente refusée à inspection');
@@ -43,19 +43,19 @@ export async function runL7ArchivesTests({eq,ok}){
   ok(timer.cooking_incarnation!==source.timer.cooking_incarnation,'L7 archive '+mode+' : incarnation neuve du minuteur');ok(session.cooking_state.incarnation!==source.session.cooking_state.incarnation,'L7 archive '+mode+' : incarnation neuve de séance');eq(timer.cooking_receipt_floor,1,'L7 archive '+mode+' : ancien reçu hors zone fiable');eq(lireRecuCuisine(timer,{store:'timer_launches',...source.timer.cooking_receipts[0]}),null,'L7 archive '+mode+' : ancien reçu ne prouve aucun geste actuel');
   const commands=outbox.filter(x=>x.op==='cooking_apply');eq(commands.length,3,'L7 archive '+mode+' : une commande fermée par ligne protégée');eq(outbox.filter(x=>x.op==='put'&&[source.timer.id,source.siri.id,source.session.id].includes(x.id)).length,0,'L7 archive '+mode+' : aucun put ordinaire des nouvelles formes');
   ok((await verifyRestored(db,inspection,{mode,normalisationsCuisine:result.normalisationsCuisine})).ok,'L7 archive '+mode+' : normalisations effectivement relues');
-  const avant=await db.getSnapshot();ok(await refuse(()=>applyArchive(db,inspection,{mode})),'L7 archive '+mode+' : ancien ZIP divergent refusé au nouveau geste');eq(await db.getSnapshot(),avant,'L7 archive '+mode+' : refus sans perte partielle');
+  const avant=await db.getSnapshot();eq((await erreur(()=>applyArchive(db,inspection,{mode})))?.code, "restauration_changee",'L7 archive '+mode+' : ancien ZIP divergent refusé au nouveau geste');eq(await db.getSnapshot(),avant,'L7 archive '+mode+' : refus sans perte partielle');
   await db.mutate({origin:'remote',puts:{cook_sessions:[{...session,progress:{...session.progress,by_version:{...session.progress.by_version,'l7-version':{...session.progress.by_version['l7-version'],done_step_ids:['etape']}}}}]}});
   ok(!(await verifyRestored(db,inspection,{mode,normalisationsCuisine:result.normalisationsCuisine})).ok,'L7 archive '+mode+' : les normalisations ne masquent pas une progression différente');
  });
  await withDatabase(async db=>{
   await fixture(db);let atteinte=false,apres;
   const facade=Object.assign(Object.create(db),{mutate:async opts=>{if(opts.archive_import&&!atteinte){atteinte=true;const row=await db.get('timer_launches',source.timer.id);await db.mutate({origin:'remote',puts:{timer_launches:[{...row,handoff_state:'failed'}]}});apres=await db.getSnapshot();}return db.mutate(opts);}});
-  ok(await refuse(()=>applyArchive(facade,inspection)),'L7 archive : changement après préparation refuse le commit');ok(atteinte,'L7 archive : course atteint la transaction');eq(await db.getSnapshot(),apres,'L7 archive : nouvelle preuve concurrente et bibliothèque intactes');
+  eq((await erreur(()=>applyArchive(facade,inspection)))?.code, "sources_divergentes",'L7 archive : minuteur changé après préparation : snapshot divergent refuse le commit');ok(atteinte,'L7 archive : course atteint la transaction');eq(await db.getSnapshot(),apres,'L7 archive : nouvelle preuve concurrente et bibliothèque intactes');
  });
  await withRepo(async(repo,db)=>{
   const avant=await db.getSnapshot(),hook=db.onMutate;let atteint=false;
   db.onMutate=args=>{if(args.archive_import&&args.cooking_commands?.length){atteint=true;throw new DOMException('quota injecté','QuotaExceededError');}return hook?.(args);};
-  try{ok(await refuse(()=>applyArchive(db,inspection)),'L7 archive : quota transactionnel signalé');ok(atteint,'L7 archive : quota atteint les commandes de restauration');eq(await db.getSnapshot(),avant,'L7 archive : quota ne laisse ni livre ni minuteur ni file partiels');}
+  try{eq((await erreur(()=>applyArchive(db,inspection)))?.name, "QuotaExceededError",'L7 archive : quota transactionnel signalé');ok(atteint,'L7 archive : quota atteint les commandes de restauration');eq(await db.getSnapshot(),avant,'L7 archive : quota ne laisse ni livre ni minuteur ni file partiels');}
   finally{db.onMutate=hook;}
  });
  for(const format of[1,2,3,4,5])await withDatabase(async db=>{await db.mutate({origin:'remote',puts:{timer_launches:[{id:'ancien',channel:'siri'}]}});ok((await transformer(await createArchive(db),(s,m)=>m.format_version=format)).ok,'L7 archive : ancien format'+format+' documentaire encore admis');});

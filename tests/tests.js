@@ -766,7 +766,7 @@ try { await runAuditReponsesParcoursTests({eq,ok}); } catch (e) { ok(false, 'run
 try { await runAuditReponsesEcranTests({eq,ok}); } catch (e) { ok(false, 'runAuditReponsesEcranTests : ' + (e.stack || e)); }
 try { await runAuditImportRouteTests({eq,ok}); } catch (e) { ok(false, 'runAuditImportRouteTests : ' + (e.stack || e)); }
 
-eq(results.length, 14514,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 14517,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

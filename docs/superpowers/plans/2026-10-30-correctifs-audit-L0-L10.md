@@ -192,7 +192,7 @@
 
 **Fichiers :** `tests/l1-corbeille-domaine.js:9`, `tests/l2-corbeille-domaine.js`, `tests/l5-archives.js:9`, `tests/correctifs-reperes.js:8` (≈ 109 sites), `tests/l5-index-stockage.js`, `tools/prouver.sh` (nouveau), `supabase/README.md`, `.github/workflows/ci.yml` (nouveau), `STATE.md`. Lentille : `docs/audits/…/lentilles/tests.md`.
 
-- [ ] **12.1 Refus exacts** : remplacer chaque `ok(await refuse(fn))` par `eq(await motif(fn), '<code>')` avec le code réel lu dans le `throw` du code testé (`e.raison ?? e.code ?? e.message`) ; aucun total en baisse.
+- [x] **12.1 Refus exacts** : remplacer chaque `ok(await refuse(fn))` par `eq(await motif(fn), '<code>')` avec le code réel lu dans le `throw` du code testé (`e.raison ?? e.code ?? e.message`) ; aucun total en baisse.
 - [ ] **12.2 Bornes jamais atteintes** : tests rouges → 65 fragments → `too_large` ; résultat > 4 Mio → `too_large` ; `absente:true` isolée au niveau dépôt (retirer la branche de `lireCondition`, `repo.js:434`, rougit).
 - [ ] **12.3 PostgreSQL jetable scripté** : `tools/prouver.sh` crée une base locale (port 55439, `L1_PROOF_LOCAL=1`), applique 0001→0014, lance tous les `tools/prover-*.mjs` et imprime un bilan ; `supabase/README.md` § « Rejouer les preuves » ; `node --test` ne change pas.
 - [ ] **12.4 CI** : `.github/workflows/ci.yml` sur `pull_request` et `push` vers `main` : `node --test --test-concurrency=1 tools/*.test.mjs`, `node tools/generer-migrations.mjs --check`, `node tools/generer-livraison.mjs --check`, suite navigateur en Chromium sans tête (serveur statique + Playwright, lecture de `#out h2`, échec si ≠ « ✅ N/N »), scan `git grep -nE 'sk-ant-|sbp_|eyJ[A-Za-z0-9_-]{30,}\.'` (hors sentinelles de test). Aucun secret dans le workflow.
