@@ -12,10 +12,10 @@ export async function runL5ComplementsRecetteUiTests({eq,ok}) {
   return {root,session,journal,button:()=>[...root.querySelectorAll('button')].find(b=>b.textContent==='Choisir des photos')};
  }
  const run=async(n,f)=>{try{await withRepo(async(repo,db)=>{U.reinitialiserImportCible();try{await f(repo,db);}finally{U.reinitialiserImportCible();}});}catch(e){ok(false,'L5 complément UI '+n+' : '+(e.stack||e));}};
- await run('annulation',async(repo,db)=>{let confirmations=0,pickers=0;const f=await fixture(repo,db,{confirmer:async()=>{confirmations++;return false;},pickFiles:async()=>{pickers++;return[];}});try{
+ await run('annulation',async(repo,db)=>{let confirmations=0,pickers=0;const f=await fixture(repo,db,{confirmer:async()=>{confirmations++;return false;},pickFiles:async()=>{pickers++;return[new File(['page suivante'],'suite.jpg',{type:'image/jpeg'})];}});try{
   ok(!!f.button(),'L5 complément UI : accès photos disponible pour une nouvelle lecture explicite');
   eq(f.root.querySelectorAll('[data-role=retirer],[data-role=monter],[data-role=descendre]').length,0,'L5 complément UI : pages payées restent en consultation');
-  f.button()?.click();await attendre(()=>confirmations===1);eq(pickers,0,'L5 complément UI : annuler confirme avant tout sélecteur');eq(await repo.get('imports','ancien'),f.journal,'L5 complément UI : annulation préserve toute la lecture');
+  f.button()?.click();await attendre(()=>confirmations===1);eq(pickers,1,'L5 complément UI : refus de la nouvelle lecture après choix du fichier');eq(await repo.get('imports','ancien'),f.journal,'L5 complément UI : annulation préserve toute la lecture');
  }finally{f.root.remove();}});
  await run('quota puis même geste',async(repo,db)=>{let confirmations=0,pickers=0,calls=0;const args=[],files=[new File(['page suivante'],'suite.jpg',{type:'image/jpeg'})];const port={...repo,get db(){return repo.db;},ajouterPages:async(fs,options)=>{args.push({files:fs,args:structuredClone({...options,recettes:[]})});calls++;if(calls===1)throw new DOMException('plein','QuotaExceededError');return repo.ajouterPages(fs,options);}};const f=await fixture(port,db,{confirmer:async()=>{confirmations++;return true;},pickFiles:async()=>{pickers++;return files;}});try{
   f.button()?.click();await attendre(()=>f.root.querySelector('[data-role=reessayer-ajout-photos]'));

@@ -1,3 +1,9 @@
+import {runBoutonsPhotosLivrePresentationTests} from './boutons-photos-presentation.js';
+import {runBoutonsAccueilLivreTests} from './boutons-accueil-livre.js';
+import {runBoutonsPhotosLivreTests, runBoutonsPhotosLivreConservationTests, runBoutonsPhotosLivreGardesTests} from './boutons-photos-livre.js';
+import {runBoutonsPhotosAnnexesTests} from './boutons-photos-annexes.js';
+import {runBoutonsPhotosSourcesTests} from './boutons-photos-sources.js';
+import {runBoutonsSuggestionsTests} from './boutons-suggestions.js';
 import {runPwaBilanTests} from './pwa-bilan.js';
 import {runPwaBibliothequeTests} from './pwa-bibliotheque.js';
 import {runPwaRepasTests} from './pwa-repas.js';
@@ -505,6 +511,22 @@ try { await runL6LectureRecetteTests({ eq, ok }); }
 catch (e) { ok(false, 'L6 lecture-recette : ' + (e.stack || e)); }
 try { await runCorrectifLangueRecetteTests({ eq, ok }); }
 catch (e) { ok(false, 'Correctif langue recette : ' + (e.stack || e)); }
+try { await runBoutonsPhotosLivrePresentationTests({eq,ok}); }
+catch(e) { ok(false, 'runBoutonsPhotosLivrePresentationTests : '+(e?.stack||String(e))); }
+try { await runBoutonsAccueilLivreTests({eq,ok}); }
+catch(e) { ok(false, 'runBoutonsAccueilLivreTests : '+(e?.stack||String(e))); }
+try { await runBoutonsPhotosLivreTests({eq,ok}); }
+catch(e) { ok(false, 'runBoutonsPhotosLivreTests : '+(e?.stack||String(e))); }
+try { await runBoutonsPhotosLivreConservationTests({eq,ok}); }
+catch(e) { ok(false, 'runBoutonsPhotosLivreConservationTests : '+(e?.stack||String(e))); }
+try { await runBoutonsPhotosLivreGardesTests({eq,ok}); }
+catch(e) { ok(false, 'runBoutonsPhotosLivreGardesTests : '+(e?.stack||String(e))); }
+try { await runBoutonsPhotosAnnexesTests({eq,ok}); }
+catch(e) { ok(false, 'runBoutonsPhotosAnnexesTests : '+(e?.stack||String(e))); }
+try { await runBoutonsPhotosSourcesTests({eq,ok}); }
+catch(e) { ok(false, 'runBoutonsPhotosSourcesTests : '+(e?.stack||String(e))); }
+try { await runBoutonsSuggestionsTests({eq,ok}); }
+catch(e) { ok(false, 'runBoutonsSuggestionsTests : '+(e?.stack||String(e))); }
 try { await runPwaBilanTests({eq,ok}); }
 catch (e) { ok(false, 'PWA bilan : ' + (e.stack || e)); }
 try { await runPwaBibliothequeTests({eq,ok}); }
@@ -808,7 +830,7 @@ try { await runAuditImportRouteTests({eq,ok}); } catch (e) { ok(false, 'runAudit
 
 try { await runAuditRepoAbsenceTests({eq,ok}); } catch (e) { ok(false, 'runAuditRepoAbsenceTests : ' + (e.stack || e)); }
 
-eq(results.length, 15084,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 15373,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

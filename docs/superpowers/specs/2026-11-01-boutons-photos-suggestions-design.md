@@ -1,6 +1,6 @@
 # Mistu — boutons photo et suggestions
 
-Date : 1er novembre 2026. Document fourni par Neegan, relu contre le code `cd6dbc1` (livraison0.32.12-3). Périmètre précisé avant construction ; aucun correctif produit appliqué ou déployé par cette relecture.
+Date : 1er novembre 2026. Document fourni par Neegan, relu contre le code `cd6dbc1` (livraison0.32.12-3). Périmètre précisé avant construction. Mise en œuvre autorisée le 1er novembre par Neegan : « oui corrige, les boutons ajouter photos ne marchent toujours pas ». La réception distingue les essais automatisés de la caméra iPhone physique.
 
 ## Résultat attendu
 
@@ -85,7 +85,7 @@ Le dédoublonnage reste propre à chaque liste. Le champ `cuisines` contient dé
 
 Écrire d’abord les tests de comportement qui reproduisent les défauts. Conserver les écritures par le dépôt et les traductions par `t()`. Suivre les règles de version et de génération de livraison de `AGENTS.md`. Aucun SQL ni changement de fonction assistant prévu.
 
-La règle de revue applicable est : « Spec d’abord (`docs/superpowers/specs/AAAA-MM-JJ-<lot>-design.md`), relue par Neegan, puis construction en petites tâches testées ». La présente fiche constitue le périmètre à relire, sans attribuer d’approbation à Neegan.
+La règle de revue applicable est : « Spec d’abord (`docs/superpowers/specs/AAAA-MM-JJ-<lot>-design.md`), relue par Neegan, puis construction en petites tâches testées ». La relecture initiale a précédé le « oui corrige » de Neegan. Ce message autorise la construction du présent périmètre et la correction des autres entrées photo présentant la même attente avant ouverture.
 
 ## Références
 

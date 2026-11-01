@@ -5,6 +5,7 @@ import { getSyncGeneration } from './state.js';
 
 export function texteErreurSources(resultat) {
   const raison=resultat?.raison??resultat?.code;
+  if(raison==='selection_photo')return t('Le choix des photos n’a pas pu s’ouvrir. Réessaie.');
   if(['owner_changed','compte_change','epoch_changed','epoque_changee','database_changed','contexte_change','bibliotheque_remplacee'].includes(raison))return t('Le compte ou la bibliothèque a changé. Rouvre la séance avant de continuer.');
   if(['edition_cycle','edition_retiree','cycle_change','cycle_changee'].includes(raison))return t('Le livre a changé. Tes photos sont conservées ; revois le livre avant de continuer.');
   if(['source_changed','session_changed','source_modifiee','source_changee','session_modifiee'].includes(raison))return t('Les sources ont changé. Compare les images avant de continuer.');
@@ -25,7 +26,8 @@ export async function creerCommandesSources({repo,ctx,compte,lire,estCourante,on
   let occupe=false,planRefuse=null,optionsRefusees={},preparationRefusee=null,demandeRefusee=null,dialogue=null,detruit=false,declencheur=null;
   const vivante=()=>!detruit&&estCourante();
   const capturer=async(affiche=structuredClone(lire()))=>{
-    const proprietaire=await compte;if(!vivante()||proprietaire.contexteValide&&!proprietaire.contexteValide())return {issue:'refuse',raison:'owner_changed'};
+    const base=repo.db,generation=getSyncGeneration();
+    const proprietaire=await compte;if(!vivante()||repo.db!==base||getSyncGeneration()!==generation||proprietaire.contexteValide&&!proprietaire.contexteValide())return {issue:'refuse',raison:'owner_changed'};
     return service.capturerSources({...affiche,contexte:{owner_id:proprietaire.owner_id,edition:affiche.edition??null,estCourante:vivante}});
   };
   const bouton=(texte,fn,primaire=false)=>el('button',{type:'button',class:`btn${primaire?' primary':''}`,onClick:()=>lancer(fn)},texte);
@@ -52,10 +54,16 @@ export async function creerCommandesSources({repo,ctx,compte,lire,estCourante,on
     return r;
   }
   async function modifier(demande){
-    const affiche=structuredClone(lire()),capture=await capturer(affiche);if(capture.issue!=='ok'){afficherErreur(capture);return capture;}
-    const d={...demande};
-    if(d.action==='replace'&&!d.fichier){const fichiers=await choisir({accept:'image/*',multiple:false,capture:'environment'});if(!fichiers.length||!vivante())return;d.fichier=fichiers[0];}
-    if(d.action==='append'&&!d.fichiers){d.fichiers=await choisir(d.choix||{accept:'image/*,application/pdf,application/epub+zip'});delete d.choix;if(!d.fichiers.length||!vivante())return;}
+    const affiche=structuredClone(lire()),d={...demande};
+    // La capture démarre dans le geste, mais son attente ne repousse pas le
+    // sélecteur natif. Son rejet reste traité même si le choix est annulé.
+    const captureEnCours=capturer(affiche).then(capture=>({capture}),erreur=>({erreur}));
+    try{
+      if(d.action==='replace'&&!d.fichier){const fichiers=await choisir({accept:'image/*',multiple:false,capture:'environment'});if(!fichiers?.length||!vivante())return;d.fichier=fichiers[0];}
+      if(d.action==='append'&&!d.fichiers){d.fichiers=await choisir(d.choix||{accept:'image/*,application/pdf,application/epub+zip'});delete d.choix;if(!d.fichiers?.length||!vivante())return;}
+    }catch{if(vivante())afficherErreur({issue:'refuse',raison:'selection_photo'});return;}
+    const recu=await captureEnCours;if(!vivante())return;if(recu.erreur)throw recu.erreur;
+    const capture=recu.capture;if(capture.issue!=='ok'){afficherErreur(capture);return capture;}
     let annuler=null;
     if(d.action==='hide'){
       if(!await confirmer(t('Retirer ces photos de la séance ? Les recettes et les photos déjà conservées restent.'),{okLabel:t('Retirer de la séance')}))return;

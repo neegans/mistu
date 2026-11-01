@@ -6,6 +6,7 @@ import { carte } from './components.js';
 import { icone } from './icones.js';
 
 export const ACCUEIL_ACTIONS = ['index', 'recette', 'plusTard'];
+let prochainAccueil = 0;
 
 // D-UI-9 (lot UI-1 « Carnet ») : `ico` est le NOM d'une icône au trait d'icones.js ; renderAccueilLivre la rend (un nom inconnu lève).
 export function accueilLivreModel({ nouveau = undefined } = {}) {
@@ -20,14 +21,36 @@ export function accueilLivreModel({ nouveau = undefined } = {}) {
 export function renderAccueilLivre(model, gestes = {}) {
   const root = el('div', null);
   if (!model.afficher) return root;
-  const sources = el('div', { class: 'row sources' });
-  const devoiler = (intention) => sources.replaceChildren(
+  const id = `accueil-livre-${++prochainAccueil}`, choix = new Map();
+  let intention = null;
+  const sources = el('div', { class: 'row sources', id: `${id}-sources`, role: 'group' });
+  const commandes = [
+    el('p', { class: 'accueil-livre-selection', dataset: { role: 'choix-selectionne' } }, t('Choix sélectionné')),
     el('button', { type: 'button', class: 'btn primary', onClick: () => gestes.photographier && gestes.photographier(intention) }, t('Photographier')),
-    el('button', { type: 'button', class: 'btn', onClick: () => gestes.choisir && gestes.choisir(intention) }, t('Choisir des photos ou un PDF')));
+    el('button', { type: 'button', class: 'btn', onClick: () => gestes.choisir && gestes.choisir(intention) }, t('Choisir des photos ou un PDF'))];
+  const devoiler = action => {
+    const courant = choix.get(action);
+    if (!courant) return;
+    intention = action;
+    for (const [valeur, { bouton }] of choix) bouton.setAttribute('aria-pressed', String(valeur === action));
+    sources.setAttribute('aria-labelledby', courant.titre.id);
+    if (!sources.hasChildNodes()) sources.append(...commandes);
+    if (sources.parentElement !== courant.groupe) courant.groupe.append(sources);
+  };
+  const cartes = model.cartes.map((c, n) => {
+    const bouton = carte(icone(c.ico), c.titre, c.texte, () => (c.action === 'plusTard' ? gestes.plusTard && gestes.plusTard() : devoiler(c.action)));
+    const groupe = el('div', { class: 'accueil-livre-choix' }, bouton);
+    if (c.action !== 'plusTard') {
+      const titre = bouton.querySelector('h3'); titre.id = `${id}-choix-${n}`;
+      bouton.setAttribute('aria-pressed', 'false'); bouton.setAttribute('aria-controls', sources.id);
+      choix.set(c.action, { bouton, groupe, titre });
+    }
+    return groupe;
+  });
   const panneau = el('section', { class: 'card accueil-livre stack' },
     el('div', { class: 'row between top' }, el('h2', null, model.titre),
       el('button', { type: 'button', class: 'btn small fermer', 'aria-label': t('Fermer'), onClick: () => { panneau.remove(); gestes.fermer && gestes.fermer(); } }, '×')),
-    el('div', { class: 'grid wide' }, ...model.cartes.map((c) => carte(icone(c.ico), c.titre, c.texte, () => (c.action === 'plusTard' ? gestes.plusTard && gestes.plusTard() : devoiler(c.action))))),
+    el('div', { class: 'grid wide' }, ...cartes),
     sources);
   root.append(panneau);
   return root;

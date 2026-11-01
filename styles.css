@@ -276,6 +276,12 @@ section.plain > h2 { margin: 0 0 .8rem; padding-bottom: .4rem; border-bottom: 1p
 }
 .chip.removable { cursor: pointer; min-height: 32px; }
 .chip.removable::after { content: "×"; font-weight: 700; margin-left: .1rem; }
+.livre-classement .chip.removable { min-height:44px; }
+.livre-classement > .row > span.stack { display:flex; flex-direction:column; align-items:flex-start; }
+.livre-classement > .row > span.stack > * { margin:0; }
+.accueil-livre-choix { display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+.accueil-livre-choix > button[aria-pressed="true"] { border-color: var(--action); background: var(--accent-bg); }
+.accueil-livre-selection { flex-basis: 100%; margin: 0; color: var(--action); font-weight: 600; }
 /* R-VIS-10 : une puce bascule ALLUMÉE (sa case cochée : capacités d'un appareil) garde une teinte d'état (accent) ; éteinte,
    .chip.outline. Les puces cliquables sans case (exemples de l'accueil, contraintes d'un repas) restent des puces ordinaires. */
 .chip.clickable:has(> input:checked) { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-bg); }

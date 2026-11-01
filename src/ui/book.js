@@ -184,17 +184,86 @@ export async function renderBook(params, query, ctx, deps = {}) {
   const matchMedia = deps.matchMedia || ((q) => window.matchMedia(q));
   const large = matchMedia(LARGEUR_DEUX_COLONNES);
   const root = el('div', { class: 'fiche-livre' });
+  let photosActives = true, numeroChoix = 0, operationPhoto = null;
+  let reprisePhoto = null, messagePhoto = '';
+  const etatPhoto = el('div', {class:'stack',role:'status',hidden:true,dataset:{role:'etat-photo-livre'}});
+  const tachesPhotos = new Set();
+  const suivrePhoto = fn => {
+    const p = fn(); tachesPhotos.add(p);
+    p.then(() => tachesPhotos.delete(p), () => tachesPhotos.delete(p)); return p;
+  };
+  root.attendrePhotos = async () => { while (tachesPhotos.size) await Promise.allSettled([...tachesPhotos]); };
+  const dessinerEtatPhoto = () => {
+    etatPhoto.hidden = !messagePhoto;
+    etatPhoto.className = messagePhoto ? 'status warn stack' : 'stack';
+    etatPhoto.replaceChildren(...(messagePhoto ? [el('p',null,messagePhoto)] : []),
+      ...(reprisePhoto ? [el('button',{type:'button',class:'btn',disabled:reprisePhoto.operation.enCours,dataset:{role:'reessayer-photo-livre'},onClick:()=>{
+        const reprise=reprisePhoto;if(reprise)suivrePhoto(()=>conserverPhoto(reprise.operation,reprise.ecrire));
+      }},t('Réessayer de conserver les fichiers'))] : []));
+  };
+  const afficherEtatPhoto = (message, reprise = undefined) => { messagePhoto=message;if(reprise!==undefined)reprisePhoto=reprise;dessinerEtatPhoto(); };
+  const changementPhoto = e => e?.name==='ErreurCycleRecette' || ['compte_change','contexte_change','cycle_change','edition_retiree'].includes(e?.code);
+  const erreurChoixPhoto = e => { if(photosActives&&root.isConnected)afficherEtatPhoto(changementPhoto(e)
+    ? t('Le livre a changé. Rouvre sa fiche avant d’ajouter des pages.')
+    : t('Le choix des photos n’a pas pu s’ouvrir. Réessaie.')); };
+  const conserverPhoto = async (operation,ecrire) => {
+    if(operation.enCours)return;
+    operation.enCours=true;afficherEtatPhoto(t('Conservation des fichiers en cours…'),null);
+    let presenter;
+    try {
+      if(!operation.contexte.contexteValide())throw Object.assign(new Error('contexte_change'),{code:'contexte_change'});
+      presenter = await ecrire(operation);
+      if(operationPhoto===operation)afficherEtatPhoto('',null);
+    } catch(e) {
+      if(photosActives&&root.isConnected&&operationPhoto===operation){
+        const imageRefusee=e?.name==='ErreurImage';
+        afficherEtatPhoto(changementPhoto(e)?t('Le livre a changé. Rouvre sa fiche avant d’ajouter des pages.')
+          :imageRefusee?messageErreurImage(e):t('La sélection n’a pas pu être conservée. Réessaie sans choisir à nouveau les fichiers.'),
+        changementPhoto(e)||imageRefusee?null:{operation,ecrire});
+      }
+    } finally {operation.enCours=false;if(photosActives&&root.isConnected&&operationPhoto===operation)dessinerEtatPhoto();}
+    // La conservation a réussi : une erreur d'affichage ne doit jamais proposer
+    // de répéter l'écriture et créer une deuxième séance avec les mêmes photos.
+    if (typeof presenter === 'function') {
+      try { presenter(); }
+      catch { if (operation.contexte.contexteValide()) afficherEtatPhoto(t('Les fichiers sont conservés sur cet appareil. Rouvre le livre pour les retrouver.'),null); }
+    }
+  };
+  const choisirPourLivre = async options => {
+    const numero = ++numeroChoix, adresse = location.href;
+    const vueCourante = () => photosActives && root.isConnected && location.href === adresse;
+    if (!vueCourante()) return null;
+    // Un nouveau geste annule le travail encore actif. Une sélection dont
+    // l'écriture a échoué reste, elle, disponible si ce nouveau choix est annulé.
+    if (operationPhoto?.enCours) { operationPhoto = null; afficherEtatPhoto('',null); }
+    // Capturer la cible avant le choix, sans différer l'ouverture native. Le rejet
+    // est pris en charge même si la personne laisse le sélecteur ouvert ou annule.
+    const capture = Promise.resolve((deps.capturerEdition || capturerEdition)(repo, edition, {ctx}))
+      .then(contexte => ({contexte}), erreur => ({erreur}));
+    const files = await (deps.pickFiles || pickFiles)(options);
+    if (!files.length || numero !== numeroChoix || !vueCourante()) return null;
+    const recu = await capture;
+    if (numero !== numeroChoix || !vueCourante()) return null;
+    if (recu.erreur) throw recu.erreur;
+    const operation = {files}; operationPhoto = operation;
+    operation.contexte = {...recu.contexte, contexteValide: () => vueCourante() && operationPhoto === operation && recu.contexte.contexteValide()};
+    return operation;
+  };
   const route=`/books/${encodeURIComponent(edition.id)}`,portee=porteeNavigation(ctx);
   const etat=lireContexteListe({route,query,portee}),origine={cleEntree:etat.cleEntree};
   const actions=actionsLivre({edition,ctx,origine},deps);
   // I-F : un scan parti d'ici porte le livre ET l'intention (index ou recette) ; le menu ne décide que de la SOURCE.
-  const lancer = (intention) => async (accept, capture) => {
+  const lancer = (intention) => (accept, capture) => suivrePhoto(async () => {
     try {
-      const contexteEdition=await capturerEdition(repo,edition,{ctx});
-      const f = await pickFiles({ accept, multiple: true, capture });
-      if (f.length) await startScanSession(f, { edition_id: edition.id, intention, contexteEdition, ctx });
-    }catch{toast(t('Le livre a changé. Rouvre sa fiche avant d’ajouter des pages.'));}
-  };
+      const choix = await choisirPourLivre({accept, multiple: true, capture});
+      if (choix) await conserverPhoto(choix,async()=> {
+        let cible, texte;
+        await (deps.startScanSession || startScanSession)(choix.files, { edition_id: edition.id, intention, contexteEdition: choix.contexte, ctx,
+          naviguer: adresse => { cible=adresse; }, notifier: message => { texte=message; } });
+        return () => { if (choix.contexte.contexteValide()) { (deps.toast || toast)(texte); (deps.navigate || navigate)(cible); } };
+      });
+    }catch(e){erreurChoixPhoto(e);}
+  });
   // D-UI-7, H-21 : le sous-titre dit l'auteur, l'éditeur et l'année — ce qui est connu, dans cet ordre ; l'ISBN et la langue restent dans « Métadonnées et
   // convention ». Les deux menus d'ajout restent les ACTIONS de l'en-tête (markup inchangé, textes D-UI-10) ; le titre de fiche porte classeTitre (D-UI-3).
   // R-UI-11 tranché (vague finale) : les retours propres à un livre (« ← Bibliothèque », « Plus tard », après la suppression) mènent au segment Livres, d'où
@@ -205,6 +274,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
     classeTitre: 'titre-fiche',
     actions:[boutonsActions(actions,['modifier-livre','ajouter-index','ajouter-recette']),menuActions(actions,{titre:book.title})],
   }));
+  root.querySelector('header').append(etatPhoto);
   if(['index','recette'].includes(query.panel)){
     const intention=query.panel;
     root.append(el('section',{class:'card stack',dataset:{role:'ajout-livre'}},el('h2',null,intention==='index'?t('Ajouter des pages d’index'):t('Ajouter une recette')),
@@ -280,28 +350,29 @@ export async function renderBook(params, query, ctx, deps = {}) {
   const zoneCouv = el('div', null);
   const dessinerCouv = () => zoneCouv.replaceChildren(renderZoneCouverture(etatCouv, gestesCouv));
   // C4 / I2 : la fusion relit l'édition DANS la transaction et ne change que le pointeur décoratif.
-  const ecrirePointeur = async (sha256,contexte,fichier=null) => {
+  const ecrirePointeur = async (sha256,contexte,fichier=null,propager=false) => {
     try {
       await repo.saveBatch({}, { editions:[contexte], ...(fichier?{fichiers:[fichier]}:{}), conditions: { book_editions: [{ key: edition.id, fusion: (courante) => {
         if (!courante) throw new Error('edition_absente');
         return { ...courante, cover_sha256: sha256 };
       } }] } });
       return true;
-    } catch { return false; }
+    } catch(e) { if(propager)throw e;return false; }
   };
-  const poser = async (capture) => {
-    let contexte,files;
-    try{contexte=await capturerEdition(repo,edition,{ctx});files=await pickFiles({ accept: 'image/*', multiple: false, capture });}
-    catch{toast(t('La couverture n’a pas pu être changée. Réessaie.'));return;}
-    if (!files.length) return;
-    etatCouv.enCours = true; dessinerCouv();
-    let image;
-    // Deux phases, deux phrases : une image refusée n'est pas une écriture refusée (I-B).
-    try { image = await poserCouverture(files[0], { origine: 'locale',prepareOnly:true }); }
-    catch (e) { etatCouv.enCours = false; dessinerCouv(); toast(messageErreurImage(e)); return; }
-    if (!(await ecrirePointeur(image.sha256,contexte,image.fichier))) { etatCouv.enCours = false; dessinerCouv(); toast(t('La couverture n’a pas pu être changée. Réessaie.')); return; }
-    toast(t('Couverture enregistrée.')); refresh();
-  };
+  const poser = (capture) => suivrePhoto(async () => {
+    let choix;
+    try{choix=await choisirPourLivre({accept:'image/*',multiple:false,capture});if(!choix)return;}
+    catch(e){erreurChoixPhoto(e);return;}
+    await conserverPhoto(choix,async operation=>{
+      etatCouv.enCours=true;dessinerCouv();
+      try {
+        operation.image ||= await (deps.poserCouverture || poserCouverture)(operation.files[0],{origine:'locale',prepareOnly:true});
+        const image=operation.image;
+        await ecrirePointeur(image.sha256,operation.contexte,image.fichier,true);
+        return () => { if(operation.contexte.contexteValide()){(deps.toast || toast)(t('Couverture enregistrée.'));(deps.refresh || refresh)();} };
+      } finally {etatCouv.enCours=false;if(photosActives&&root.isConnected)dessinerCouv();}
+    });
+  });
   const gestesCouv = {
     photographier: () => poser('environment'),
     choisir: () => poser(null),
@@ -336,7 +407,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
   // Métadonnées (le details d'avant, inchangé ; il passe dans la colonne de gauche, avant le Sommaire : D-UI-7)
   const metadonnees = await renderLivreEditeur({book,edition,ctx,query,deps});
   gauche.append(metadonnees);
-  root.dispose = () => metadonnees.dispose?.();
+  root.dispose = () => { photosActives=false;numeroChoix++;operationPhoto=null;reprisePhoto=null;metadonnees.dispose?.(); };
   root.flushEditeur = () => metadonnees.flushEditeur?.();
   root.etatEditeur = () => metadonnees.etatEditeur?.();
   if (pref?.hidden) gauche.append(el('button', { class: 'btn', onClick: async () => { const contexte=await capturerEdition(repo,edition,{ctx}); await repo.save('rediscovery_prefs', { ...pref, hidden: false }, {editions:[contexte]}); toast(t('Livre de nouveau proposé dans Redécouvrir')); refresh(); } }, t('Réafficher dans Redécouvrir')));

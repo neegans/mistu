@@ -17,10 +17,12 @@ export async function runL6ComplementsGroupesTests({eq,ok}){
   const confirmer=async()=>{confirmations++;if(course)await db.mutate({origin:'remote',puts:{recipe_versions:[{...version,notes:'Autre source arrivée'}]}});return true;};
   try{
    if(canal==='web')await enregistrerLecture(journal.id,{repo,ctx,remplacer:true,confirmer,fetch:async()=>{posts++;throw Error('Pas de POST attendu');}});
-   else{node=await renderImportCible({id:recipe.id},{import:journal.id},ctx,{repo,confirmer,navigate:()=>{},toast:()=>{},fetch:async()=>{posts++;throw Error('Pas de POST attendu');}});document.body.append(node);node.querySelector('[data-role=enregistrer]').click();await attendre(()=>confirmations>0);
+   else{node=await renderImportCible({id:recipe.id},{import:journal.id},ctx,{repo,confirmer,navigate:()=>{},toast:()=>{},fetch:async()=>{posts++;throw Error('Pas de POST attendu');}});document.body.append(node);const boutonInitial=node.querySelector('[data-role=enregistrer]');boutonInitial.click();await attendre(()=>confirmations>0);
     // La clôture précède la capture du contexte du panneau photo : attendre le
     // bilan monté avant de retirer la vue et de relier le dépôt à une autre base.
-    await attendre(async()=>course?node.querySelector('[data-role=enregistrer]')&&!node.querySelector('[data-role=enregistrer]').disabled:(await repo.get('imports',journal.id)).status==='enregistre'&&!!node.querySelector('[data-role=bilan-import]'));}
+    // En cas de refus, le bouton initial reste actif pendant la confirmation :
+    // seul celui du rendu suivant atteste que le geste est terminé.
+    await attendre(async()=>course?node.querySelector('[data-role=enregistrer]')&&node.querySelector('[data-role=enregistrer]')!==boutonInitial&&!node.querySelector('[data-role=enregistrer]').disabled:(await repo.get('imports',journal.id)).status==='enregistre'&&!!node.querySelector('[data-role=bilan-import]'));}
   }catch(e){ok(false,'L6 complément '+canal+' : geste aboutit sans exception — '+e.message);}finally{node?.dispose?.();node?.remove();}
   eq(confirmations,1,'L6 complément '+canal+' : retrait des titres confirmé explicitement');eq(posts,0,'L6 complément '+canal+' : réponse payée réutilisée sans nouvel appel');
   const versions=await repo.byIndex('recipe_versions','recipe_id',recipe.id),lu=await repo.get('imports',journal.id);

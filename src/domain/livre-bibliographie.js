@@ -66,22 +66,76 @@ export function brouillonLivre(v = {}) {
     edition_id: texte(v.edition_id, 160) || null, book_id: texte(v.book_id, 160) || null };
 }
 export const cleCandidateLivre = (c) => JSON.stringify(['title', 'author', 'isbn', 'publisher', 'year', 'language'].map((k) => valeurChamp(k, c?.fields?.[k])));
+const provenanceValeur = (p, value) => p?.values?.[value] || (p ? { origin:p.origin, retrieved_at:p.retrieved_at, sources:p.sources, uncertain:p.uncertain, justification:p.justification } : { origin:'manual', sources:[], uncertain:false, justification:'' });
 export function modifierChampLivre(d, k, value) {
   const next = brouillonLivre(d); if (!CHAMPS_LIVRE_I2.includes(k)) return next;
-  const previous = next.provenance[k];
+  const previous = next.provenance[k], cuisinesAvant = next.provenance.cuisines;
+  const valeursAvant = k === 'cuisine_facets' ? FACETTES_LIVRE.flatMap(f=>next.fields[k][f]) : next.fields[k];
   next.fields[k] = valeurChamp(k, value); next.touched[k] = true;
   next.provenance[k] = { origin: 'manual', retrieved_at: null, sources: [], uncertain: false, justification: '' }; delete next.proposals[k];
   if (['tags', 'cuisines', 'cuisine_facets'].includes(k)) {
     const values = k === 'cuisine_facets' ? FACETTES_LIVRE.flatMap((f) => next.fields[k][f]) : next.fields[k];
-    next.provenance[k].values = Object.fromEntries(values.map((v) => [v, previous?.values?.[v] || { origin: 'manual', sources: [], uncertain: false, justification: '' }]));
+    next.provenance[k].values = Object.fromEntries(values.map((v) => [v, valeursAvant.includes(v) ? provenanceValeur(previous,v) : { origin:'manual', sources:[], uncertain:false, justification:'' }]));
     next.provenance[k].sources = sourcesDe(Object.values(next.provenance[k].values).flatMap((p) => p.sources || []));
   }
   if (k === 'cuisine_facets') {
-    const anciennes = new Set(FACETTES_LIVRE.flatMap((f) => brouillonLivre(d).fields.cuisine_facets[f]).map(cle));
+    const anciennes = new Set(valeursAvant.map(cle));
     next.fields.cuisines = listeLivre([...next.fields.cuisines.filter((v) => !anciennes.has(cle(v))), ...FACETTES_LIVRE.flatMap((f) => next.fields.cuisine_facets[f])]);
-    next.touched.cuisines = true; next.provenance.cuisines = next.provenance[k];
+    next.touched.cuisines = true; next.provenance.cuisines = { ...next.provenance[k], values:Object.fromEntries(next.fields.cuisines.map(v=>[v,next.provenance[k].values[v] || provenanceValeur(cuisinesAvant,v)])) };
+    next.provenance.cuisines.sources = sourcesDe(Object.values(next.provenance.cuisines.values).flatMap(p=>p.sources||[]));
   }
   return next;
+}
+
+const categorieValide = (key,facet) => key === 'cuisine_facets' ? FACETTES_LIVRE.includes(facet) : ['cuisines','tags'].includes(key) && facet == null;
+const valeursCategorie = (d,key,facet) => facet ? d.fields[key][facet] : d.fields[key];
+export function propositionsCategorieLivre(d,key,facet=null) {
+  if (!categorieValide(key,facet)) return [];
+  const draft=brouillonLivre(d),p=draft.proposals[key];
+  if (!p || p.provenance.uncertain) return [];
+  const prises=new Set(valeursCategorie(draft,key,facet).map(cle));
+  return (facet ? p.value[facet] : p.value).filter(v=>!prises.has(cle(v)) && !provenanceValeur(p.provenance,v).uncertain);
+}
+
+// Un ajout conserve les autres valeurs, leurs provenances et les propositions encore disponibles.
+export function modifierCategorieLivre(d,key,{facet=null,ajouter,retirer,proposition=false}={}) {
+  if (!categorieValide(key,facet)) return {ok:false,raison:'valeur_invalide'};
+  const draft=brouillonLivre(d),values=valeursCategorie(draft,key,facet),raw=ajouter ?? retirer;
+  if (typeof raw!=='string' || !raw.trim()) return {ok:false,raison:'vide'};
+  if (Array.from(raw).length>BORNES_LIVRE.puce) return {ok:false,raison:'longueur'};
+  const value=listeLivre([raw])[0];if (!value) return {ok:false,raison:'valeur_invalide'};
+  const presente=values.some(v=>cle(v)===cle(value));
+  if (ajouter!==undefined && presente) return {ok:false,raison:'doublon'};
+  if (ajouter!==undefined && values.length>=BORNES_LIVRE.puces) return {ok:false,raison:'limite'};
+  if (proposition && !propositionsCategorieLivre(draft,key,facet).includes(value)) return {ok:false,raison:'proposition_absente'};
+  const suivants=ajouter!==undefined ? [...values,value] : values.filter(v=>cle(v)!==cle(value));
+  let cuisines;
+  if(facet) {
+    const facettes={...draft.fields.cuisine_facets,[facet]:suivants},avant=new Set(FACETTES_LIVRE.flatMap(f=>draft.fields.cuisine_facets[f]).map(cle));
+    const apres=FACETTES_LIVRE.flatMap(f=>facettes[f]),clesApres=new Set(apres.map(cle));
+    const union=[...draft.fields.cuisines.filter(v=>!avant.has(cle(v))||clesApres.has(cle(v))),...apres];
+    if(new Set(union.map(cle)).size>BORNES_LIVRE.puces) return {ok:false,raison:'limite_cuisines'};
+    cuisines=listeLivre(union);
+  }
+  const next=modifierChampLivre(draft,key,facet ? {...draft.fields[key],[facet]:suivants} : suivants);
+  if(facet) next.fields.cuisines=cuisines;
+  if (proposition) {
+    const p=provenanceValeur(draft.proposals[key].provenance,value);
+    next.provenance[key].values[value]=structuredClone(p);
+    next.provenance[key].sources=sourcesDe(Object.values(next.provenance[key].values).flatMap(v=>v.sources||[]));
+    if(facet && next.fields.cuisines.includes(value)) {
+      next.provenance.cuisines.values[value]=structuredClone(p);
+      next.provenance.cuisines.sources=sourcesDe(Object.values(next.provenance.cuisines.values).flatMap(v=>v.sources||[]));
+    }
+  }
+  next.proposals=structuredClone(draft.proposals);
+  for (const k of ['tags','cuisines','cuisine_facets']) {
+    const p=next.proposals[k];if(!p)continue;
+    const restantes=(list,prises)=>list.filter(v=>!prises.some(x=>cle(x)===cle(v)));
+    p.value=k==='cuisine_facets' ? Object.fromEntries(FACETTES_LIVRE.map(f=>[f,restantes(p.value[f],next.fields[k][f])])) : restantes(p.value,next.fields[k]);
+    if (!(k==='cuisine_facets' ? FACETTES_LIVRE.some(f=>p.value[f].length) : p.value.length)) delete next.proposals[k];
+  }
+  return {ok:true,brouillon:next};
 }
 export function appliquerCandidateLivre(d, candidate, { forceFields = [] } = {}) {
   const next = brouillonLivre(d);

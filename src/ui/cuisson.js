@@ -364,8 +364,11 @@ export async function monterMesPhotos(recipe, history, { repo = repoModule, ctxF
         if (occupe) return;
         occupe = true; const liberer = protegerSaisie(root);
         try {
-          const recettes = [await capturerRecette(repo, recipe, {ctx, historique:true})];
+          const capture = capturerRecette(repo, recipe, {ctx, historique:true});
+          capture.catch(() => {}); // Une annulation ne consomme pas le résultat de cette capture.
           const selection = await pickFiles({ accept: 'image/*', multiple: true }); if (!selection?.length || !root.isConnected) return;
+          const recettes = [await capture];
+          if (!root.isConnected) return;
           const courante = await repo.get('cook_history', h.id);
           if (!courante || courante.recipe_id !== recipe.id) erreur('reference');
           if (!root.isConnected) return;

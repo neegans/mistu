@@ -64,7 +64,7 @@ export async function modifierPhotoAffichee(recipeId, attendu, { file = null, re
 export async function renderPhotoGestion({ id }, query = {}, ctx = {}, deps = {}) {
   const repo = deps.repo || depot, pickFiles = deps.pickFiles || pickDom, confirmDialog = deps.confirmDialog || confirmDom;
   const ctxF = deps.ctxF || await contexteFichiers(ctx);
-  let vue = await lire(repo, id), fermee = false, occupe = false, travail = Promise.resolve();
+  let vue = await lire(repo, id), fermee = false, occupe = false, travail = Promise.resolve(), choixPhoto = 0;
   if (!vue.recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
   const contenu = el('div', { class: 'stack' });
   const message = el('p', { role: 'status', class: 'status', hidden: true });
@@ -113,13 +113,16 @@ export async function renderPhotoGestion({ id }, query = {}, ctx = {}, deps = {}
   }
   function choisir(capture) {
     if (fermee || occupe) return;
-    const attendu = vue.photo;
-    // Le sélecteur peut rester sans résolution après Annuler ; il ne verrouille donc pas l’écran.
+    const attendu = vue.photo, choix = ++choixPhoto;
+    // Commencer la capture sans retarder le sélecteur ; son résultat reste celui du geste initial.
     travail = (async () => {
       try {
-        const contexte = await capturerRecette(repo, vue.recipe, {ctx, historique:!!attendu?.personnelle});
+        const captureContexte = capturerRecette(repo, vue.recipe, {ctx, historique:!!attendu?.personnelle});
+        captureContexte.catch(() => {}); // Le choix peut être annulé après un refus de portée.
         const files = await pickFiles({ accept: 'image/*', multiple: false, ...(capture ? { capture: 'environment' } : {}) });
-        if (!files?.length || fermee || occupe || !root.isConnected) return;
+        if (!files?.length || choix !== choixPhoto || fermee || occupe || !root.isConnected) return;
+        const contexte = await captureContexte;
+        if (choix !== choixPhoto || fermee || occupe || !root.isConnected) return;
         if (attendu?.personnelle) {
           let confirme;
           verrouiller(true);
@@ -128,7 +131,7 @@ export async function renderPhotoGestion({ id }, query = {}, ctx = {}, deps = {}
           if (!confirme) return;
         }
         await appliquer(attendu, { file: files[0], origin: capture ? 'photo' : 'image' }, contexte);
-      } catch { signaler(t('La photo du plat n’a pas pu être changée. Réessaie.')); }
+      } catch { if (choix === choixPhoto) signaler(t('La photo du plat n’a pas pu être changée. Réessaie.')); }
     })();
   }
   function retirer() {

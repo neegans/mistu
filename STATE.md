@@ -1,4 +1,10 @@
-# STATE.md — Mistu — 31 octobre 2026 — PWA MOBILE ; PUBLIC 0.32.12-3
+# STATE.md — Mistu — 1er novembre 2026 — BOUTONS PHOTO ; PUBLIC 0.32.12-3
+
+**Boutons photo et suggestions — 0.32.13-2 reçu localement, publication en préparation.** Sélecteur ouvert dans le geste sur les parcours du livre, couverture, recette, cuisson et sources ; contexte initial conservé jusqu’à la transaction. Annulation/réouverture, tentatives tardives et réessai après stockage refusé couverts. Les commandes suivent le choix index/recette ; suggestions disponibles et catégories retenues sont distinctes, une seule croix, sauvegarde réelle annoncée. [Captures relues](docs/audits/2026-11-01-boutons-photos.md) · [Réception détaillée](docs/superpowers/plans/2026-11-01-boutons-photos-suggestions-reception.md).
+
+**15374/15374** navigateur (+289), **281/281** outils Node, **29/29** outils CI ; générateurs conformes. WebKit42/42 sur l’ouverture/annulation ; parcours Chromium25/25 avec quatre JPEG conservés puis relus hors ligne ; suggestions FR/EN320/390 :40/40. Deux montages historiques ajustés sans retrait d’assertion : attente de fin du geste L6, puis choix de fichier avant refus de confirmation L5. Captures inspectées, zéro compte privé ou appel payé. APP_VERSION0.32.13, livraison0.32.13-2, DB6/archive7 inchangés. Aucun test de caméra/PWA sur iPhone physique revendiqué ; réception publique à compléter.
+
+## Livraison précédente : téléphone et PWA
 
 **Téléphone et PWA — 0.32.12-3 publié et reçu.** Code `d0c3fda`, Pages confirmé à20:45:00UTC (16h45HAE). **479/479 fichiers publics conformes**, **42/42 contrôles publics** (WebKit34, marges Chromium8), captures ouvertes. Dix étapes inspectées : menus44px, bibliothèque dégagée, premier plat du repas remonté de1102 à364px, bilan ouvert sur son titre, navigation de cuisine et marges latérales corrigées en paysage. Le volet du repas reste ouvert après sauvegarde/rechargement et « Rester » ne redemande plus la confirmation. [Comparatif avec20 captures](docs/audits/2026-10-31-pwa-mobile.md) · [Réception](docs/superpowers/plans/2026-10-31-pwa-mobile-reception.md).
 

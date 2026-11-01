@@ -16,7 +16,7 @@ import { renderLivreAjoutRoute, poserCouverture, recupererCouvertureParIsbn, mes
 import { texteEchec } from './import-cible.js';
 import { PasserelleProvider, extraireIndicesLivre, validerIndicesLivre, blobToBase64 } from '../domain/llm.js';
 import { listConventions } from '../domain/units.js';
-import { brouillonLivre, modifierChampLivre, appliquerCandidateLivre, candidateDepuisPhoto, chercherCatalogueLivre, rechercherLivreWeb, relireRechercheLivre, cleCandidateLivre, sourceLivre, listeLivre, shaLivre } from '../domain/livre-bibliographie.js';
+import { brouillonLivre, modifierChampLivre, modifierCategorieLivre, propositionsCategorieLivre, appliquerCandidateLivre, candidateDepuisPhoto, chercherCatalogueLivre, rechercherLivreWeb, relireRechercheLivre, cleCandidateLivre, sourceLivre, listeLivre, shaLivre } from '../domain/livre-bibliographie.js';
 import { fabriquerImportLivre, garderBrouillonLivre, trouverEditionsLivre, enregistrerLivreI2, brouillonDepuisEdition, ConflitLivre, memoireEditionLivre, relireBrouillonLivre } from '../domain/livre-parcours.js';
 import { capturerEdition, capturerProprietaire, conditionProprietaire } from './recette-garde.js';
 import { lireCycleEdition } from '../domain/cycle-edition.js';
@@ -100,6 +100,9 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
   root.append(pageHeader(draft.edition_id ? t('Compléter les informations') : t('Ajouter un livre'), { back: { href: draft.edition_id ? `/books/${encodeURIComponent(draft.edition_id)}` : '/add', label: draft.edition_id ? t('Livre') : t('Ajouter') } }));
   const status = el('div', { class: 'status', role: 'status', dataset: { role: 'etat-livre' } });
   const conservationPhoto = el('div', { class: 'status warn stack', role: 'status', hidden: true, dataset: { role: 'conservation-photo-livre' } });
+  const etatBrouillon = el('span');
+  const conservationBrouillon = el('div', { class:'stack', role:'status', hidden:true, dataset:{role:'conservation-brouillon-livre'} }, etatBrouillon);
+  let sauvegardeBrouillon = 0;
   const feedback = el('div', { class: 'stack' }); const candidatesZone = el('div', { class: 'stack' });
   const duplicateZone = el('div', { class: 'stack' }); const conflictsZone = el('div', { class: 'stack' });
   const fieldsZone = el('section', { class: 'card stack livre-ajout', hidden: !row && !draft.edition_id });
@@ -108,8 +111,12 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
   const inputs = new Map(), provenanceNodes = new Map(), listViews = [];
   const operations = new Set();
   const action = (label, role, fn, primary = false) => el('button', { type: 'button', class: primary ? 'btn primary' : 'btn', dataset: { role }, onClick: () => {
-    const p=Promise.resolve().then(fn).catch(() => dire(t('L’action n’a pas pu être terminée. Réessaie.')));operations.add(p);p.finally(()=>operations.delete(p));
+    let resultat;
+    try { resultat = Promise.resolve(fn()); } catch(e) { resultat = Promise.reject(e); }
+    const p=resultat.catch(() => dire(t('L’action n’a pas pu être terminée. Réessaie.')));operations.add(p);p.finally(()=>operations.delete(p));
   } }, label);
+  const reessayerBrouillon = action(t('Réessayer de sauvegarder le brouillon'), 'reessayer-brouillon-livre', () => persist());
+  reessayerBrouillon.hidden = true; conservationBrouillon.append(reessayerBrouillon);
   const message = (s) => { status.textContent = s; };
   const alive = () => !closed && (!mounted || !everConnected || root.isConnected);
   function dispose() { if (closed) return; closed = true; generation++; choixPhoto++; photoEnAttente = null; controller?.abort(); observer.disconnect(); window.removeEventListener('hashchange', dispose); unsubscribe?.(); if (previewUrl) revoquerUrlDeBlob(previewUrl); }
@@ -141,13 +148,21 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
   };
   const persist = (fichiers = []) => {
     const capture = contexteEdition;
+    const sauvegarde = ++sauvegardeBrouillon;
+    conservationBrouillon.hidden = false; etatBrouillon.textContent = t('Sauvegarde en cours…'); reessayerBrouillon.hidden = true;
     // Lire au début du geste en file : une saisie arrivée pendant le commit photo ne rétablit pas ses anciens pointeurs.
     queue = queue.catch(() => {}).then(async () => {
       verifierPortee(); const snapshot = brouillonLivre(draft);
       if (!importId) await ensure(snapshot, fichiers);
       else await garderBrouillonLivre(importId, snapshot, { repo,compte,contexteEdition:capture,fichiers,verifier:verifierPortee,conditionsSync:conditionsPhoto(verifierPortee) });
     });
-    queue.catch(() => { if (alive()) message(t('Le brouillon n’a pas pu être sauvegardé. Réessaie.')); });
+    queue.then(() => {
+      if(alive() && sauvegarde === sauvegardeBrouillon) etatBrouillon.textContent = t('Brouillon sauvegardé sur cet appareil.');
+    }, () => {
+      if(alive() && sauvegarde === sauvegardeBrouillon) {
+        etatBrouillon.textContent = t('Le brouillon n’a pas pu être sauvegardé. Réessaie.'); reessayerBrouillon.hidden = false;
+      }
+    });
     return queue;
   };
   function changed(k, value) { draft = modifierChampLivre(draft, k, value); syncPanels(); persist(); }
@@ -170,7 +185,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     el('div', { class: 'row' }, action(t('Photographier la couverture'), 'photo-livre', () => choisirPhoto('environment', true)), action(t('Choisir une image'), 'image-livre', () => choisirPhoto(null, true))));
   const cancel = action(t('Annuler'), 'annuler-livre', () => { generation++; controller?.abort(); message(t('Recherche annulée. Ton brouillon est conservé.')); });
   cancel.hidden = true;
-  root.append(start, status, conservationPhoto, cancel, feedback, duplicateZone, candidatesZone, fieldsZone, coverZone);
+  root.append(start, status, conservationPhoto, conservationBrouillon, cancel, feedback, duplicateZone, candidatesZone, fieldsZone, coverZone);
   const labels = { title: t('Titre'), subtitle: t('Sous-titre'), author: t('Auteur ou chef'), publisher: t('Éditeur'), year: t('Année'), description: t('Description courte') };
   for (const [k, label] of Object.entries(labels)) {
     const input = el(k === 'description' ? 'textarea' : 'input', { type: k === 'year' ? 'number' : 'text', name: k, rows: k === 'description' ? 3 : undefined,
@@ -183,18 +198,50 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
   const conventions = select([{ value: '', label: t('À préciser') }, ...listConventions().map((c) => ({ value: c.id, label: c.labels?.fr || c.id }))], draft.fields.convention, (v) => changed('convention', v));
   inputs.set('convention', conventions); fieldsZone.append(field(t('Convention de mesures'), conventions));
   function listeChamp(label, key, facet = null) {
-    const chips = el('div', { class: 'row' }); const input = el('input', { type: 'text', maxlength: 80, 'aria-label': label });
+    const chips = el('div', { class: 'row' }), propositions = el('div', {class:'stack'});
+    const saisie = key === 'tags' ? t('Ajouter un autre mot-clé') : t('Ajouter une autre catégorie');
+    const input = el('input', { type: 'text', 'aria-label': saisie });
+    const etat = el('small', {role:'status', dataset:{role:'etat-categorie'}});
+    let enCours = false;
     const get = () => facet ? draft.fields.cuisine_facets[facet] : draft.fields[key];
-    const set = (values) => facet ? changed('cuisine_facets', { ...draft.fields.cuisine_facets, [facet]: values }) : changed(key, values);
-    const add = () => { if (input.value.trim()) { set(listeLivre([...get(), input.value])); input.value = ''; } };
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
-    const view = () => chips.replaceChildren(...get().map((v) => {
-      const p = draft.provenance[key]?.values?.[v] || draft.provenance[key];
-      return el('span', { class: 'stack', style: { gap: '.15rem', maxWidth: '100%' } },
-        el('button', { type: 'button', class: 'chip removable', 'aria-label': t('Retirer {texte}', { texte: v }), onClick: () => set(get().filter((x) => x !== v)) }, v, ' ×'),
-        p ? el('small', { class: 'muted' }, afficherProvenanceLivre(p), p.justification ? ` · ${p.justification}` : '') : null);
-    }));
-    listViews.push(view); fieldsZone.append(el('div', { class: 'stack' }, el('strong', null, label), chips, el('div', { class: 'row' }, input, action(t('Ajouter'), `ajouter-${facet || key}`, add))));
+    const erreur = raison => raison === 'doublon' ? t('Cette valeur est déjà dans cette liste.')
+      : raison === 'longueur' ? t('Utilise 80 caractères au maximum.')
+      : raison === 'limite' ? t('Cette liste contient déjà 20 valeurs. Retire une valeur avant d’en ajouter une autre.')
+      : raison === 'limite_cuisines' ? t('Les cuisines contiennent déjà 20 valeurs. Retire une cuisine avant d’ajouter cette catégorie.')
+      : t('Saisis une valeur pour l’ajouter.');
+    const actualiserSaisie = () => { ajouter.disabled = enCours || !input.value.trim(); };
+    const modifier = async options => {
+      if(enCours) return;
+      const r = modifierCategorieLivre(draft, key, {facet,...options});
+      if(!r.ok) { etat.textContent = erreur(r.raison); return; }
+      const saisieAvant = input.value;
+      enCours = true; etat.textContent = ''; draft = r.brouillon; syncPanels();
+      try {
+        await persist();
+        if(options.ajouter !== undefined && !options.proposition && input.value === saisieAvant) input.value = '';
+      } catch { /* L’état de conservation commun reste affiché avec son réessai. La saisie est conservée. */ }
+      finally { enCours = false; if(alive()) view(); }
+    };
+    const ajouter = action(t('Ajouter'), `ajouter-${facet || key}`, () => modifier({ajouter:input.value}));
+    input.addEventListener('input', () => { etat.textContent = ''; actualiserSaisie(); });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.repeat && !e.isComposing) { e.preventDefault(); ajouter.click(); } });
+    const view = () => {
+      chips.replaceChildren(...get().map((v) => {
+        const p = draft.provenance[key]?.values?.[v] || draft.provenance[key];
+        return el('span', { class: 'stack', style: { gap: '.15rem', maxWidth: '100%' } },
+          el('button', { type: 'button', class: 'chip removable', disabled:enCours, 'aria-label': t('Retirer {texte}', { texte: v }), onClick: () => modifier({retirer:v}) }, v),
+          el('small', {class:'muted'}, t('Ajoutée au brouillon')),
+          p ? el('small', { class: 'muted' }, afficherProvenanceLivre(p), p.justification ? ` · ${p.justification}` : '') : null);
+      }));
+      propositions.replaceChildren(...propositionsCategorieLivre(draft,key,facet).map(v => {
+        const b = action(t('+ Ajouter'), `proposer-${facet || key}`, () => modifier({ajouter:v,proposition:true}));
+        b.setAttribute('aria-label', t('Ajouter {texte}', {texte:v})); b.disabled = enCours;
+        return el('div', {class:'row'}, el('span', null, v), b);
+      }));
+      actualiserSaisie();
+    };
+    listViews.push(view); fieldsZone.append(el('div', { class:'stack livre-classement', dataset:{role:'classement-livre',champ:facet||key} },
+      el('strong', null, label), chips, propositions, el('div', {class:'row'}, field(saisie,input), ajouter), etat));
   }
   listeChamp(t('Origines et traditions'), 'cuisine_facets', 'origines'); listeChamp(t('Styles de cuisine'), 'cuisine_facets', 'styles'); listeChamp(t('Familles de préparations'), 'cuisine_facets', 'preparations');
   listeChamp(t('Autres cuisines'), 'cuisines'); listeChamp(t('Mots-clés'), 'tags');
@@ -206,7 +253,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     for (const [k, input] of inputs) { const value = draft.fields[k]; if (input.value !== value && document.activeElement !== input) input.value = value; }
     for (const [k, p] of provenanceNodes) p.textContent = afficherProvenanceLivre(draft.provenance[k]);
     sourceList.replaceChildren(renderSourcesLivre(draft.provenance));
-    conflictsZone.replaceChildren(...Object.entries(draft.proposals).map(([k, p]) => el('div', { class: 'card flat' },
+    conflictsZone.replaceChildren(...Object.entries(draft.proposals).filter(([k])=>!['tags','cuisines','cuisine_facets'].includes(k)).map(([k, p]) => el('div', { class: 'card flat' },
       el('p', null, t('Autre proposition pour {champ} : {valeur}', { champ: labels[k] || k, valeur: typeof p.value === 'string' ? p.value : JSON.stringify(p.value) })),
       action(t('Utiliser cette proposition'), `utiliser-${k}`, () => { draft = appliquerCandidateLivre(draft, { fields: { [k]: p.value }, provenance: { [k]: p.provenance } }, { forceFields: [k] }); syncPanels(); persist(); }),
       action(t('Garder ma valeur'), `garder-${k}`, () => { delete draft.proposals[k]; syncPanels(); persist(); }))));

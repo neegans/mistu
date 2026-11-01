@@ -469,6 +469,8 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   // injectés. Une fiche disponible à adresse y est admise (relecture, D-B18).
   if (typeof recipe?.source_url === 'string' && recipe.source_url) return renderImportWeb(params, query, ctx, deps);
   const root = el('div', null);
+  let photosActives=true;
+  root.dispose=()=>{photosActives=false;};
   // ligne : l'import NON TERMINÉ de cette recette (un seul, I-2) ; pages : ses source_pages par id ; question : 'discordance' | 'remplacer' | null ;
   // cleQuestion : la clé (cleLecture) de LA lecture pour laquelle `question` a été posée (T4-R2 : toute réponse s'y rapporte) ; rattache : la clé de
   // la lecture pour laquelle « Rattacher » a été répondu, sinon null ; verdict : la discordance calculée par decider() ; focus : le bouton à focaliser
@@ -559,7 +561,8 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     etat.ajout=null;etat.erreurAjout=null;
   }
   function erreurAjoutPhotos(e) {
-    etat.erreurAjout=['lecture_changee','source_changed','cycle_change','contexte_change','compte_change','import_ouvert'].includes(e?.code)||estRefus(e)
+    etat.erreurAjout=e?.code==='selection_photo'?t('Le choix des photos n’a pas pu s’ouvrir. Réessaie.')
+      :['lecture_changee','source_changed','cycle_change','contexte_change','compte_change','import_ouvert'].includes(e?.code)||estRefus(e)
       ? t('La recette ou la lecture a changé. Les photos n’ont pas été ajoutées. Rouvre la recette avant de continuer.')
       : t('Ces photos n’ont pas pu être ajoutées. Réessaie.');
     if(!estRefus(e)&&!e?.code)logError('import_cible.ajout',{error:e});
@@ -572,14 +575,22 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   async function ajouterPhotos(options) {
     if (etat.occupe||etat.ajout) return;
     const attendue=etat.ligne?structuredClone(etat.ligne):null;
+    const adresse=location.href,courante=()=>photosActives&&root.isConnected&&location.href===adresse&&contexteRecette.contexteValide();
     etat.occupe = true;etat.erreurAjout=null;dessiner();
     try {
+      // Lire les pages à conserver sans différer le sélecteur. Une annulation
+      // ne laisse pas de rejet non géré ni de nouveau journal.
+      const pagesEnCours=attendue?null:pagesDejaLiees().then(pages=>({pages}),erreur=>({erreur}));
+      let files;try{files=await pickFiles(options);}catch{throw Object.assign(new Error('selection_photo'),{code:'selection_photo'});}
+      if(!files?.length)return;
+      if(!courante())throw Object.assign(new Error('contexte_change'),{code:'contexte_change'});
       const payee=lecturePayee(attendue);
       if(payee&&!(await confirmer(t('Préparer une nouvelle lecture avec ces pages et de nouvelles photos ? La réponse déjà reçue reste conservée à part. Aucun appel ne sera lancé avant ton prochain choix.'),{okLabel:t('Préparer une nouvelle lecture')})))return;
-      const args={intention_id:repo.newId('complement'),recettes:[contexteRecette]};
+      if(!courante())throw Object.assign(new Error('contexte_change'),{code:'contexte_change'});
+      const args={intention_id:repo.newId('complement'),recettes:[{...contexteRecette,contexteValide:courante}]};
       if(attendue){args.import_id=attendue.id;if(payee)args.nouvelleLecture={id:repo.newId('imp'),attendue};}
-      else Object.assign(args,{edition_id:recipe.edition_id??null,import:{id:repo.newId('imp'),kind:'recette',recipe_id:recipe.id,edition_id:recipe.edition_id??null,page_ids:await pagesDejaLiees()}});
-      const files=await pickFiles(options);if(!files?.length)return;
+      else{const recu=await pagesEnCours;if(recu.erreur)throw recu.erreur;Object.assign(args,{edition_id:recipe.edition_id??null,import:{id:repo.newId('imp'),kind:'recette',recipe_id:recipe.id,edition_id:recipe.edition_id??null,page_ids:recu.pages}});}
+      if(!courante())throw Object.assign(new Error('contexte_change'),{code:'contexte_change'});
       etat.ajout={files,args};await conserverAjoutPhotos();
     } catch (e) {
       erreurAjoutPhotos(e);
